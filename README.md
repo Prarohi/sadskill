@@ -43,7 +43,7 @@ flowchart TD
 Clone the repository and run `install.sh`:
 
 ```bash
-git clone https://github.com/SadafTiger/sadskill.git
+git clone https://github.com/sadafbabu/sadskill.git
 cd sadskill
 ./install.sh
 ```
@@ -61,7 +61,7 @@ To install for a specific agent:
 If you use the universal `skills` package manager:
 
 ```bash
-npx skills add SadafTiger/sadskill
+npx skills add sadafbabu/sadskill
 ```
 
 ---

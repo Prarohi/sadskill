@@ -3,7 +3,7 @@ name: sadskill
 description: "Unified autonomous engineering skill for coding agents. Provides 5 high-leverage workflows: /sad-plan (planning & spec), /sad-design (UI/UX & polish), /sad-backend (schema & RLS), /sad-sec (security & OWASP audit), and /sad-analyze (architecture & code health)."
 metadata:
   version: 0.1.0
-  author: SadafTiger
+  author: sadafbabu
   license: MIT
 ---
 
