@@ -1,8 +1,8 @@
 # `sadskill`
 
 > **One engineering workflow. Any coding agent.**  
-> *Turn AI-generated code into verified, maintainable software.*  
-> Version: `v0.2.0` · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity)
+> *A portable engineering workflow for coding agents that plans proportionally, remembers decisions, verifies outcomes, and reports uncertainty.*  
+> Version: `v0.3.0` · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity)
 
 > *"Don't just generate code. Engineer it, verify it, and remember why."*
 
@@ -10,13 +10,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://img.shields.io/badge/skills.sh-sadskill-success.svg)](https://skills.sh)
 
-`sadskill` is an open-source autonomous engineering workflow framework. Instead of juggling dozens of conflicting agent plugins or enduring circular trial-and-error edits, `sadskill` provides **adaptive planning, shared project memory, executable safety guardrails, and proof-grounded verification** across every major coding agent.
+`sadskill` is an open-source engineering workflow framework for AI coding agents. Instead of juggling conflicting prompt fragments or enduring repetitive trial-and-error cycles, `sadskill` provides **adaptive planning, persistent project memory, defense-in-depth safety guardrails, and proof-grounded verification** across coding agents.
 
 ---
 
 ## ⚡ Quickstart (Universal via `skills.sh`)
 
-Install `sadskill` into any supported agent in one command:
+Install `sadskill` into any supported agent using the universal standard:
 
 ```bash
 npx skills add sadafbabu/sadskill
@@ -24,14 +24,14 @@ npx skills add sadafbabu/sadskill
 
 ---
 
-## 📊 Why `sadskill`? Benchmark Advantage
+## 📊 Why `sadskill`? Core Advantages
 
 | Dimension | Default Plain Coding Agent | Agent Powered by `sadskill` |
 |---|---|---|
-| **Verification Proof** | Claims *"all tests pass"* blindly without proof | Real terminal proof with exit code `0` recorded in `.sad/evidence/` |
+| **Verification Proof** | Claims *"all tests pass"* blindly without proof | Verifiable terminal proof with exit code `0` recorded in `.sad/evidence/` |
 | **Token Efficiency** | Speculative trial-and-error editing cycles | **Adaptive 2-Tier Planning** (Surgical Plan for bugfixes; AST Contracts for features) |
 | **Context Retention** | Resets completely across sessions | Persistent `.sad/` memory (`history.md`, `decisions.md`, `design-memory.md`) |
-| **Safety Guardrails** | Can run `git reset --hard` or `DROP TABLE` | Executable `scripts/git-guardrail.sh` OS hook blocking destructive commands |
+| **Safety Guardrails** | Can run `git reset --hard` or `DROP TABLE` | Executable `git-guardrail.sh` defense filter intercepting destructive commands |
 | **UI/UX Craft Floor** | Generic AI aesthetic (purple gradients, unscaled cards) | **Zero-Lift** hover rule (click compression; drawers/tooltips permitted), 44px targets, 20 UI polish rules |
 | **Backend Reliability** | Destructive migrations and permissive queries | Reversible UP/DOWN migrations, zero-trust RLS, safe `EXPLAIN (BUFFERS)` |
 
@@ -47,7 +47,7 @@ npx skills add sadafbabu/sadskill
 | `/sad-sec` | **Security & Compliance Audit** | Strictly read-only audit: OWASP Top 10 web & API, secrets exposure, offline-resilient dependency scanning, and 15-point launch legal compliance in `.sad/reports/`. |
 | `/sad-analyze` | **Architecture & Code Health** | Scoped (`/sad-analyze <path>`) or full codebase scan: John Ousterhout deep module analysis, coupling, dead code detection, and prioritization matrix. |
 
-> **Universal Fallback**: If slash commands are not supported in your environment, trigger with `$sadskill <mode>` (e.g. `$sadskill plan`, `$sadskill design`).
+> **Universal Invocation**: If slash commands are not supported in your environment, trigger with `$sadskill <mode>` (e.g. `$sadskill plan`, `$sadskill design`) or via natural language intent.
 
 ---
 
@@ -61,7 +61,7 @@ flowchart TD
     Modes --> Memory[".sad/ Project Memory (history.md, decisions.md, design-memory.md)"]
     Modes --> Evidence[".sad/evidence/ (Execution proof logs with exit code 0)"]
     Modes --> VendorIndex["Vendor Index (40 Curated Reference Patterns)"]
-    Protocols --> Guardrails["Executable Guardrail (scripts/git-guardrail.sh)"]
+    Protocols --> Guardrails["Defense-in-Depth Guardrail (git-guardrail.sh)"]
     Protocols --> LocalProfile["Optional Local User Profile (~/.sadskill/profile.md)"]
 ```
 
@@ -69,7 +69,7 @@ flowchart TD
 
 ## 🚀 Advanced Companion Installer (`install.sh`)
 
-For deep local integrations (Claude Code commands, Cursor `.mdc` rules, non-destructive backups):
+For deep local host integrations (Claude Code commands, Cursor `.mdc` rules, non-destructive backups):
 
 ```bash
 git clone https://github.com/sadafbabu/sadskill.git
@@ -86,61 +86,88 @@ cd sadskill
 ./install.sh --agent all                       # Configures all detected environments
 ```
 
-> **Safe by Design**: `install.sh` automatically preserves any existing installation in a timestamped `sadskill.bak.<timestamp>` directory rather than executing unprompted deletions.
+> **Safe by Design**: `install.sh` tracks all installed artifacts in `~/.sadskill/install-manifest.json` and preserves preexisting files in timestamped `.bak.<timestamp>` archives.
 
 ---
 
-## 🛡️ Core Protocols
+## 🛡️ Core Protocols & Security Model
 
-### 1. Project Memory (`.sad/`)
-Persistent context stored in the project root:
-- `.sad/history.md`: Chronological changelog of high-level project milestones.
-- `.sad/decisions.md`: Architecture Decision Records (ADRs).
-- `.sad/design-memory.md`: Approved palettes, typography, UI patterns, and rejected anti-patterns.
-- `.sad/evidence/`: Machine-readable verification evidence logs (`.json`).
-- `.sad/plans/`: Generated execution specifications (`YYYY-MM-DD-<slug>.md`).
-- `.sad/reports/`: Timestamped security audits (`security-*.md`) and architecture scans (`analysis-*.md`).
-
-### 2. Verification Evidence Protocol
-Every task must conclude with demonstrable terminal verification:
+### 1. Verification Evidence Standard (`protocols/evidence.md`)
+Tasks conclude with demonstrable terminal verification and machine-readable evidence:
 ```text
 ✓ Command: npm test -- tests/auth.test.ts (exit code 0)
-✓ Output: 4 passed, 0 failed (verified in 1.2s)
+✓ Result: 4 passed, 0 failed (verified in 1.2s)
 ✓ Evidence: .sad/evidence/20261028-031200-auth-login-fix.json
 ```
 
-### 3. Executable Safety Guardrails
-`sadskill` blocks dangerous terminal actions before they cause data loss:
-- Prohibits `git reset --hard`, `git push --force`, `git clean -fd`, `git checkout .`, `git branch -D`.
-- Prohibits unconditional `DROP TABLE`, `DROP DATABASE`, and `TRUNCATE`.
-- Integrates via `scripts/git-guardrail.sh` into Claude Code `PreToolUse` hooks and Git hooks.
+#### Verification Provenance States:
+- `reported`: Agent claims execution in conversation.
+- `schema_valid`: Valid JSON format and strictly contained project paths verified by `scripts/verify-evidence.py`.
+- `retested`: Independently executed by authorized verifier.
+- `ci_attested`: Linked to immutable GitHub Actions CI run SHA/URL.
 
-### 4. Human Voice Protocol
-AI responses lead with the direct answer or diff before commentary. All conversational fluff ("delve", "seamless", "tapestry", "in summary", "moreover") and sycophantic praise ("Great question!") are strictly banned.
+### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
+Safety operates through layered boundaries:
+- **Tier 1 (Agent Prompts)**: Strictly forbids destructive operations without explicit confirmation.
+- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` intercepts dangerous bash commands before execution.
+- **Tier 3 (Host Boundaries)**: Sandbox permissions, branch rules, and least privilege.
 
-### 5. Workstation Profile Isolation (`~/.sadskill/profile.md`)
+#### Hook Lifecycle Status:
+- `HOOK_AVAILABLE`: Hook script installed on disk.
+- `HOOK_REGISTERED`: Registered in host configuration (e.g. `PreToolUse` in `~/.claude/settings.json`).
+- `HOOK_ACTIVE`: Actively receiving and filtering host tool events.
+
+### 3. Human Voice Protocol (`protocols/human-voice.md`)
+AI responses lead with the direct answer or diff before commentary. Fluff phrases ("delve", "seamless", "tapestry", "in summary") and sycophantic praise ("Great question!") are strictly banned.
+
+### 4. Workstation Profile Isolation (`~/.sadskill/profile.md`)
 Personal communication preferences or private tooling rules live exclusively on your workstation outside git:
 ```bash
 cp skills/sadskill/templates/profile.template.md ~/.sadskill/profile.md
 ```
-`sadskill` checks dynamically for this file; if absent, it operates on clean, neutral industry standards.
 
 ---
 
-## 🗺️ 90-Day Roadmap
+## 🧪 Verification & Benchmarks
 
-- **Day 1–14 (v0.2.0: Reliability)**: Broken installer/path fixes, adaptive 2-tier planning, dual-record verification evidence, CI pipeline, executable guardrails.
-- **Day 15–30 (v0.3.0: Intelligence)**: Automated subagent debate (`/octo:debate`), automated test flakiness detectors, deeper database schema AST analysis.
-- **Day 31–60 (v0.4.0: Public Beta)**: Real-world reproducible benchmarks (token cost vs success rate), demo showcase, developer onboarding.
-- **Day 61–90 (v1.0 Release Candidate)**: Stable API, community ecosystem contributions, production certification.
+### 1. Independent Evidence Verifier
+Validate `.sad/evidence/*.json` records for syntax, strict path containment, and authorized execution:
+```bash
+python3 scripts/verify-evidence.py
+python3 scripts/verify-evidence.py --retest  # Safely re-executes authorized checks with timeout
+```
+
+### 2. Contract & Policy Verification Suite
+Evaluates specification compliance across planning, design, backend, security, and guardrails:
+```bash
+python3 benchmarks/runner.py
+```
+
+### 3. Real Behavioral Test Fixture
+Execute behavioral tests on real fixture code:
+```bash
+python3 benchmarks/fixtures/tenant-isolation/grader.py
+```
+
+---
+
+## 🧹 Uninstallation
+
+To cleanly remove `sadskill` and optionally restore original backed-up configurations:
+
+```bash
+./uninstall.sh                    # Clean removal of installed files
+./uninstall.sh --restore-previous # Restores original pre-install files from backups
+./uninstall.sh --purge            # Removes ~/.sadskill user profile directory
+```
 
 ---
 
 ## 🤝 Contributing & Community
 
-We welcome contributions! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) before submitting issues or pull requests.
+We welcome contributions! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) before submitting pull requests.
 
-Run the automated verification suite before submitting:
+Run the full verification suite before submitting:
 ```bash
 python3 scripts/verify.py
 ```

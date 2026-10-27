@@ -7,6 +7,7 @@ vendor indexing, community health files, executable guardrails,
 installation sandboxing, and strict privacy/portability invariants.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -218,6 +219,91 @@ class VerificationSuite:
         res = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True)
         self.assert_true(res.returncode == 0, f"Reproducible benchmarks passed 100% (exit code {res.returncode})")
 
+    def test_version_consistency(self):
+        print("\n--- Testing Version Consistency Across Files ---")
+        skill_text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        install_text = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        uninstall_text = (REPO_ROOT / "uninstall.sh").read_text(encoding="utf-8")
+
+        self.assert_true("version: 0.3.0" in skill_text, "SKILL.md defines version: 0.3.0")
+        self.assert_true("v0.3.0" in readme_text, "README.md references v0.3.0")
+        self.assert_true("v0.3.0" in install_text, "install.sh references v0.3.0")
+        self.assert_true("v0.3.0" in uninstall_text, "uninstall.sh references v0.3.0")
+
+    def test_evidence_verifier_safety(self):
+        print("\n--- Testing Evidence Verifier Hardening & Safety ---")
+        verifier = REPO_ROOT / "scripts" / "verify-evidence.py"
+
+        # 1. Test --require-evidence on empty dir fails with exit 1
+        with tempfile.TemporaryDirectory() as empty_dir:
+            res = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", empty_dir, "--require-evidence"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res.returncode == 1,
+                f"verify-evidence --require-evidence on empty dir exited 1 (got {res.returncode})",
+            )
+
+        # 2. Test path traversal rejection (e.g. ../../outside)
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            bad_record = {
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "traversal-test",
+                "command": "python3 -c 'print(1)'",
+                "exit_code": 0,
+                "summary": "malicious record",
+                "files_touched": ["../../etc/passwd"],
+            }
+            (ev_dir / "bad-traversal.json").write_text(json.dumps(bad_record), encoding="utf-8")
+            res_bad = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_bad.returncode == 1,
+                f"verify-evidence rejected path traversal in files_touched (got exit {res_bad.returncode})",
+            )
+
+        # 3. Test arbitrary shell chaining rejection on --retest
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            test_file = Path(proj_dir) / "test.py"
+            test_file.write_text("print('ok')", encoding="utf-8")
+
+            chained_record = {
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "chained-test",
+                "command": "python3 test.py && echo pwned",
+                "exit_code": 0,
+                "summary": "chained command record",
+                "files_touched": ["test.py"],
+            }
+            (ev_dir / "bad-chain.json").write_text(json.dumps(chained_record), encoding="utf-8")
+            res_chain = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir, "--retest"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_chain.returncode == 1,
+                f"verify-evidence --retest rejected shell chaining tokens (got exit {res_chain.returncode})",
+            )
+
+    def test_behavioral_fixture(self):
+        print("\n--- Testing Real Behavioral Benchmark Fixture ---")
+        fixture_grader = REPO_ROOT / "benchmarks" / "fixtures" / "tenant-isolation" / "grader.py"
+        self.assert_true(fixture_grader.exists(), "Tenant isolation fixture grader exists")
+        if fixture_grader.exists():
+            res = subprocess.run([sys.executable, str(fixture_grader)], capture_output=True, text=True)
+            self.assert_true(res.returncode == 0, f"Tenant isolation behavioral tests passed cleanly (exit {res.returncode})")
+
     def test_markdown_relative_links(self):
         print("\n--- Testing All Markdown Relative Links ---")
         link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
@@ -301,6 +387,9 @@ class VerificationSuite:
             self.assert_true(res_cur.returncode == 0, "install.sh --agent cursor --target succeeded")
             self.assert_true((target_proj / ".cursor" / "rules" / "sadskill.mdc").exists(), "Cursor rule .cursor/rules/sadskill.mdc created in target")
 
+            manifest_file = Path(temp_dir) / ".sadskill" / "install-manifest.json"
+            self.assert_true(manifest_file.exists(), "Installation manifest ~/.sadskill/install-manifest.json created")
+
             # Test uninstallation
             res_un = subprocess.run(
                 ["bash", str(REPO_ROOT / "uninstall.sh"), "--purge", "--clean-backups", "--target", str(target_proj)],
@@ -365,6 +454,9 @@ class VerificationSuite:
         self.test_modes_and_protocols()
         self.test_vendor_index_and_sources()
         self.test_community_and_metadata()
+        self.test_version_consistency()
+        self.test_evidence_verifier_safety()
+        self.test_behavioral_fixture()
         self.test_benchmarks_execution()
         self.test_markdown_relative_links()
         self.test_sandbox_installer()

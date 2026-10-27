@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sadskill installer: multi-agent installation and companion script
+# sadskill installer: multi-agent installation and companion script (v0.3.0)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,6 +7,7 @@ TARGET_AGENT="auto"
 TARGET_DIR="${PWD}"
 TARGET_DIR_EXPLICIT="false"
 NO_BACKUP="false"
+MANIFEST_FILE="${HOME}/.sadskill/install-manifest.json"
 
 show_help() {
   echo "Usage: ./install.sh [options]"
@@ -28,10 +29,18 @@ while [[ $# -gt 0 ]]; do
       show_help
       ;;
     -a|--agent)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --agent requires a value." >&2
+        show_help
+      fi
       TARGET_AGENT="$2"
       shift 2
       ;;
     -t|--target)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --target requires a value." >&2
+        show_help
+      fi
       TARGET_DIR="$2"
       TARGET_DIR_EXPLICIT="true"
       shift 2
@@ -45,16 +54,51 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "Unknown argument: $1"
+      echo "Unknown argument: $1" >&2
       show_help
       ;;
   esac
 done
 
-echo "=== Installing sadskill (v0.2.0) ==="
+echo "=== Installing sadskill (v0.3.0) ==="
+
+mkdir -p "${HOME}/.sadskill"
+
+# Manifest tracker
+record_manifest_entry() {
+  local agent="$1"
+  local dest="$2"
+  local backup_path="${3:-}"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # Simple JSON append / update via Python
+  python3 -c "
+import json, os
+manifest_path = '$MANIFEST_FILE'
+data = {'version': '0.3.0', 'entries': []}
+if os.path.exists(manifest_path):
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        pass
+data['entries'].append({
+    'agent': '$agent',
+    'destination': '$dest',
+    'backup': '$backup_path',
+    'installed_at': '$timestamp'
+})
+with open(manifest_path, 'w', encoding='utf-8') as f:
+    json.dump(data, f, indent=2)
+" 2>/dev/null || true
+}
 
 backup_and_install_skill() {
-  local dest="$1"
+  local agent="$1"
+  local dest="$2"
+  local backup_dest=""
+
   if [[ -d "$dest" ]]; then
     if [[ "$NO_BACKUP" == "true" ]]; then
       rm -rf "$dest"
@@ -62,10 +106,12 @@ backup_and_install_skill() {
       local backup="${dest}.bak.$(date +%Y%m%d%H%M%S)"
       echo "   [INFO] Preserving existing installation at ${backup}"
       mv "$dest" "$backup"
+      backup_dest="$backup"
     fi
   fi
   mkdir -p "$(dirname "$dest")"
   cp -r "${SCRIPT_DIR}/skills/sadskill" "$dest"
+  record_manifest_entry "$agent" "$dest" "$backup_dest"
 }
 
 install_codex() {
@@ -76,15 +122,18 @@ install_codex() {
   echo "-> Configuring for OpenAI Codex / ChatGPT Desktop..."
   mkdir -p "${skills_dir}" "${prompts_dir}"
 
-  backup_and_install_skill "${skills_dir}/sadskill"
+  backup_and_install_skill "codex" "${skills_dir}/sadskill"
 
   for cmd in "${SCRIPT_DIR}/commands/codex/"*.md; do
     if [[ -f "$cmd" ]]; then
       local target_cmd="${prompts_dir}/$(basename "$cmd")"
+      local cmd_backup=""
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
-        mv "$target_cmd" "${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+        cmd_backup="${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$target_cmd" "$cmd_backup"
       fi
       cp "$cmd" "$target_cmd"
+      record_manifest_entry "codex_prompt" "$target_cmd" "$cmd_backup"
     fi
   done
   echo "   [OK] Installed skill to ${skills_dir}/sadskill and prompts to ${prompts_dir}"
@@ -98,24 +147,31 @@ install_claude() {
   echo "-> Configuring for Claude Code..."
   mkdir -p "${skills_dir}" "${commands_dir}"
 
-  backup_and_install_skill "${skills_dir}/sadskill"
+  backup_and_install_skill "claude" "${skills_dir}/sadskill"
 
   for cmd in "${SCRIPT_DIR}/commands/claude/"*.md; do
     if [[ -f "$cmd" ]]; then
       local target_cmd="${commands_dir}/$(basename "$cmd")"
+      local cmd_backup=""
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
-        mv "$target_cmd" "${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+        cmd_backup="${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+        mv "$target_cmd" "$cmd_backup"
       fi
       cp "$cmd" "$target_cmd"
+      record_manifest_entry "claude_command" "$target_cmd" "$cmd_backup"
     fi
   done
 
   local hooks_dir="${claude_dir}/hooks"
   mkdir -p "${hooks_dir}"
-  cp "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "${hooks_dir}/git-guardrail.sh"
-  chmod +x "${hooks_dir}/git-guardrail.sh"
+  local guardrail_target="${hooks_dir}/git-guardrail.sh"
+  cp "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "$guardrail_target"
+  chmod +x "$guardrail_target"
+  record_manifest_entry "claude_hook" "$guardrail_target" ""
 
   echo "   [OK] Installed skill, commands, and guardrail hook to ${claude_dir}"
+  echo "   [HOOK STATUS: AVAILABLE] File placed at ${guardrail_target}."
+  echo "   [NOTE] To activate hook in Claude Code, add PreToolUse configuration to ~/.claude/settings.json."
 }
 
 install_cursor() {
@@ -135,7 +191,14 @@ install_cursor() {
   # Deploy full skill into workspace .cursor/skills for relative link resolution
   cp -r "${SCRIPT_DIR}/skills/sadskill/"* "${target_skill_dir}/"
 
-  cat << 'EOF' > "${rules_dir}/sadskill.mdc"
+  local rule_file="${rules_dir}/sadskill.mdc"
+  local rule_backup=""
+  if [[ -f "$rule_file" && "$NO_BACKUP" != "true" ]]; then
+    rule_backup="${rule_file}.bak.$(date +%Y%m%d%H%M%S)"
+    mv "$rule_file" "$rule_backup"
+  fi
+
+  cat << 'EOF' > "${rule_file}"
 ---
 description: "sadskill: Unified autonomous engineering workflow (plan, design, backend, sec, analyze)"
 globs: "*"
@@ -163,7 +226,8 @@ alwaysApply: false
 4. **Human Voice**: Lead with answers, strip AI buzzwords ("delve", "seamless"), maintain technical density.
 EOF
 
-  echo "   [OK] Generated self-contained Cursor rule at ${rules_dir}/sadskill.mdc"
+  record_manifest_entry "cursor_rule" "$rule_file" "$rule_backup"
+  echo "   [OK] Generated self-contained Cursor rule at ${rule_file}"
 }
 
 install_antigravity() {
@@ -173,7 +237,7 @@ install_antigravity() {
   echo "-> Configuring for Google Antigravity..."
   mkdir -p "${skills_dir}"
 
-  backup_and_install_skill "${skills_dir}/sadskill"
+  backup_and_install_skill "antigravity" "${skills_dir}/sadskill"
   echo "   [OK] Installed skill to ${skills_dir}/sadskill"
 }
 
@@ -228,7 +292,7 @@ case "$TARGET_AGENT" in
     fi
     ;;
   *)
-    echo "Unknown agent: $TARGET_AGENT (valid options: auto, codex, claude, cursor, antigravity, all)"
+    echo "Unknown agent: $TARGET_AGENT (valid options: auto, codex, claude, cursor, antigravity, all)" >&2
     exit 1
     ;;
 esac

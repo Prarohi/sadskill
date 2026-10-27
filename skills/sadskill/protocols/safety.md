@@ -4,12 +4,24 @@ Autonomous agents must never perform irreversible destructive actions on user co
 
 ---
 
+## 🛡️ Multi-Tier Safety Architecture
+
+Safety in `sadskill` operates as **defense-in-depth**, not an impenetrable OS sandbox:
+1. **Tier 1 (Agent Prompts & Policy)**: The agent is instructed to avoid destructive operations, prefer reversible alternatives, and request user approval for high-consequence tasks.
+2. **Tier 2 (Tool-Hook Interception)**: A best-effort filter (`skills/sadskill/hooks/git-guardrail.sh`) intercepting command tokens before execution in supported agent environments.
+3. **Tier 3 (Host Permissions & Isolation)**: Repository branch protections, container sandboxes, non-root execution, and least-privilege tokens.
+
+> [!WARNING]
+> The guardrail hook is a defensive filter against common accident patterns; it does **not** replace containerization, branch protections, or secure database access controls.
+
+---
+
 ## 🚫 Forbidden Destructive Actions (Require Explicit Approval)
 
 ### 1. Git Destructive Operations
 The following Git commands can cause permanent loss of uncommitted work or commit history. They are **strictly forbidden** from automatic execution:
 - `git reset --hard` (destroys uncommitted working directory changes)
-- `git push --force` or `git push -f` (overwrites remote branch history)
+- `git push --force`, `git push -f`, or force refspecs `+<branch>` (overwrites remote branch history)
 - `git clean -fd` or `git clean -f` (permanently deletes untracked files)
 - `git checkout -- .` or `git restore .` (discards all local modifications)
 - `git branch -D` (force deletes unmerged branches)
@@ -42,11 +54,18 @@ The following database queries cause irreversible data loss and must never be ru
 
 ---
 
-## ⚙️ Programmatic Enforcement: `scripts/git-guardrail.sh`
+## ⚙️ Programmatic Enforcement: `skills/sadskill/hooks/git-guardrail.sh`
 
-`sadskill` provides an executable OS-level hook script at `scripts/git-guardrail.sh` that intercepts dangerous commands and terminates with exit code 2 before they run.
+`sadskill` provides an executable hook script packaged at `skills/sadskill/hooks/git-guardrail.sh` (mirrored at `scripts/git-guardrail.sh`) that intercepts dangerous commands and terminates with exit code 2 before they run.
 
-### Setup for Claude Code (`.claude/settings.json`)
+### Hook Integration Status
+- **HOOK_AVAILABLE**: Script is installed on disk.
+- **HOOK_REGISTERED**: Host configuration references the hook.
+- **HOOK_ACTIVE**: Host tool events actively dispatch through the hook.
+
+### Setup for Claude Code (`~/.claude/settings.json`)
+Register the hook under `PreToolUse` in your Claude Code settings:
+
 ```json
 {
   "hooks": {
@@ -56,7 +75,7 @@ The following database queries cause irreversible data loss and must never be ru
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/git-guardrail.sh"
+            "command": "\"$HOME\"/.claude/hooks/git-guardrail.sh"
           }
         ]
       }
@@ -65,7 +84,5 @@ The following database queries cause irreversible data loss and must never be ru
 }
 ```
 
-### Setup for Git Pre-Push Hook (`.git/hooks/pre-push`)
-```bash
-ln -s ../../scripts/git-guardrail.sh .git/hooks/pre-push
-```
+### Git Hook Scope Clarification
+When used as a Git hook (e.g. `.git/hooks/pre-push`), the hook can only intercept `git push` operations (blocking force-pushes or deletions); it does not intercept local working-tree commands like `git reset` or `DROP TABLE` when run through Git's push lifecycle.

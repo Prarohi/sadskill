@@ -22,11 +22,12 @@ Identify the surface's primary mode:
 ### Phase 3: Craft Floor Requirements (Non-Negotiable)
 Before shipping any UI code, verify these absolute requirements:
 1. **Touch & Click Targets**: Minimum 44×44px interactive area for all buttons, links, and icons.
-2. **Layout Stability**: Zero Cumulative Layout Shift (CLS) on hover, active states, modal toggles, or dynamic data loading. Always reserve space for images and skeleton loaders.
-3. **Contrast & Readability**: Minimum 4.5:1 contrast ratio for body text; 3:1 for large headers and interface borders (WCAG AA).
-4. **Motion Safety**: Wrap all animations and transitions in `@media (prefers-reduced-motion: reduce)`.
-5. **Keyboard & Focus**: Never set `outline: none` without providing a distinct `:focus-visible` ring.
-6. **Optical Typography**: Set explicit tracking (e.g. tighter for large titles, looser for uppercase labels) and proportional leading.
+2. **Zero-Lift Hover Rule**: Card/button hover `translateY(-...)` float is prohibited (preventing generic AI floating-card jitter); use `scale(0.97)` micro-compression on click. (Legitimate entrance and positional transitions like slide-in drawers, bottom sheets, toasts, and tooltips remain permitted).
+3. **Layout Stability**: Maintain Cumulative Layout Shift (CLS < 0.1) on hover, active states, modal toggles, or dynamic data loading. Always reserve space for images and skeleton loaders.
+4. **Contrast & Readability**: Minimum 4.5:1 contrast ratio for body text; 3:1 for large headers and interface borders (WCAG AA).
+5. **Motion Safety**: Wrap all animations and transitions in `@media (prefers-reduced-motion: reduce)`.
+6. **Keyboard & Focus**: Never set `outline: none` without providing a distinct `:focus-visible` ring.
+7. **Optical Typography**: Set explicit tracking (e.g. tighter for large titles, looser for uppercase labels) and proportional leading.
 
 ### Phase 4: Self-Critique & Polish
 Review the created UI against [checklists/ui-polish-20-tips.md](../checklists/ui-polish-20-tips.md) and [checklists/site-production.md](../checklists/site-production.md).

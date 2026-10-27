@@ -32,3 +32,13 @@ Chronological record of high-level accomplishments, architectural transitions, a
 - **Independent Evidence Verifier**: Added `scripts/verify-evidence.py` to validate `.sad/evidence/*.json` records against git state.
 - **Reproducible Benchmark Suite**: Added `benchmarks/tasks.json` and `benchmarks/runner.py` with 100% pass rate.
 - **Node Matrix CI**: Added Node 20 & 22 matrix in `.github/workflows/ci.yml`.
+
+### [2026-10-28] v0.3.0 Technical Audit Resolution & Hardened Verifier
+- **Safe Evidence Verifier**: Eliminated `shell=True` arbitrary command execution in `scripts/verify-evidence.py`; enforced strict project path containment (rejecting path traversal `..` and external symlinks); added per-command timeout and safe argv dispatch.
+- **Truthful Provenance States**: Defined exact verification states (`reported`, `schema_valid`, `retested`, `ci_attested`, `failed`) and stopped unqualified `VERIFIED` claims on unexecuted self-reports.
+- **Contract & Policy Smoke Suite**: Hardened `benchmarks/runner.py` with registry dispatch, immediate failure on unknown task IDs, dynamic pass rate computation, and evaluation of declared criteria.
+- **Real Behavioral Fixture**: Added `benchmarks/fixtures/tenant-isolation/` with actual behavioral unit tests and grader (`grader.py`).
+- **Installation Manifest & Reversibility**: Added `~/.sadskill/install-manifest.json` tracking installed files and backups, along with `uninstall.sh --restore-previous` for automated restoration.
+- **Defense-in-Depth Safety Model**: Clarified hook boundaries (`protocols/safety.md`), distinguishing Claude PreToolUse from Git pre-push and documenting lifecycle states (`HOOK_AVAILABLE`, `HOOK_REGISTERED`, `HOOK_ACTIVE`).
+- **Version Alignment**: Unified `v0.3.0` across `SKILL.md`, `README.md`, `install.sh`, and `uninstall.sh`.
+- **Expanded Verification Suite**: Expanded `scripts/verify.py` to 87 automated tests covering evidence safety, path traversal, shell chaining rejection, and fixture graders.
