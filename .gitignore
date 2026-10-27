@@ -25,7 +25,7 @@ node_modules/
 *.bak
 
 # Sensitive / Private files & user configuration
-profile.md
+/profile.md
 *.env
 *.env.*
 *.local

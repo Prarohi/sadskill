@@ -59,13 +59,14 @@ class VerificationSuite:
             if path.resolve() == root_skill.resolve():
                 continue
             # Ignore .git and .sad
-            if any(part.startswith(".") for part in path.parts):
+            rel = path.relative_to(REPO_ROOT)
+            if any(part.startswith(".") for part in rel.parts):
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             if text.startswith("---\n"):
                 match = re.search(r"^name:\s+([a-zA-Z0-9_-]+)", text, re.MULTILINE)
                 if match:
-                    other_skills.append((str(path.relative_to(REPO_ROOT)), match.group(1)))
+                    other_skills.append((str(rel), match.group(1)))
 
         self.assert_true(
             len(other_skills) == 0,
