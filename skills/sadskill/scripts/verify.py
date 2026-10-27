@@ -225,7 +225,7 @@ class VerificationSuite:
             if re.search(p_lang, content, re.IGNORECASE):
                 violations.append((rel_path, "Personal language reference detected"))
 
-            # Check standalone personal name (case-insensitive, word boundary, ignoring repo SadafTiger)
+            # Check standalone personal name (case-insensitive, word boundary, ignoring repo handle)
             for m in re.finditer(p_name, content, re.IGNORECASE):
                 violations.append((rel_path, f"Standalone personal name detected: {m.group(0)}"))
 
