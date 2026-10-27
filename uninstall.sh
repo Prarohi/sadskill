@@ -51,7 +51,8 @@ if [[ -d "${HOME}/.claude/skills/sadskill" ]]; then
         "${HOME}/.claude/commands/sad-design.md" \
         "${HOME}/.claude/commands/sad-backend.md" \
         "${HOME}/.claude/commands/sad-sec.md" \
-        "${HOME}/.claude/commands/sad-analyze.md"
+        "${HOME}/.claude/commands/sad-analyze.md" \
+        "${HOME}/.claude/hooks/git-guardrail.sh"
   if [[ "$CLEAN_BACKUPS" == "true" ]]; then
     rm -rf "${HOME}/.claude/skills/sadskill.bak."*
   fi

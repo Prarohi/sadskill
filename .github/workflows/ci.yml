@@ -8,8 +8,11 @@ on:
 
 jobs:
   verify:
-    name: Verify sadskill Architecture & Multi-Agent Compatibility
+    name: Verify sadskill (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,10 +22,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ matrix.node-version }}
 
       - name: Run sadskill Verification Suite
         run: python3 scripts/verify.py

@@ -195,6 +195,29 @@ class VerificationSuite:
         if guardrail_script.exists():
             self.assert_true(os.access(guardrail_script, os.X_OK), "scripts/git-guardrail.sh is marked executable")
 
+        skill_hook = SKILL_DIR / "hooks" / "git-guardrail.sh"
+        self.assert_true(skill_hook.exists(), "Packaged guardrail exists at skills/sadskill/hooks/git-guardrail.sh")
+        if skill_hook.exists():
+            self.assert_true(os.access(skill_hook, os.X_OK), "skills/sadskill/hooks/git-guardrail.sh is marked executable")
+
+        evidence_verifier = REPO_ROOT / "scripts" / "verify-evidence.py"
+        self.assert_true(evidence_verifier.exists(), "Evidence verifier exists at scripts/verify-evidence.py")
+        if evidence_verifier.exists():
+            self.assert_true(os.access(evidence_verifier, os.X_OK), "scripts/verify-evidence.py is marked executable")
+
+        benchmarks_runner = REPO_ROOT / "benchmarks" / "runner.py"
+        benchmarks_tasks = REPO_ROOT / "benchmarks" / "tasks.json"
+        self.assert_true(benchmarks_runner.exists(), "Benchmark runner exists at benchmarks/runner.py")
+        self.assert_true(benchmarks_tasks.exists(), "Benchmark tasks exist at benchmarks/tasks.json")
+        if benchmarks_runner.exists():
+            self.assert_true(os.access(benchmarks_runner, os.X_OK), "benchmarks/runner.py is marked executable")
+
+    def test_benchmarks_execution(self):
+        print("\n--- Testing Reproducible Benchmark Suite ---")
+        runner = REPO_ROOT / "benchmarks" / "runner.py"
+        res = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True)
+        self.assert_true(res.returncode == 0, f"Reproducible benchmarks passed 100% (exit code {res.returncode})")
+
     def test_markdown_relative_links(self):
         print("\n--- Testing All Markdown Relative Links ---")
         link_pattern = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
@@ -342,6 +365,7 @@ class VerificationSuite:
         self.test_modes_and_protocols()
         self.test_vendor_index_and_sources()
         self.test_community_and_metadata()
+        self.test_benchmarks_execution()
         self.test_markdown_relative_links()
         self.test_sandbox_installer()
         self.test_privacy_and_portability()

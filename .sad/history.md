@@ -23,3 +23,12 @@ Chronological record of high-level accomplishments, architectural transitions, a
 - **Executable Guardrails**: Added `scripts/git-guardrail.sh` hook intercepting destructive Git/SQL commands.
 - **Cursor Target Packaging**: Added `--target <dir>` support in `install.sh` and generated valid `.cursor/rules/sadskill.mdc`.
 - **Community Suite & CI**: Added `.github/workflows/ci.yml`, issue templates, and `SECURITY.md`.
+
+### [2026-10-28] v0.2.1 Competitive Hardening & Benchmark Harness
+- **Cursor YAML Fix**: Quoted globs (`globs: "*"`) in generated `.cursor/rules/sadskill.mdc` to eliminate YAML ScannerError.
+- **Packaged Hook**: Placed executable guardrail inside skill payload at `skills/sadskill/hooks/git-guardrail.sh` with robust command tokenization (preventing bypasses like `git -C <path>`, chained commands `&&`, and force refspecs `+main`).
+- **Claude Hook Auto-Wiring**: Added automatic `.claude/hooks/git-guardrail.sh` deployment in `install.sh`.
+- **Zero-Lift Nuance**: Refined Zero-Lift hover rule to explicitly permit slide-in drawers, sheets, tooltips, and toasts while banning generic card-hover float jitter.
+- **Independent Evidence Verifier**: Added `scripts/verify-evidence.py` to validate `.sad/evidence/*.json` records against git state.
+- **Reproducible Benchmark Suite**: Added `benchmarks/tasks.json` and `benchmarks/runner.py` with 100% pass rate.
+- **Node Matrix CI**: Added Node 20 & 22 matrix in `.github/workflows/ci.yml`.

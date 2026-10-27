@@ -10,7 +10,7 @@ Execute the `design` workflow of `sadskill` on target UI surface: $ARGUMENTS
    - Check local profile `~/.sadskill/profile.md` for personal design preferences.
 2. **Design Craft Floor & Anti-Slop Rules**:
    - Touch targets >= 44×44px, zero layout shift (CLS < 0.1), WCAG AA contrast (4.5:1 text, 3:1 UI).
-   - Strict Zero-Lift Rule: `translateY(-...)` on hover is banned; use `scale(0.97)` micro-compression on click.
+   - Zero-Lift Hover Rule: `translateY(-...)` on card/button hover is banned (preventing generic floating-card jitter); use `scale(0.97)` micro-compression on click. (Legitimate positioning and entrance transitions like slide-in drawers, sheets, toasts, and tooltips remain permitted).
    - Preserve natural image aspect ratios; never crop avatars or products into distorted shapes.
    - Classify surface mode: *Persuade* (landing), *Operate* (dashboard/settings), *Read* (docs), or *Experience* (creative).
 3. **Execution & Polish**:

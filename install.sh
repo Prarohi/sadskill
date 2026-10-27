@@ -80,7 +80,11 @@ install_codex() {
 
   for cmd in "${SCRIPT_DIR}/commands/codex/"*.md; do
     if [[ -f "$cmd" ]]; then
-      cp "$cmd" "${prompts_dir}/$(basename "$cmd")"
+      local target_cmd="${prompts_dir}/$(basename "$cmd")"
+      if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
+        mv "$target_cmd" "${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+      fi
+      cp "$cmd" "$target_cmd"
     fi
   done
   echo "   [OK] Installed skill to ${skills_dir}/sadskill and prompts to ${prompts_dir}"
@@ -98,10 +102,20 @@ install_claude() {
 
   for cmd in "${SCRIPT_DIR}/commands/claude/"*.md; do
     if [[ -f "$cmd" ]]; then
-      cp "$cmd" "${commands_dir}/$(basename "$cmd")"
+      local target_cmd="${commands_dir}/$(basename "$cmd")"
+      if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
+        mv "$target_cmd" "${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+      fi
+      cp "$cmd" "$target_cmd"
     fi
   done
-  echo "   [OK] Installed skill to ${skills_dir}/sadskill and commands to ${commands_dir}"
+
+  local hooks_dir="${claude_dir}/hooks"
+  mkdir -p "${hooks_dir}"
+  cp "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "${hooks_dir}/git-guardrail.sh"
+  chmod +x "${hooks_dir}/git-guardrail.sh"
+
+  echo "   [OK] Installed skill, commands, and guardrail hook to ${claude_dir}"
 }
 
 install_cursor() {
@@ -124,7 +138,7 @@ install_cursor() {
   cat << 'EOF' > "${rules_dir}/sadskill.mdc"
 ---
 description: "sadskill: Unified autonomous engineering workflow (plan, design, backend, sec, analyze)"
-globs: *
+globs: "*"
 alwaysApply: false
 ---
 
@@ -137,7 +151,7 @@ alwaysApply: false
 - `/sad-plan`: Adaptive 2-tier planning.
   - **Tier 1 (Surgical)**: <= 2 files/bugfix/CSS. Single-turn, concise diff table, test assertion.
   - **Tier 2 (Architectural)**: Multi-file features/migrations. Pre-declared AST contracts, Mermaid graph, boundary failure analysis. Output to `.sad/plans/`.
-- `/sad-design`: Craft floor UI/UX, strict Zero-Lift rule (`translateY` banned, `scale(0.97)` click compression), natural image aspect ratios, 20 UI polish tips. Record choices in `.sad/design-memory.md`.
+- `/sad-design`: Craft floor UI/UX, Zero-Lift hover rule (card float `translateY` banned, `scale(0.97)` click compression; drawers/tooltips permitted), natural image aspect ratios, 20 UI polish tips. Record choices in `.sad/design-memory.md`.
 - `/sad-backend`: Schema-first migrations (`up.sql`/`down.sql`), zero-trust Row Level Security, safe query performance (`EXPLAIN (BUFFERS)`).
 - `/sad-sec`: Strictly read-only OWASP Top 10 web & API audit, secrets scanning, offline-resilient dependency check, 15-point launch legal compliance. Output to `.sad/reports/security-<date>-<time>.md`.
 - `/sad-analyze`: Scoped (`/sad-analyze <path>`) or full repo scan, John Ousterhout deep module analysis, coupling, dead code. Output to `.sad/reports/analysis-<date>-<time>.md`.

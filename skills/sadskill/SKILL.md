@@ -19,15 +19,17 @@ metadata:
 
 Inspect the incoming user prompt or slash command. Route immediately to the corresponding mode:
 
-| Trigger | Target Mode | Reference Document | Purpose |
-|---|---|---|---|
-| `/sad-plan` or `$sadskill plan` | **Plan** | [modes/plan.md](modes/plan.md) | Codebase reconnaissance, requirement grilling, and A-to-Z execution plans in `.sad/plans/`. |
-| `/sad-design` or `$sadskill design` | **Design** | [modes/design.md](modes/design.md) | Accessible, distinctive UI/UX craft, design tokens, anti-slop rules, and `.sad/design-memory.md`. |
-| `/sad-backend` or `$sadskill backend` | **Backend** | [modes/backend.md](modes/backend.md) | Schema-first DDL, reversible migrations, Row Level Security, indexing, and API verification. |
-| `/sad-sec` or `$sadskill sec` | **Security** | [modes/security.md](modes/security.md) | OWASP Top 10, secret detection, dependency audit, headers/CSP, and 15-point launch legal checklist in `.sad/reports/`. |
-| `/sad-analyze` or `$sadskill analyze` | **Analyze** | [modes/analyze.md](modes/analyze.md) | Deep codebase exploration, module coupling, dead code, test gaps, and Mermaid architecture diagrams. |
+| Universal Trigger (`skills.sh`) | Native Slash Command (`install.sh`) | Natural Language Intent | Target Mode | Reference |
+|---|---|---|---|---|
+| `$sadskill plan` | `/sad-plan` | "plan this feature", "create spec", "break down task" | **Plan** | [modes/plan.md](modes/plan.md) |
+| `$sadskill design` | `/sad-design` | "design component", "UI polish", "style landing page" | **Design** | [modes/design.md](modes/design.md) |
+| `$sadskill backend` | `/sad-backend` | "write schema", "database migration", "RLS policy" | **Backend** | [modes/backend.md](modes/backend.md) |
+| `$sadskill sec` | `/sad-sec` | "audit security", "find secret leaks", "check OWASP" | **Security** | [modes/security.md](modes/security.md) |
+| `$sadskill analyze` | `/sad-analyze` | "analyze codebase", "module depth", "find dead code" | **Analyze** | [modes/analyze.md](modes/analyze.md) |
 
-If no slash command is used but the user requests engineering assistance, select the most relevant mode or ask a single clarifying question.
+### Invocation Architecture:
+- **Standard (`skills.sh`)**: When installed via `npx skills add sadafbabu/sadskill`, invoke via `$sadskill <mode>` or natural language prompts.
+- **Companion (`install.sh`)**: When installed via `./install.sh`, native slash commands (`/sad-*`) are registered directly into Claude Code commands (`~/.claude/commands/`), OpenAI Codex prompts (`~/.codex/prompts/`), and Cursor rules (`.cursor/rules/`).
 
 ---
 
