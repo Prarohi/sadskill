@@ -1,21 +1,21 @@
 # `/sad-analyze`
 
-Execute the `analyze` workflow of `sadskill`.
+Execute the `analyze` workflow of `sadskill` on target scope: $ARGUMENTS
+*(Invocation: `/sad-analyze` or `/prompts:sad-analyze`)*
 
 ## Instructions
-1. Load and adhere to `sadskill`:
-   - Inspect `.sad/` project memory.
-   - Respect local profile if configured (`~/.sadskill/profile.md`).
-   - Enforce the Human-Voice protocol.
-2. Follow `skills/sadskill/modes/analyze.md`:
-   - Determine scope:
-     - Scoped analysis if specific path or module is provided (e.g., `/sad-analyze src/auth`).
-     - Full codebase exploration if invoked without arguments or with `all`.
-   - Analyze:
-     - Architecture & entry points (generate Mermaid dependency graph).
-     - Module depth, coupling, god-files, and cyclic dependencies.
-     - Code health: dead code, duplicated logic, complexity bottlenecks.
-     - Test coverage and verification gaps.
-     - Quick security and performance smells.
-   - Save report to `.sad/reports/analysis-<YYYY-MM-DD>.md`.
-   - Provide summary with high-impact recommendations and next commands (`/sad-plan` or `/sad-sec`).
+1. **Locate sadskill Configuration**:
+   - Check local workspace: `./skills/sadskill/SKILL.md` (or global `~/.codex/skills/sadskill/SKILL.md`).
+   - Check `.sad/decisions.md` and past reports in `.sad/reports/`.
+2. **Determine Analysis Scope**:
+   - Scoped: If a specific path or module is passed in `$ARGUMENTS` (e.g. `/sad-analyze src/auth`).
+   - Full: If invoked without arguments or with `all`.
+3. **Multi-Vector Architecture Scan**:
+   - John Ousterhout Deep Module Philosophy: Identify shallow modules (bloated interfaces hiding minimal logic) and find seams for deepening.
+   - Coupling & Cycles: Detect circular dependencies and monolithic god-files.
+   - Code Health & Dead Code: Find unused exports, redundant dependencies, and unreachable code paths.
+   - Verification Gaps: Identify critical workflows lacking automated test assertions.
+   - Mermaid Architecture Diagram: Generate visual component flow.
+4. **Collision-Proof Reporting**:
+   - Write report to `.sad/reports/analysis-<YYYY-MM-DD>-<HHMMSS>.md`.
+   - Output high-impact prioritization matrix and recommend next command (`/sad-plan` or `/sad-sec`).

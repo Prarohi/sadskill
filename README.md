@@ -1,64 +1,22 @@
 # `sadskill`
 
-> **The One-Roof Engineering Skill for Autonomous Coding Agents.**  
-> Version: `v0.1.0` · License: `MIT` · Multi-Agent Compatible
+> **One engineering workflow. Any coding agent.**  
+> *Turn AI-generated code into verified, maintainable software.*  
+> Version: `v0.2.0` · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity)
 
-`sadskill` combines the industry's most effective agent engineering workflows, design systems, architectural protocols, and security audits into a single discoverable skill. Instead of juggling dozens of conflicting agent plugins, `sadskill` provides five unified commands backed by a structured project memory system and a human-voice protocol.
+> *"Don't just generate code. Engineer it, verify it, and remember why."*
 
----
+[![CI](https://github.com/sadafbabu/sadskill/actions/workflows/ci.yml/badge.svg)](https://github.com/sadafbabu/sadskill/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![skills.sh](https://img.shields.io/badge/skills.sh-sadskill-success.svg)](https://skills.sh)
 
-## ⚡ The Five Commands
-
-| Command | Workflow | Description & Reference |
-|---|---|---|
-| `/sad-plan` | **A-to-Z Spec & Planning** | Scans codebase, grills on ambiguous requirements, and writes actionable plans to `.sad/plans/<date>-<slug>.md`. Built on Matt Pocock, Superpowers, and Karpathy guidelines. |
-| `/sad-design` | **UI/UX & Visual Polish** | Crafts responsive, accessible, distinctive interfaces. Reads `.sad/design-memory.md` to avoid repeated aesthetic mistakes. Built on Impeccable, Taste, Shadcn, and Vercel guidelines. |
-| `/sad-backend` | **Schema, RLS & APIs** | Schema-first migrations, reversible DDL, Row Level Security, indexing, query optimization, and contract testing. Built on Supabase and PostgreSQL best practices. |
-| `/sad-sec` | **Security Audit & Hardening** | OWASP Top 10 web & API audits, IDOR detection, secret leak scanning, dependency vulnerability audit, CSP headers, and 15-point launch legal compliance. Output saved to `.sad/reports/security-<date>.md`. |
-| `/sad-analyze` | **Architecture & Code Health** | Scoped or full-codebase scan: deep module analysis, coupling, circular dependencies, dead code, test gaps, and Mermaid architecture diagrams in `.sad/reports/analysis-<date>.md`. |
-
-> **Fallback**: `$sadskill <mode>` (e.g. `$sadskill plan`, `$sadskill design`, `$sadskill backend`, `$sadskill sec`, `$sadskill analyze`).
+`sadskill` is an open-source autonomous engineering workflow framework. Instead of juggling dozens of conflicting agent plugins or enduring circular trial-and-error edits, `sadskill` provides **adaptive planning, shared project memory, executable safety guardrails, and proof-grounded verification** across every major coding agent.
 
 ---
 
-## 🏗️ Architecture
+## ⚡ Quickstart (Universal via `skills.sh`)
 
-```mermaid
-flowchart TD
-    User["Developer Prompt / Slash Command"] --> Router["sadskill / SKILL.md (Root Router)"]
-    Router --> Protocols["Protocols: Memory · Grilling · Human-Voice · MCP · Profile"]
-    Router --> Modes["Modes: plan · design · backend · security · analyze"]
-    Modes --> Memory[".sad/ Project Memory (.sad/history.md, .sad/plans/, .sad/reports/)"]
-    Modes --> VendorIndex["Vendor Index (skills/sadskill/vendor/INDEX.md)"]
-    VendorIndex --> CuratedVendors["Vendored Best Practices (Matt Pocock, Impeccable, Superpowers, Supabase, OWASP, etc.)"]
-    Protocols --> LocalProfile["Optional Local User Profile (~/.sadskill/profile.md)"]
-```
-
----
-
-## 🚀 Installation
-
-### Option 1: Automatic Multi-Agent Installer
-
-Clone the repository and run `install.sh`:
-
-```bash
-git clone https://github.com/sadafbabu/sadskill.git
-cd sadskill
-./install.sh
-```
-
-To install for a specific agent:
-```bash
-./install.sh --agent codex       # Installs to ~/.codex/skills/ & ~/.codex/prompts/
-./install.sh --agent claude      # Installs to ~/.claude/skills/ & ~/.claude/commands/
-./install.sh --agent cursor      # Installs to .cursor/rules/
-./install.sh --agent antigravity # Installs to agent skills directory
-```
-
-### Option 2: `skills` CLI
-
-If you use the universal `skills` package manager:
+Install `sadskill` into any supported agent in one command:
 
 ```bash
 npx skills add sadafbabu/sadskill
@@ -66,54 +24,123 @@ npx skills add sadafbabu/sadskill
 
 ---
 
-## 🧠 Core Protocols
+## 📊 Why `sadskill`? Benchmark Advantage
+
+| Dimension | Default Plain Coding Agent | Agent Powered by `sadskill` |
+|---|---|---|
+| **Verification Proof** | Claims *"all tests pass"* blindly without proof | Real terminal proof with exit code `0` recorded in `.sad/evidence/` |
+| **Token Efficiency** | Speculative trial-and-error editing cycles | **Adaptive 2-Tier Planning** (Surgical Plan for bugfixes; AST Contracts for features) |
+| **Context Retention** | Resets completely across sessions | Persistent `.sad/` memory (`history.md`, `decisions.md`, `design-memory.md`) |
+| **Safety Guardrails** | Can run `git reset --hard` or `DROP TABLE` | Executable `scripts/git-guardrail.sh` OS hook blocking destructive commands |
+| **UI/UX Craft Floor** | Generic AI aesthetic (purple gradients, unscaled cards) | Strict **Zero-Lift** rule, 44px hit targets, WCAG AA, 20 UI polish rules |
+| **Backend Reliability** | Destructive migrations and permissive queries | Reversible UP/DOWN migrations, zero-trust RLS, safe `EXPLAIN (BUFFERS)` |
+
+---
+
+## 🧭 The Five Core Workflows
+
+| Command | Workflow | Description & Core Value |
+|---|---|---|
+| `/sad-plan` | **Adaptive Spec & Planning** | **Tier 1 (Surgical)**: <= 2 files/bugfix/CSS; single-turn lean diff table.<br>**Tier 2 (Architectural)**: Contract-First AST signatures, Mermaid data flows, and failure modes in `.sad/plans/`. |
+| `/sad-design` | **UI/UX & Visual Polish** | Distinctive, accessible UI. Enforces the strict Zero-Lift rule (`translateY` banned, `scale(0.97)` micro-compression), 20 UI polish tips, and reads `.sad/design-memory.md`. |
+| `/sad-backend` | **Schema, RLS & Safe APIs** | Schema-first DDL, reversible UP/DOWN migrations, zero-trust Row Level Security policies, and safe query performance analysis (`EXPLAIN (BUFFERS)`). |
+| `/sad-sec` | **Security & Compliance Audit** | Strictly read-only audit: OWASP Top 10 web & API, secrets exposure, offline-resilient dependency scanning, and 15-point launch legal compliance in `.sad/reports/`. |
+| `/sad-analyze` | **Architecture & Code Health** | Scoped (`/sad-analyze <path>`) or full codebase scan: John Ousterhout deep module analysis, coupling, dead code detection, and prioritization matrix. |
+
+> **Universal Fallback**: If slash commands are not supported in your environment, trigger with `$sadskill <mode>` (e.g. `$sadskill plan`, `$sadskill design`).
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    User["Developer Prompt / Slash Command ($ARGUMENTS)"] --> Router["sadskill / SKILL.md (Root Router)"]
+    Router --> Protocols["Protocols: Memory · Evidence · Safety · Human-Voice · Grilling"]
+    Router --> Modes["Modes: plan · design · backend · security · analyze"]
+    Modes --> Memory[".sad/ Project Memory (history.md, decisions.md, design-memory.md)"]
+    Modes --> Evidence[".sad/evidence/ (Execution proof logs with exit code 0)"]
+    Modes --> VendorIndex["Vendor Index (40 Curated Reference Patterns)"]
+    Protocols --> Guardrails["Executable Guardrail (scripts/git-guardrail.sh)"]
+    Protocols --> LocalProfile["Optional Local User Profile (~/.sadskill/profile.md)"]
+```
+
+---
+
+## 🚀 Advanced Companion Installer (`install.sh`)
+
+For deep local integrations (Claude Code commands, Cursor `.mdc` rules, non-destructive backups):
+
+```bash
+git clone https://github.com/sadafbabu/sadskill.git
+cd sadskill
+./install.sh
+```
+
+### Agent-Specific Options
+```bash
+./install.sh --agent codex                     # Installs to ~/.codex/skills/ & ~/.codex/prompts/
+./install.sh --agent claude                    # Installs to ~/.claude/skills/ & ~/.claude/commands/
+./install.sh --agent cursor --target /path/app # Generates .cursor/rules/sadskill.mdc in target
+./install.sh --agent antigravity               # Installs to ~/.gemini/antigravity/skills/
+./install.sh --agent all                       # Configures all detected environments
+```
+
+> **Safe by Design**: `install.sh` automatically preserves any existing installation in a timestamped `sadskill.bak.<timestamp>` directory rather than executing unprompted deletions.
+
+---
+
+## 🛡️ Core Protocols
 
 ### 1. Project Memory (`.sad/`)
-When `sadskill` runs on any codebase, it maintains persistent context in the project root:
-- `.sad/history.md`: Chronological changelog of high-level accomplishments.
-- `.sad/design-memory.md`: Approved palettes, typography, UI patterns, and rejected ideas.
+Persistent context stored in the project root:
+- `.sad/history.md`: Chronological changelog of high-level project milestones.
 - `.sad/decisions.md`: Architecture Decision Records (ADRs).
-- `.sad/plans/`: Generated execution plans (`YYYY-MM-DD-<slug>.md`).
-- `.sad/reports/`: Security audits (`security-*.md`) and codebase analysis (`analysis-*.md`).
+- `.sad/design-memory.md`: Approved palettes, typography, UI patterns, and rejected anti-patterns.
+- `.sad/evidence/`: Machine-readable verification evidence logs (`.json`).
+- `.sad/plans/`: Generated execution specifications (`YYYY-MM-DD-<slug>.md`).
+- `.sad/reports/`: Timestamped security audits (`security-*.md`) and architecture scans (`analysis-*.md`).
 
-### 2. Human Voice Protocol
-AI responses frequently suffer from repetitive cliches, faux enthusiasm, and verbose boilerplate. `sadskill` enforces the **Human Voice Protocol**:
-- Answer immediately before explaining.
-- Ban AI buzzwords ("delve", "seamless", "testament", "tapestry", "in summary", "moreover").
-- No unsolicited compliments ("Great question!", "Certainly!").
-- Plain, direct, technical communication.
+### 2. Verification Evidence Protocol
+Every task must conclude with demonstrable terminal verification:
+```text
+✓ Command: npm test -- tests/auth.test.ts (exit code 0)
+✓ Output: 4 passed, 0 failed (verified in 1.2s)
+✓ Evidence: .sad/evidence/20261028-031200-auth-login-fix.json
+```
 
-### 3. Grilling on Ambiguity
-Before making irreversible assumptions or complex architectural choices, `sadskill` grills the user with concise multiple-choice questions, always providing a sensible recommended default.
+### 3. Executable Safety Guardrails
+`sadskill` blocks dangerous terminal actions before they cause data loss:
+- Prohibits `git reset --hard`, `git push --force`, `git clean -fd`, `git checkout .`, `git branch -D`.
+- Prohibits unconditional `DROP TABLE`, `DROP DATABASE`, and `TRUNCATE`.
+- Integrates via `scripts/git-guardrail.sh` into Claude Code `PreToolUse` hooks and Git hooks.
 
-### 4. Maximum Token Efficiency & AST Contracts
-Autonomous agents burn excessive tokens on trial-and-error editing loops. `sadskill` prevents this:
-- **Contract-First AST Planning**: Function signatures, argument types, return types, and interfaces are defined before modifying code.
-- **Progressive Disclosure**: Plans and reports are written to disk (`.sad/plans/`, `.sad/reports/`), outputting only a concise 5-10 line executive summary and link to chat.
-- **Batched Replacements**: Code edits are grouped into contiguous chunks rather than repeated piecemeal roundtrips.
+### 4. Human Voice Protocol
+AI responses lead with the direct answer or diff before commentary. All conversational fluff ("delve", "seamless", "tapestry", "in summary", "moreover") and sycophantic praise ("Great question!") are strictly banned.
 
-### 5. Destructive Action Guardrails
-Autonomous agents are strictly blocked from running irreversible commands (`git reset --hard`, `git push --force`, `git clean -fd`, `DROP TABLE`, `TRUNCATE`) without an explicit user approval gate.
-
-### 6. Per-User Local Profile (`~/.sadskill/profile.md`)
-Personal communication preferences, favorite frameworks, or localized language guidelines never belong in git. You can create an optional local profile on your workstation:
+### 5. Workstation Profile Isolation (`~/.sadskill/profile.md`)
+Personal communication preferences or private tooling rules live exclusively on your workstation outside git:
 ```bash
 cp skills/sadskill/templates/profile.template.md ~/.sadskill/profile.md
 ```
-`sadskill` checks for `~/.sadskill/profile.md` dynamically. If absent, it operates on clean, neutral industry defaults.
+`sadskill` checks dynamically for this file; if absent, it operates on clean, neutral industry standards.
 
 ---
 
-## 🔒 Privacy & Portability Guarantee
+## 🗺️ 90-Day Roadmap
 
-`sadskill` is completely free of hardcoded user names, machine-specific paths, credentials, or personal preferences. It is safe for open-source teams, private enterprises, and CI/CD environments.
+- **Day 1–14 (v0.2.0: Reliability)**: Broken installer/path fixes, adaptive 2-tier planning, dual-record verification evidence, CI pipeline, executable guardrails.
+- **Day 15–30 (v0.3.0: Intelligence)**: Automated subagent debate (`/octo:debate`), automated test flakiness detectors, deeper database schema AST analysis.
+- **Day 31–60 (v0.4.0: Public Beta)**: Real-world reproducible benchmarks (token cost vs success rate), demo showcase, developer onboarding.
+- **Day 61–90 (v1.0 Release Candidate)**: Stable API, community ecosystem contributions, production certification.
 
 ---
 
-## 🧪 Verification
+## 🤝 Contributing & Community
 
-Run the verification suite to ensure all links, frontmatters, commands, and vendor references are valid:
+We welcome contributions! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`SECURITY.md`](SECURITY.md) before submitting issues or pull requests.
 
+Run the automated verification suite before submitting:
 ```bash
 python3 scripts/verify.py
 ```
@@ -122,5 +149,5 @@ python3 scripts/verify.py
 
 ## 📄 License & Attribution
 
-- `sadskill` is released under the [MIT License](LICENSE).
-- All integrated vendor patterns are credited in [THIRD_PARTY.md](THIRD_PARTY.md).
+- Distributed under the [MIT License](LICENSE).
+- Vendored reference guides and community standards are credited in [`THIRD_PARTY.md`](THIRD_PARTY.md) and [`skills/sadskill/vendor/SOURCES.md`](skills/sadskill/vendor/SOURCES.md).

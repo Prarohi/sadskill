@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify:
+    name: Verify sadskill Architecture & Multi-Agent Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run sadskill Verification Suite
+        run: python3 scripts/verify.py
+
+      - name: Verify Git Safety Guardrail Hook
+        run: |
+          echo "Testing blocked command..."
+          set +e
+          echo "git reset --hard HEAD~1" | ./scripts/git-guardrail.sh 2>/dev/null
+          STATUS=$?
+          set -e
+          if [ $STATUS -ne 2 ]; then
+            echo "Expected exit code 2 from guardrail, got $STATUS"
+            exit 1
+          fi
+
+          echo "Testing allowed command..."
+          echo "git status" | ./scripts/git-guardrail.sh
+          echo "Guardrail verification successful."
+
+      - name: Verify Multi-Agent Sandbox Installation & Uninstallation
+        run: |
+          SANDBOX_DIR=$(mktemp -d)
+          echo "Testing installation in ${SANDBOX_DIR}..."
+          HOME="${SANDBOX_DIR}" ./install.sh all
+          test -d "${SANDBOX_DIR}/.codex/skills/sadskill"
+          test -d "${SANDBOX_DIR}/.claude/skills/sadskill"
+          test -d "${SANDBOX_DIR}/.gemini/antigravity/skills/sadskill"
+
+          echo "Testing non-destructive backup on reinstall..."
+          HOME="${SANDBOX_DIR}" ./install.sh all
+          ls -d "${SANDBOX_DIR}/.claude/skills/sadskill.bak."*
+
+          echo "Testing uninstallation..."
+          HOME="${SANDBOX_DIR}" ./uninstall.sh --purge --clean-backups
+          test ! -d "${SANDBOX_DIR}/.codex/skills/sadskill"
+          test ! -d "${SANDBOX_DIR}/.claude/skills/sadskill"
+          rm -rf "${SANDBOX_DIR}"
+          echo "Sandbox installation & uninstallation verified."
+
+      - name: Test Single Skill Discovery
+        run: |
+          npx skills add . -l

@@ -40,8 +40,19 @@ Plan mode conducts **intense upfront specification** and creates deterministic, 
    - Provide a concise title, context, and an explicit **Recommended Answer**.
    - Phrase questions so that the user can accept all recommendations by typing `yes`.
 
-### Phase 3: The Intense A-to-Z Specification
-The plan written to `.sad/plans/<YYYY-MM-DD>-<slug>.md` must follow [templates/plan.template.md](../templates/plan.template.md) with extreme precision:
+### Phase 3: Adaptive Specification (Tier 1 vs. Tier 2)
+
+Evaluate task scope before generating the plan to prevent instruction over-scaffolding and token waste:
+
+#### ⚡ Tier 1: Surgical Plan (Scope: <= 2 files, bug fixes, visual CSS/HTML tweaks, typos)
+- **Format**:
+  1. **Goal**: 1-2 sentence statement of target fix and user outcome.
+  2. **File Mutation Table**: Target file, action (`MODIFY`), target symbol, and exact replacement diff.
+  3. **Verification Command**: Exact test command and expected exit code 0.
+- **Token Saver**: Skips Mermaid diagrams and extensive AST formalisms. Generates a lean 15-20 line plan in `.sad/plans/<YYYY-MM-DD>-<slug>.md` for rapid single-turn execution.
+
+#### 🏛️ Tier 2: Deep Architectural Spec (Scope: new features, multi-file refactors, schema migrations, API changes)
+The plan written to `.sad/plans/<YYYY-MM-DD>-<slug>.md` follows [templates/plan.template.md](../templates/plan.template.md) with full rigor:
 1. **User Value & Concrete Outcome**: Single high-density paragraph.
 2. **Architecture & Data Flow**: Compact Mermaid diagram showing components, boundaries, and dependencies.
 3. **Contract-First AST Signatures**:

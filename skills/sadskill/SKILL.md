@@ -1,13 +1,15 @@
 ---
 name: sadskill
-description: "Unified autonomous engineering skill for coding agents. Provides 5 high-leverage workflows: /sad-plan (planning & spec), /sad-design (UI/UX & polish), /sad-backend (schema & RLS), /sad-sec (security & OWASP audit), and /sad-analyze (architecture & code health)."
+description: "One engineering workflow. Any coding agent. Turn AI-generated code into verified, maintainable software. Provides 5 high-leverage workflows: /sad-plan (adaptive planning & spec), /sad-design (UI/UX & polish), /sad-backend (schema & RLS), /sad-sec (security & OWASP audit), and /sad-analyze (architecture & code health)."
 metadata:
-  version: 0.1.0
+  version: 0.2.0
   author: sadafbabu
   license: MIT
 ---
 
 # `sadskill` Router & Runtime
+
+> **Promise**: *"Don't just generate code. Engineer it, verify it, and remember why."*
 
 `sadskill` is a unified agent skill uniting the best engineering workflows, design practices, architectural patterns, and security audits under one roof. It runs on any modern coding agent (Codex / ChatGPT, Claude Code, Cursor, Antigravity, Gemini CLI).
 
@@ -75,6 +77,12 @@ Regardless of the active mode, every agent turn must honor these invariants:
 - Autonomous agents must never execute destructive operations (`git reset --hard`, `git push --force`, `git clean -fd`, `DROP TABLE`, `TRUNCATE`) without an explicit user approval gate.
 - Prefer non-destructive workflows (`git stash`, reversible migrations, transaction rollbacks).
 - Read protocol details in [protocols/safety.md](protocols/safety.md).
+
+### 8. Verification Evidence Standard
+- Never claim a task, fix, or feature is complete without executing the test or build command and verifying exit code 0.
+- Record structured verification metadata in `.sad/evidence/<timestamp>-<slug>.json`.
+- Output a 3-line terminal execution proof in chat displaying command, exit code, and passed assertions.
+- Read protocol details in [protocols/evidence.md](protocols/evidence.md).
 
 ---
 

@@ -1,0 +1,28 @@
+name: Feature Request
+description: Propose a new workflow mode, vendor reference integration, or agent capability
+title: "[FEATURE]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to improve `sadskill`? We prioritize features that increase verification evidence, save context tokens, and eliminate agent bugs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What limitation or agent friction does this proposal solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution & Workflow
+      description: Describe how the new mode, protocol, or reference would operate.
+    validations:
+      required: true
+  - type: textarea
+    id: upstream
+    attributes:
+      label: Upstream References & Licensing
+      description: If this integrates an open-source standard, link the upstream repo and license (MIT/Apache-2.0).

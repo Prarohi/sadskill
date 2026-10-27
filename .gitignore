@@ -15,10 +15,8 @@ __pycache__/
 .coverage
 htmlcov/
 node_modules/
-
-# Local project memory during testing
-.sad/
-.sadskill/
+.cursor/rules/sadskill.mdc
+*.bak.*
 
 # Temp files
 *.tmp

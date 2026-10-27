@@ -56,7 +56,7 @@ Audit the repository against [checklists/app-launch-legal.md](../checklists/app-
    - **High**: CSRF on critical actions, missing RLS policies, severe dependency CVEs.
    - **Medium**: Missing CSP/HSTS headers, overly permissive CORS, session duration too long.
    - **Low / Informational**: Minor best-practice deviations, fingerprinting headers (`X-Powered-By`).
-3. Save the report to `.sad/reports/security-<YYYY-MM-DD>.md`.
+3. Save the report to `.sad/reports/security-<YYYY-MM-DD>-<HHMMSS>.md` (or append `-2.md` to prevent overwriting prior runs on the same date).
 4. Output a concise summary in the chat citing `file:line` references.
 5. **Approval Gate**: Stop and await user authorization before implementing remediation fixes.
 

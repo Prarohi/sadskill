@@ -1,0 +1,61 @@
+name: Bug Report
+description: Report a broken command, failed verification, or agent compatibility issue in sadskill
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue with `sadskill`! Please provide details to help us reproduce and fix it.
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Target Agent Environment
+      description: Which coding agent was active when the issue occurred?
+      options:
+        - Claude Code
+        - OpenAI Codex / ChatGPT Desktop
+        - Cursor
+        - Google Antigravity
+        - Other / CLI
+    validations:
+      required: true
+  - type: dropdown
+    id: command
+    attributes:
+      label: Active Workflow Command
+      description: Which workflow or command was triggered?
+      options:
+        - "/sad-plan"
+        - "/sad-design"
+        - "/sad-backend"
+        - "/sad-sec"
+        - "/sad-analyze"
+        - "install.sh / uninstall.sh"
+        - "scripts/verify.py"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Describe the steps taken before the error occurred.
+      placeholder: |
+        1. Run `npx skills add sadafbabu/sadskill`
+        2. Trigger `/sad-plan src/auth`
+        3. Observe error output...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal Logs & Error Output
+      description: Paste terminal output, error traces, or verification logs.
+      render: shell

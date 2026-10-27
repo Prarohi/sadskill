@@ -39,3 +39,33 @@ The following database queries cause irreversible data loss and must never be ru
      - The specific files or tables affected.
      - The recovery options.
      - Await explicit user confirmation (`yes`) before proceeding.
+
+---
+
+## ⚙️ Programmatic Enforcement: `scripts/git-guardrail.sh`
+
+`sadskill` provides an executable OS-level hook script at `scripts/git-guardrail.sh` that intercepts dangerous commands and terminates with exit code 2 before they run.
+
+### Setup for Claude Code (`.claude/settings.json`)
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/git-guardrail.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Setup for Git Pre-Push Hook (`.git/hooks/pre-push`)
+```bash
+ln -s ../../scripts/git-guardrail.sh .git/hooks/pre-push
+```

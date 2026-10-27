@@ -7,7 +7,7 @@ Thank you for contributing to `sadskill`! Our goal is to maintain a unified, hig
 1. **One Frontmatter Rule**: Only the root skill `skills/sadskill/SKILL.md` exposes top-level YAML frontmatter with `name: sadskill`. Vendored skills must have neutralized frontmatter (`*.ref.md` or comment blocks) so agents do not discover hundreds of separate skills.
 2. **Neutral Defaults**: Defaults are strict, modern engineering standards. Zero personal preferences, machine paths, or specific username configurations belong in the repository. Personal preferences belong in the user's local `~/.sadskill/profile.md`.
 3. **Human Voice**: Prompts and protocols must enforce crisp, natural, BS-free language. Never use AI filler words (e.g. "delve", "seamless", "in summary", "testament").
-4. **License Compliance**: Every vendored or referenced work must be credited in `THIRD_PARTY.md` with its original license. Only permissively licensed works (MIT, Apache 2.0, BSD, CC-BY) are vendored in-tree.
+4. **License Compliance**: Every vendored or referenced work must be credited in `THIRD_PARTY.md` with its original license. Only permissively licensed works or open documentation standards (MIT, Apache-2.0, BSD, CC-BY, CC-BY-SA 4.0 for security standards like OWASP) are vendored in-tree.
 
 ## Adding a New Mode or Workflow
 

@@ -1,19 +1,20 @@
 # `/sad-sec`
 
-Execute the `security` workflow of `sadskill`.
+Execute the `security` workflow of `sadskill` on target scope: $ARGUMENTS
+*(Invocation: `/sad-sec` or `/prompts:sad-sec`)*
 
 ## Instructions
-1. Load and adhere to `sadskill`:
-   - Inspect `.sad/` project memory (`.sad/reports/`).
-   - Respect local profile if configured (`~/.sadskill/profile.md`).
-   - Enforce the Human-Voice protocol.
-2. Follow `skills/sadskill/modes/security.md`:
-   - Perform comprehensive vulnerability audit:
-     - OWASP Top 10 Web & API issues (injection, broken auth, IDOR, SSRF).
-     - Hardcoded secrets, API keys, credentials, and git history leaks.
-     - Dependency audit (`npm audit`, `pip check`, `cargo audit`).
-     - Security headers, Content Security Policy (CSP), CORS, cookie flags.
-     - 15-point application launch legal and privacy compliance checklist.
-   - Write structured findings to `.sad/reports/security-<YYYY-MM-DD>.md`.
-   - Provide prioritized remediation plan (Critical -> High -> Medium -> Low).
-   - Await user approval before modifying code.
+1. **Locate sadskill Configuration**:
+   - Check local workspace: `./skills/sadskill/SKILL.md` (or global `~/.codex/skills/sadskill/SKILL.md`).
+   - Check `.sad/reports/` for prior audit baselines.
+   - Strictly Read-Only: Never mutate production code or execute writes during an audit.
+2. **Comprehensive Security & Legal Audit**:
+   - OWASP Top 10 Web & API: SQL/command injection, broken auth, IDOR, SSRF, mass assignment.
+   - Secret & Token Exposure: Scan for private keys, provider API tokens, hardcoded credentials.
+   - Dependency Vulnerability Scan: `npm audit`, `pip audit`, `cargo audit` (gracefully flag `[SKIPPED - OFFLINE]` if network times out).
+   - Security Headers & Cookies: CSP, HSTS, `X-Content-Type-Options: nosniff`, `SameSite=Lax/Strict`, `Secure`.
+   - 15-Point Launch Legal & Compliance Checklist: Privacy policy, terms, GDPR erasure, cookie banner conformance.
+3. **Collision-Proof Reporting & Remediation Gate**:
+   - Save report to `.sad/reports/security-<YYYY-MM-DD>-<HHMMSS>.md`.
+   - Rank findings strictly by severity (Critical -> High -> Medium -> Low).
+   - Stop and await explicit user approval before executing any remediation fixes.

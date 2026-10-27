@@ -44,7 +44,7 @@ Analyze mode conducts deep architectural discovery, module coupling assessment, 
    - Dependency Mermaid diagram.
    - High-impact architectural findings categorized by severity.
    - Concrete, phased recommendations.
-2. Save the report to `.sad/reports/analysis-<YYYY-MM-DD>.md`.
+2. Save the report to `.sad/reports/analysis-<YYYY-MM-DD>-<HHMMSS>.md` (or append `-2.md` to prevent overwriting prior runs on the same date).
 3. Conclude with immediate next actions:
    - Propose `/sad-plan` to execute architectural refactors.
    - Propose `/sad-sec` if security vulnerabilities were observed.
