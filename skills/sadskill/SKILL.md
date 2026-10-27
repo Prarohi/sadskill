@@ -64,6 +64,18 @@ Regardless of the active mode, every agent turn must honor these invariants:
 - Never modify MCP configurations or attempt automated installation of unverified MCP plugins.
 - Read protocol details in [protocols/mcp.md](protocols/mcp.md).
 
+### 6. Maximum Token Efficiency & Progressive Disclosure
+- Maximize information density: deliver findings in structured tables, concise bullets, and diff boundaries.
+- Never paste entire manuals, long transcripts, or raw file dumps into conversation context. Load only the targeted rule or slice needed.
+- Write extensive plans and reports to `.sad/plans/` and `.sad/reports/`, outputting a 5-10 line executive summary and relative file link in chat.
+- Batch code edits into contiguous replacements rather than piecemeal roundtrips.
+- Read protocol details in [protocols/output-style.md](protocols/output-style.md).
+
+### 7. Destructive Action Guardrails
+- Autonomous agents must never execute destructive operations (`git reset --hard`, `git push --force`, `git clean -fd`, `DROP TABLE`, `TRUNCATE`) without an explicit user approval gate.
+- Prefer non-destructive workflows (`git stash`, reversible migrations, transaction rollbacks).
+- Read protocol details in [protocols/safety.md](protocols/safety.md).
+
 ---
 
 ## 📚 Ecosystem & Vendor References

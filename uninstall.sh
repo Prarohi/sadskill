@@ -28,6 +28,20 @@ if [[ -d "${HOME}/.claude/skills/sadskill" ]]; then
   echo "   [OK] Removed from Claude"
 fi
 
+# Antigravity removal
+if [[ -d "${HOME}/.gemini/antigravity/skills/sadskill" ]]; then
+  echo "-> Removing from Google Antigravity..."
+  rm -rf "${HOME}/.gemini/antigravity/skills/sadskill"
+  echo "   [OK] Removed from Antigravity"
+fi
+
+# Cursor removal
+if [[ -f "${PWD}/.cursor/rules/sadskill.mdc" ]]; then
+  echo "-> Removing Cursor workspace rule..."
+  rm -f "${PWD}/.cursor/rules/sadskill.mdc"
+  echo "   [OK] Removed .cursor/rules/sadskill.mdc"
+fi
+
 if [[ "${1:-}" == "--purge" ]]; then
   echo "-> Purging ~/.sadskill directory..."
   rm -rf "${HOME}/.sadskill"

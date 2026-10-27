@@ -40,3 +40,7 @@ Use this index to look up targeted engineering and design patterns. Only load th
 | **Structuring issues & task tracking** | Workflow | [linear/linear-issue-workflow.ref.md](linear/linear-issue-workflow.ref.md) | Actionable titles, explicit acceptance criteria, atomic scope. |
 | **Automating iOS simulator testing** | Mobile QA | [ios/ios-simulator.ref.md](ios/ios-simulator.ref.md) | `xcrun simctl` automation, touch targets, safe area insets. |
 | **Craftsmanship & minimalist tooling** | Engineering Culture | [waza/craftsmanship.ref.md](waza/craftsmanship.ref.md) | Extreme thoroughness, minimal dependencies, calm tooling. |
+| **Multi-model consensus & debate** | Architecture | [octopus/multi-model-consensus.ref.md](octopus/multi-model-consensus.ref.md) | Adversarial red-teaming for high blast-radius trade-offs. |
+| **Agent discipline & verification proof** | Verification | [octopus/discipline-mode.ref.md](octopus/discipline-mode.ref.md) | Zero-trust terminal execution proof before declaring fix. |
+| **Core Web Vitals & real performance** | Frontend Performance | [addyosmani/web-vitals.ref.md](addyosmani/web-vitals.ref.md) | LCP < 2.5s, CLS < 0.1, INP < 200ms, preloads & yield. |
+| **Systems design & fault tolerance** | Distributed Systems | [integralist/systems-design.ref.md](integralist/systems-design.ref.md) | Decoupled domain boundaries, circuit breakers, jitter retries. |

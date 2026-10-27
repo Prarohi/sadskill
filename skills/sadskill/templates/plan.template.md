@@ -22,30 +22,52 @@ flowchart TD
 
 ---
 
-## 3. Discrete Implementation Phases
+## 3. Contract-First AST Signatures
+
+```typescript
+// Pre-declare exact types and function signatures BEFORE implementation
+export interface FeatureInput {
+  readonly id: string;
+  readonly payload: Record<string, unknown>;
+}
+
+export interface FeatureOutput {
+  readonly success: boolean;
+  readonly result?: Record<string, unknown>;
+  readonly error?: { code: string; message: string };
+}
+
+export function executeFeature(input: FeatureInput): Promise<FeatureOutput>;
+```
+
+---
+
+## 4. Discrete Implementation Phases
 
 ### Phase 1: [Phase Name]
-- **Files Modified/Created**:
-  - `path/to/file.ts` (symbols: `FunctionName`, `InterfaceName`)
-- **Detailed Changes**:
+- **Target File**: `path/to/file.ts`
+- **Action**: `CREATE` | `MODIFY` | `DELETE`
+- **Target Symbols**: `FunctionName`, `InterfaceName`
+- **Contiguous Edits**:
   - [Step-by-step technical instructions]
 
 ### Phase 2: [Phase Name]
-- **Files Modified/Created**:
-  - `path/to/second_file.ts`
-- **Detailed Changes**:
+- **Target File**: `path/to/second_file.ts`
+- **Action**: `CREATE` | `MODIFY` | `DELETE`
+- **Target Symbols**: `FunctionName`
+- **Contiguous Edits**:
   - [Step-by-step technical instructions]
 
 ---
 
-## 4. Edge Cases & Boundary Handling
+## 5. Edge Cases & Boundary Handling
 - [Edge Case 1: Empty input / Null handling]
 - [Edge Case 2: Concurrency / Race conditions]
 - [Edge Case 3: Network timeout / Failure mode]
 
 ---
 
-## 5. Verification Record (Automated Test Plan)
+## 6. Verification Record (Automated Test Plan)
 - **Automated Test Commands**:
   ```bash
   npm test
@@ -58,5 +80,5 @@ flowchart TD
 
 ---
 
-## 6. Rollback Strategy
+## 7. Rollback Strategy
 - [Specific Git revert command or reversible migration down.sql instructions]

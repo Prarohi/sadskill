@@ -18,6 +18,7 @@
 | **Marketing Skills** | [coreyhaines31/marketingskills](https://github.com/coreyhaines31/marketingskills) | MIT | Neutralized reference (`*.ref.md`) |
 | **OpenAI Skills** | [openai/skills](https://github.com/openai/skills) | MIT | Neutralized reference (`*.ref.md`) |
 | **iOS Simulator Skill** | [conorluddy/ios-simulator-skill](https://github.com/conorluddy/ios-simulator-skill) | MIT | Neutralized reference (`*.ref.md`) |
+| **Claude-Octopus** | [nyldn/claude-octopus](https://github.com/nyldn/claude-octopus) | MIT | Neutralized reference (`*.ref.md`) |
 | **Cloudflare Skills** | [cloudflare/skills](https://github.com/cloudflare/skills) | MIT / Apache-2.0 | Neutralized reference (`*.ref.md`) |
 | **Waza Craftsmanship** | [tw93/Waza](https://github.com/tw93/Waza) | MIT | Neutralized reference (`*.ref.md`) |
 | **Addy Osmani Skills** | [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) | Apache-2.0 | Neutralized reference (`*.ref.md`) |

@@ -30,11 +30,12 @@ Security mode conducts exhaustive vulnerability assessments, secret detection, d
 - Verify that `.env*` files containing secrets are present in `.gitignore`.
 
 #### 3. Dependency Vulnerability Audit
-- Run package manager vulnerability checks when available:
+- Run package manager vulnerability checks when network access is available:
   - Node: `npm audit` / `pnpm audit`
   - Python: `pip audit` / `pip check`
   - Rust: `cargo audit`
   - Go: `govulncheck`
+- In offline or air-gapped environments where network registries time out, catch failures gracefully, mark dependency scan as `[SKIPPED - OFFLINE]`, and proceed with static AST and secret checks without failing.
 
 #### 4. Security Headers & Cookie Flags
 - Verify presence of essential response headers:

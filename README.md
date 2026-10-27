@@ -86,7 +86,16 @@ AI responses frequently suffer from repetitive cliches, faux enthusiasm, and ver
 ### 3. Grilling on Ambiguity
 Before making irreversible assumptions or complex architectural choices, `sadskill` grills the user with concise multiple-choice questions, always providing a sensible recommended default.
 
-### 4. Per-User Local Profile (`~/.sadskill/profile.md`)
+### 4. Maximum Token Efficiency & AST Contracts
+Autonomous agents burn excessive tokens on trial-and-error editing loops. `sadskill` prevents this:
+- **Contract-First AST Planning**: Function signatures, argument types, return types, and interfaces are defined before modifying code.
+- **Progressive Disclosure**: Plans and reports are written to disk (`.sad/plans/`, `.sad/reports/`), outputting only a concise 5-10 line executive summary and link to chat.
+- **Batched Replacements**: Code edits are grouped into contiguous chunks rather than repeated piecemeal roundtrips.
+
+### 5. Destructive Action Guardrails
+Autonomous agents are strictly blocked from running irreversible commands (`git reset --hard`, `git push --force`, `git clean -fd`, `DROP TABLE`, `TRUNCATE`) without an explicit user approval gate.
+
+### 6. Per-User Local Profile (`~/.sadskill/profile.md`)
 Personal communication preferences, favorite frameworks, or localized language guidelines never belong in git. You can create an optional local profile on your workstation:
 ```bash
 cp skills/sadskill/templates/profile.template.md ~/.sadskill/profile.md

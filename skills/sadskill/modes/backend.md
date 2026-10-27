@@ -40,7 +40,14 @@ Backend mode enforces schema-first engineering, reversible migrations, zero-trus
    - Composite indexes: Order equality columns first (`status = 'active'`), then range columns (`created_at > ...`).
    - Partial indexes: Use `WHERE deleted_at IS NULL` or `WHERE is_active = true` to keep index trees compact.
    - JSONB / Search: Use `GIN` index for containment (`@>`) or full-text search.
-2. Run `EXPLAIN (ANALYZE, BUFFERS)` to verify index scans over sequential scans on large tables.
+2. **Safe Query Performance Analysis**:
+   - For read queries (`SELECT`): Run `EXPLAIN (ANALYZE, BUFFERS)` to verify index scans over sequential scans on large tables.
+   - For write queries (`INSERT`, `UPDATE`, `DELETE`): Never run `ANALYZE` bare, as it executes mutations. Use `EXPLAIN (BUFFERS)` without `ANALYZE` or wrap inside a transaction rollback:
+     ```sql
+     BEGIN;
+     EXPLAIN (ANALYZE, BUFFERS) DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '90 days';
+     ROLLBACK;
+     ```
 
 ### Phase 5: API Contracts & Integration Tests
 1. Validate all request payloads using runtime schemas (e.g. Zod, Pydantic).

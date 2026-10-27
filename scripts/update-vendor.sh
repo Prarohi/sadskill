@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENDOR_DIR="${SCRIPT_DIR}/../vendor"
+VENDOR_DIR="${SCRIPT_DIR}/../skills/sadskill/vendor"
 
 echo "=== sadskill vendor refresh ==="
 echo "Checking vendor directories in ${VENDOR_DIR}..."

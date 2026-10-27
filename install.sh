@@ -5,6 +5,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_AGENT="${1:-auto}"
 
+if [[ "$TARGET_AGENT" == "-h" || "$TARGET_AGENT" == "--help" ]]; then
+  echo "Usage: ./install.sh [--agent <agent>]"
+  echo ""
+  echo "Agents:"
+  echo "  auto         Detect installed agents and configure them (default)"
+  echo "  codex        Configure for OpenAI Codex / ChatGPT Desktop (~/.codex)"
+  echo "  claude       Configure for Claude Code (~/.claude)"
+  echo "  cursor       Configure for Cursor (.cursor/rules)"
+  echo "  antigravity  Configure for Google Antigravity (~/.gemini/antigravity/skills)"
+  echo "  all          Configure for all supported agents"
+  exit 0
+fi
+
 if [[ "$TARGET_AGENT" == "--agent" && -n "${2:-}" ]]; then
   TARGET_AGENT="$2"
 fi
@@ -57,6 +70,18 @@ install_cursor() {
   echo "   [OK] Generated Cursor workspace rule at .cursor/rules/sadskill.mdc"
 }
 
+install_antigravity() {
+  local agy_dir="${HOME}/.gemini/antigravity"
+  local skills_dir="${agy_dir}/skills"
+
+  echo "-> Configuring for Google Antigravity..."
+  mkdir -p "${skills_dir}"
+
+  rm -rf "${skills_dir}/sadskill"
+  cp -r "${SCRIPT_DIR}/skills/sadskill" "${skills_dir}/sadskill"
+  echo "   [OK] Installed to ${skills_dir}/sadskill"
+}
+
 # Ensure local profile directory exists
 mkdir -p "${HOME}/.sadskill"
 if [[ ! -f "${HOME}/.sadskill/profile.md" && -f "${SCRIPT_DIR}/skills/sadskill/templates/profile.template.md" ]]; then
@@ -73,10 +98,14 @@ case "$TARGET_AGENT" in
   cursor)
     install_cursor
     ;;
+  antigravity)
+    install_antigravity
+    ;;
   all)
     install_codex
     install_claude
     install_cursor
+    install_antigravity
     ;;
   auto)
     installed_count=0
@@ -88,6 +117,10 @@ case "$TARGET_AGENT" in
       install_claude
       installed_count=$((installed_count + 1))
     fi
+    if [[ -d "${HOME}/.gemini/antigravity" ]]; then
+      install_antigravity
+      installed_count=$((installed_count + 1))
+    fi
     if [[ $installed_count -eq 0 ]]; then
       echo "No existing agent directory found. Installing to standard Codex and Claude locations..."
       install_codex
@@ -95,7 +128,7 @@ case "$TARGET_AGENT" in
     fi
     ;;
   *)
-    echo "Unknown agent: $TARGET_AGENT (valid options: auto, codex, claude, cursor, all)"
+    echo "Unknown agent: $TARGET_AGENT (valid options: auto, codex, claude, cursor, antigravity, all)"
     exit 1
     ;;
 esac

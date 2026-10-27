@@ -102,6 +102,7 @@ class VerificationSuite:
             "output-style.md",
             "mcp.md",
             "profile.md",
+            "safety.md",
         ]
         for proto in expected_protocols:
             path = SKILL_DIR / "protocols" / proto

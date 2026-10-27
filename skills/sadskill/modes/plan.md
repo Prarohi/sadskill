@@ -7,11 +7,17 @@ Plan mode conducts **intense upfront specification** and creates deterministic, 
 ## ⚡ The Zero-Waste / High-Density Philosophy
 
 1. **Intense Upfront Planning Saves 80% of Downstream Tokens**:
+   - Speculative code patching is the #1 token waster in autonomous agents. When an agent edits code without knowing exact signatures, it enters a 3-5 turn error cycle fixing imports, type errors, and missing parameters.
    - 10 minutes spent nailing the exact types, data flows, edge cases, and test assertions upfront prevents hours of trial-and-error edits and circular error loops.
-2. **Maximum Information Density**:
+2. **Contract-First AST Planning**:
+   - Every modified or created function, method, interface, and type must have its full signature declared before any implementation starts.
+   - Declare exact parameter names, parameter types, return types, generic bounds, and error types.
+   - For external dependencies, inspect their installed definitions (`node_modules`, `venv`, cargo docs) to prevent hallucinated API calls.
+3. **Maximum Information Density**:
    - Avoid conversational prose, narrative essays, or repetitive summaries. Use structured tables, compact Mermaid graphs, and explicit file:symbol contracts.
-3. **Progressive Disclosure**:
+4. **Progressive Disclosure**:
    - Do not dump all vendor references into context. Inspect [vendor/INDEX.md](../vendor/INDEX.md) and load only the single reference file relevant to the immediate sub-problem.
+   - Extensive plans are written to `.sad/plans/` rather than flooded into chat context. The chat receives only an executive summary and file link.
 
 ---
 
@@ -38,25 +44,32 @@ Plan mode conducts **intense upfront specification** and creates deterministic, 
 The plan written to `.sad/plans/<YYYY-MM-DD>-<slug>.md` must follow [templates/plan.template.md](../templates/plan.template.md) with extreme precision:
 1. **User Value & Concrete Outcome**: Single high-density paragraph.
 2. **Architecture & Data Flow**: Compact Mermaid diagram showing components, boundaries, and dependencies.
-3. **File-by-File Mutation Matrix**:
+3. **Contract-First AST Signatures**:
+   - Explicit TypeScript/Python/Rust type definitions and interfaces for all new and touched entities.
+   - Exact function signatures: arguments, types, return types, throws/errors.
+4. **File-by-File Mutation Matrix**:
    - Target File Path (absolute or repo-relative).
    - Action: `CREATE`, `MODIFY`, or `DELETE`.
-   - Exact signatures: function arguments, return types, interfaces, error types.
+   - Exported symbols impacted and contiguous replacement boundaries.
    - Contiguous chunk strategy: batched edits to avoid piecemeal rewrites.
-4. **Exhaustive Boundary & Edge Case Analysis**:
+5. **Exhaustive Boundary & Edge Case Analysis**:
    - Zero/empty inputs (`[]`, `""`, `0`, `null`).
    - Boundary limits, overflow, concurrency, race conditions.
    - External failure modes: timeouts, network drops, auth token expiration, rate limits.
-5. **Test-First Verification Harness**:
+6. **Test-First Verification Harness**:
    - Exact test commands to execute (e.g. `npm test -- <path>`).
    - Specific assertions proving both the happy path and edge cases.
-6. **Rollback & Recovery Plan**:
+7. **Rollback & Recovery Plan**:
    - Step-by-step instructions to revert code and database migrations cleanly if verification fails.
 
-### Phase 4: Approval Gate
-1. Write the completed plan to `.sad/plans/<YYYY-MM-DD>-<feature-slug>.md`.
-2. Output a 3-bullet high-density summary in the chat with the relative link to the file.
-3. Stop tool execution and await user approval before writing production code.
+### Phase 4: Approval Gate & Progressive Disclosure
+1. Write the completed exhaustive plan to `.sad/plans/<YYYY-MM-DD>-<feature-slug>.md`.
+2. Output a **compact executive summary** (5-10 lines max) in the chat:
+   - 1-2 sentence summary of goal and approach.
+   - Markdown table of files to create/modify.
+   - Verification command.
+   - Relative link to the plan markdown: `[Read Full Plan (.sad/plans/<filename>.md)]`.
+3. Stop tool execution and await explicit user approval before writing production code.
 
 ---
 

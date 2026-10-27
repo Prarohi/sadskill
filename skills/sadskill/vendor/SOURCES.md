@@ -24,3 +24,6 @@ All vendored reference documents in `skills/sadskill/vendor/` are curated adapta
 | **Linear Skills** | OpenAI Skills catalog | OpenAI / Linear | MIT | `linear/linear-issue-workflow.ref.md` |
 | **iOS Simulator Skill** | https://github.com/conorluddy/ios-simulator-skill | Conor Luddy | MIT | `ios/ios-simulator.ref.md` |
 | **Waza** | https://github.com/tw93/Waza | tw93 | MIT | `waza/craftsmanship.ref.md` |
+| **Claude-Octopus** | https://github.com/nyldn/claude-octopus | nyldn | MIT | `octopus/*.ref.md` |
+| **Addy Osmani Skills** | https://github.com/addyosmani/agent-skills | Addy Osmani | Apache-2.0 | `addyosmani/*.ref.md` |
+| **Integralist Skills** | https://github.com/Integralist/agent-skills | Integralist | Apache-2.0 | `integralist/*.ref.md` |
