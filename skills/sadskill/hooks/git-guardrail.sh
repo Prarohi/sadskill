@@ -16,7 +16,8 @@ IS_GIT_PRE_PUSH="false"
 if [[ -n "$INPUT" ]]; then
   # 1. Check if input is a Git pre-push ref-update stream:
   # Lines format: <local_ref> <local_oid> <remote_ref> <remote_oid>
-  if echo "$INPUT" | grep -qE '^refs/[^ ]+[[:space:]]+[0-9a-f]{40}[[:space:]]+refs/[^ ]+[[:space:]]+[0-9a-f]{40}'; then
+  # Note: local_ref may be 'refs/heads/...', '(delete)', any non-whitespace string, or omitted (leading space)
+  if echo "$INPUT" | grep -qE '^[[:space:]]*([^[:space:]]+[[:space:]]+)?[0-9a-f]{40}[[:space:]]+refs/[^[:space:]]+[[:space:]]+[0-9a-f]{40}'; then
     IS_GIT_PRE_PUSH="true"
   elif echo "$INPUT" | grep -q '"tool_input"'; then
     # 2. Structured Claude Code PreToolUse JSON extraction via Python
@@ -39,6 +40,13 @@ except Exception:
   fi
 fi
 
+# Detect git pre-push invocations via standard git hook arguments ($1: remote, $2: url)
+if [[ "$IS_GIT_PRE_PUSH" != "true" && $# -ge 2 ]]; then
+  if [[ "$2" =~ ^(https?|git|ssh|file):// || "$2" =~ ^git@ || "$2" =~ \.git$ || "$1" =~ ^(origin|upstream)$ ]]; then
+    IS_GIT_PRE_PUSH="true"
+  fi
+fi
+
 if [[ -z "$COMMAND" && "$IS_GIT_PRE_PUSH" != "true" && $# -gt 0 ]]; then
   COMMAND="$*"
 fi
@@ -46,10 +54,33 @@ fi
 # Handle Git pre-push ref update inspection
 if [[ "$IS_GIT_PRE_PUSH" == "true" ]]; then
   ZERO_OID="0000000000000000000000000000000000000000"
-  while read -r local_ref local_oid remote_ref remote_oid; do
+  while IFS= read -r line; do
+    [[ -z "${line// /}" ]] && continue
+    read -r -a tokens <<< "$line"
+    local_ref=""
+    local_oid=""
+    remote_ref=""
+    remote_oid=""
+
+    if [[ ${#tokens[@]} -eq 3 ]]; then
+      # 3 tokens: <local_oid> <remote_ref> <remote_oid> (empty local_ref)
+      local_ref=""
+      local_oid="${tokens[0]}"
+      remote_ref="${tokens[1]}"
+      remote_oid="${tokens[2]}"
+    elif [[ ${#tokens[@]} -ge 4 ]]; then
+      # 4 tokens: <local_ref> <local_oid> <remote_ref> <remote_oid>
+      local_ref="${tokens[0]}"
+      local_oid="${tokens[1]}"
+      remote_ref="${tokens[2]}"
+      remote_oid="${tokens[3]}"
+    else
+      continue
+    fi
+
     # Destructive remote branch deletion check
-    if [[ "$local_oid" == "$ZERO_OID" ]]; then
-      if [[ "$remote_ref" =~ refs/heads/(main|master|release|prod) ]]; then
+    if [[ "$local_oid" == "$ZERO_OID" || "$local_ref" == "(delete)" ]]; then
+      if [[ "$remote_ref" =~ refs/heads/(main|master|release|prod|production)$ ]]; then
         echo "BLOCKED: Force deletion of protected remote branch detected: $remote_ref" >&2
         echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
         exit 2
@@ -58,11 +89,13 @@ if [[ "$IS_GIT_PRE_PUSH" == "true" ]]; then
 
     # Non-fast-forward / force push verification via git merge-base if repository available
     if [[ "$remote_oid" != "$ZERO_OID" && "$local_oid" != "$ZERO_OID" ]]; then
-      if git rev-parse --verify "$remote_oid" >/dev/null 2>&1 && git rev-parse --verify "$local_oid" >/dev/null 2>&1; then
-        if ! git merge-base --is-ancestor "$remote_oid" "$local_oid" 2>/dev/null; then
-          echo "BLOCKED: Non-fast-forward (force push) detected for ref $remote_ref." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
+      if [[ "$remote_ref" =~ refs/heads/(main|master|release|prod|production)$ ]]; then
+        if git rev-parse --verify "$remote_oid" >/dev/null 2>&1 && git rev-parse --verify "$local_oid" >/dev/null 2>&1; then
+          if ! git merge-base --is-ancestor "$remote_oid" "$local_oid" 2>/dev/null; then
+            echo "BLOCKED: Non-fast-forward (force push) detected for protected branch $remote_ref." >&2
+            echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+            exit 2
+          fi
         fi
       fi
     fi

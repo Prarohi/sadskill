@@ -77,6 +77,18 @@ fi
 
 mkdir -p "${HOME}/.sadskill"
 
+# Generate collision-safe backup paths with PID and timestamp
+make_backup_path() {
+  local target="$1"
+  local ts
+  ts="$(date +%Y%m%d%H%M%S)_$$"
+  local bak="${target}.bak.${ts}"
+  while [[ -e "$bak" ]]; do
+    bak="${target}.bak.${ts}_${RANDOM}"
+  done
+  echo "$bak"
+}
+
 # Manifest tracker using robust python helper
 record_manifest_entry() {
   local agent="$1"
@@ -112,7 +124,8 @@ backup_and_install_skill() {
         echo "   [DRY-RUN] Would remove existing: ${dest}"
       fi
     else
-      local backup="${dest}.bak.$(date +%Y%m%d%H%M%S)"
+      local backup
+      backup="$(make_backup_path "$dest")"
       echo "   [INFO] Preserving existing installation at ${backup}"
       if [[ "$DRY_RUN" != "true" ]]; then
         mv "$dest" "$backup"
@@ -147,7 +160,7 @@ install_codex() {
       local target_cmd="${prompts_dir}/$(basename "$cmd")"
       local cmd_backup=""
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
-        cmd_backup="${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+        cmd_backup="$(make_backup_path "$target_cmd")"
         if [[ "$DRY_RUN" != "true" ]]; then
           mv "$target_cmd" "$cmd_backup"
         fi
@@ -181,7 +194,7 @@ install_claude() {
       local target_cmd="${commands_dir}/$(basename "$cmd")"
       local cmd_backup=""
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
-        cmd_backup="${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
+        cmd_backup="$(make_backup_path "$target_cmd")"
         if [[ "$DRY_RUN" != "true" ]]; then
           mv "$target_cmd" "$cmd_backup"
         fi
@@ -199,7 +212,7 @@ install_claude() {
   local guardrail_target="${hooks_dir}/git-guardrail.sh"
   local hook_backup=""
   if [[ -f "$guardrail_target" && "$NO_BACKUP" != "true" ]] && ! cmp -s "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "$guardrail_target"; then
-    hook_backup="${guardrail_target}.bak.$(date +%Y%m%d%H%M%S)"
+    hook_backup="$(make_backup_path "$guardrail_target")"
     echo "   [INFO] Preserving existing Claude hook at ${hook_backup}"
     if [[ "$DRY_RUN" != "true" ]]; then
       mv "$guardrail_target" "$hook_backup"
@@ -233,7 +246,7 @@ install_cursor() {
 
   local skill_backup=""
   if [[ -d "$target_skill_dir" && "$NO_BACKUP" != "true" ]]; then
-    skill_backup="${target_skill_dir}.bak.$(date +%Y%m%d%H%M%S)"
+    skill_backup="$(make_backup_path "$target_skill_dir")"
     echo "   [INFO] Preserving existing Cursor skill directory at ${skill_backup}"
     if [[ "$DRY_RUN" != "true" ]]; then
       mv "$target_skill_dir" "$skill_backup"
@@ -246,7 +259,7 @@ install_cursor() {
 
   if [[ "$DRY_RUN" != "true" ]]; then
     mkdir -p "${rules_dir}" "${target_skill_dir}"
-    cp -r "${SCRIPT_DIR}/skills/sadskill/"* "${target_skill_dir}/"
+    cp -r "${SCRIPT_DIR}/skills/sadskill/." "${target_skill_dir}/"
   else
     echo "   [DRY-RUN] Would create ${rules_dir} and ${target_skill_dir}"
   fi
@@ -255,7 +268,7 @@ install_cursor() {
   local rule_file="${rules_dir}/sadskill.mdc"
   local rule_backup=""
   if [[ -f "$rule_file" && "$NO_BACKUP" != "true" ]]; then
-    rule_backup="${rule_file}.bak.$(date +%Y%m%d%H%M%S)"
+    rule_backup="$(make_backup_path "$rule_file")"
     if [[ "$DRY_RUN" != "true" ]]; then
       mv "$rule_file" "$rule_backup"
     fi

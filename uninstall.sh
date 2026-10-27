@@ -19,12 +19,15 @@ Options:
   -t, --target <dir>     Target project directory for Cursor removal (default: current working dir)
       --restore-previous Restore original files from .bak timestamp archives if available
       --clean-backups    Remove .bak timestamp archives created by sadskill
+  -f, --force            Force removal or restoration of files even if modified since installation
       --dry-run          Preview actions without modifying or removing files
       --purge            Remove ~/.sadskill user profile directory
   -h, --help             Show this help message and exit
 EOF
   exit "$exit_code"
 }
+
+FORCE="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --restore-previous)
       RESTORE_PREVIOUS="true"
+      shift
+      ;;
+    -f|--force)
+      FORCE="true"
       shift
       ;;
     --purge)
@@ -77,6 +84,9 @@ if [[ -f "$MANIFEST_FILE" ]]; then
   fi
   if [[ "$CLEAN_BACKUPS" == "true" ]]; then
     opts+=(--clean-backups)
+  fi
+  if [[ "$FORCE" == "true" ]]; then
+    opts+=(--force)
   fi
   if [[ "$DRY_RUN" == "true" ]]; then
     opts+=(--dry-run)

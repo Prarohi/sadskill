@@ -243,10 +243,20 @@ class VerificationSuite:
         res_json = subprocess.run(["bash", str(hook)], input=json_payload, text=True, capture_output=True)
         self.assert_true(res_json.returncode == 2, f"Claude Code JSON destructive payload blocked with exit 2 (got {res_json.returncode})")
 
-        # 2. Git pre-push hook ref-update stream deletion
+        # 2. Git pre-push hook ref-update stream deletion (standard ref update format)
         pre_push_payload = "refs/heads/main 0000000000000000000000000000000000000000 refs/heads/main 1111111111111111111111111111111111111111\n"
         res_ref = subprocess.run(["bash", str(hook)], input=pre_push_payload, text=True, capture_output=True)
         self.assert_true(res_ref.returncode == 2, f"Git pre-push branch deletion of protected ref blocked with exit 2 (got {res_ref.returncode})")
+
+        # 2b. Git pre-push hook deletion via (delete) token format
+        pre_push_del = "(delete) 0000000000000000000000000000000000000000 refs/heads/main 1111111111111111111111111111111111111111\n"
+        res_del = subprocess.run(["bash", str(hook)], input=pre_push_del, text=True, capture_output=True)
+        self.assert_true(res_del.returncode == 2, f"Git pre-push (delete) ref format for protected branch blocked with exit 2 (got {res_del.returncode})")
+
+        # 2c. Git pre-push hook deletion via 3-token / empty local_ref format (e.g. git push origin :main)
+        pre_push_empty_local = " 0000000000000000000000000000000000000000 refs/heads/main 1111111111111111111111111111111111111111\n"
+        res_empty = subprocess.run(["bash", str(hook)], input=pre_push_empty_local, text=True, capture_output=True)
+        self.assert_true(res_empty.returncode == 2, f"Git pre-push empty local_ref format for protected branch blocked with exit 2 (got {res_empty.returncode})")
 
         # 3. Benign commit message containing dangerous phrase
         commit_msg_cmd = 'git commit -m "fix git reset --hard issue in docs"'
@@ -396,6 +406,83 @@ class VerificationSuite:
                 f"verify-evidence --retest rejected untrusted -c flag (got exit {res_untrusted.returncode})",
             )
 
+        # 5b. Arbitrary repository script rejected in --retest without trusted recipe (P0 safety)
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            arbitrary_script = Path(proj_dir) / "evil.py"
+            arbitrary_script.write_text("print('pwned')", encoding="utf-8")
+            evil_record = {
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "arbitrary-script",
+                "command": "python3 evil.py",
+                "exit_code": 0,
+                "summary": "arbitrary script record",
+                "files_touched": ["evil.py"],
+            }
+            (ev_dir / "evil.json").write_text(json.dumps(evil_record), encoding="utf-8")
+            res_evil = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir, "--retest"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_evil.returncode == 1,
+                f"verify-evidence --retest rejected arbitrary script execution (got exit {res_evil.returncode})",
+            )
+
+        # 5c. Trusted recipe (recipe_id) accepted and executed in --retest
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            (Path(proj_dir) / "test_sample.py").write_text("import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n", encoding="utf-8")
+            recipe_record = {
+                "schema_version": "1.0.0",
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "trusted-recipe-test",
+                "recipe_id": "python-unittest",
+                "command": "python3 -m unittest discover",
+                "exit_code": 0,
+                "summary": "trusted recipe discovery",
+                "files_touched": [],
+            }
+            (ev_dir / "recipe.json").write_text(json.dumps(recipe_record), encoding="utf-8")
+            res_recipe = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir, "--retest"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_recipe.returncode == 0,
+                f"verify-evidence --retest accepted trusted recipe (got exit {res_recipe.returncode})",
+            )
+
+        # 5d. Documentation-only task with status SKIPPED_WITH_REASON and exit_code null accepted without failure (T60)
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            doc_file = Path(proj_dir) / "README.md"
+            doc_file.write_text("# Doc update", encoding="utf-8")
+            docs_record = {
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "doc-update-task",
+                "command": "NONE",
+                "exit_code": None,
+                "status": "SKIPPED_WITH_REASON",
+                "summary": "Documentation update without executable test harness",
+                "files_touched": ["README.md"],
+            }
+            (ev_dir / "docs-task.json").write_text(json.dumps(docs_record), encoding="utf-8")
+            res_docs = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir, "--retest"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_docs.returncode == 0,
+                f"verify-evidence accepted docs-only task with status SKIPPED_WITH_REASON (got exit {res_docs.returncode})",
+            )
+
         # 6. Clean JSON output check (T26)
         with tempfile.TemporaryDirectory() as proj_dir:
             res_json = subprocess.run(
@@ -516,9 +603,15 @@ class VerificationSuite:
             found_baks = list(codex_prompts.glob("sad-plan.md.bak.*"))
             self.assert_true(len(found_baks) > 0, "Pre-existing prompt backed up upon installation")
 
-            # 5. Run Cursor per-project target installation
+            # 5. Seed pre-existing Cursor workspace skill with sentinel to test directory restore
             target_proj = Path(temp_dir) / "sample_project"
             target_proj.mkdir()
+            cursor_pre_skill = target_proj / ".cursor" / "skills" / "sadskill"
+            cursor_pre_skill.mkdir(parents=True)
+            cursor_sentinel = cursor_pre_skill / "sentinel.txt"
+            cursor_sentinel.write_text("CURSOR_SENTINEL_SURVIVES", encoding="utf-8")
+
+            # Run Cursor per-project target installation
             res_cur = subprocess.run(
                 ["bash", str(REPO_ROOT / "install.sh"), "--agent", "cursor", "--target", str(target_proj)],
                 cwd=str(REPO_ROOT),
@@ -544,7 +637,17 @@ class VerificationSuite:
             self.assert_true(res_gem.returncode == 0, "install.sh --agent gemini succeeded")
             self.assert_true((Path(temp_dir) / ".gemini" / "skills" / "sadskill").exists(), "Gemini CLI skill directory created in sandbox")
 
-            # 7. Test Doctor utility
+            # 7. Test reinstallation preserves original backup references
+            res_reinstall = subprocess.run(
+                ["bash", str(REPO_ROOT / "install.sh"), "all"],
+                cwd=str(REPO_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(res_reinstall.returncode == 0, "install.sh all reinstall succeeded in sandbox")
+
+            # 8. Test Doctor utility and --enable-hooks
             res_doc = subprocess.run(
                 [sys.executable, str(REPO_ROOT / "scripts" / "doctor.py"), "--json", "--target", str(target_proj)],
                 env=env,
@@ -555,16 +658,49 @@ class VerificationSuite:
             doc_data = json.loads(res_doc.stdout)
             self.assert_true(doc_data["cursor"]["status"] == "INSTALLED", "doctor correctly diagnosed Cursor as INSTALLED")
             self.assert_true(doc_data["antigravity_gemini"]["status"] == "INSTALLED", "doctor correctly diagnosed Gemini CLI / Antigravity as INSTALLED")
+            self.assert_true(doc_data["claude_hook"]["status"] == "AVAILABLE", "doctor correctly diagnosed Claude hook as AVAILABLE before registration")
 
-            # 8. Test uninstallation with --restore-previous (T01, T03, S01 fix)
-            res_un = subprocess.run(
-                ["bash", str(REPO_ROOT / "uninstall.sh"), "--restore-previous", "--clean-backups", "--target", str(target_proj)],
+            # Test opt-in hook registration via doctor --enable-hooks (P1-01, S10)
+            res_enable = subprocess.run(
+                [sys.executable, str(REPO_ROOT / "scripts" / "doctor.py"), "--enable-hooks", "--json", "--target", str(target_proj)],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(res_enable.returncode == 0, "doctor.py --enable-hooks executed successfully")
+            doc_data_act = json.loads(res_enable.stdout)
+            self.assert_true(doc_data_act["claude_hook"]["status"] == "ACTIVE", "doctor correctly diagnosed Claude hook as ACTIVE after --enable-hooks")
+
+            # 8b. Simulate user modifying an installed prompt to test conflict preservation (P0-01, P0-05, T05)
+            codex_backend = codex_prompts / "sad-backend.md"
+            self.assert_true(codex_backend.exists(), "Installed codex prompt exists")
+            codex_backend.write_text("USER_CUSTOM_BACKEND_MODIFICATIONS", encoding="utf-8")
+
+            # 9. Test uninstallation without --force (must refuse to overwrite/delete user-modified files)
+            res_un_noforce = subprocess.run(
+                ["bash", str(REPO_ROOT / "uninstall.sh"), "--restore-previous", "--target", str(target_proj)],
                 cwd=str(REPO_ROOT),
                 env=env,
                 capture_output=True,
                 text=True,
             )
-            self.assert_true(res_un.returncode == 0, "uninstall.sh --restore-previous succeeded cleanly")
+            self.assert_true(res_un_noforce.returncode == 0, "uninstall.sh without --force succeeded")
+            self.assert_true(codex_backend.exists(), "User-modified prompt preserved by conflict refusal")
+            if codex_backend.exists():
+                self.assert_true(
+                    codex_backend.read_text(encoding="utf-8") == "USER_CUSTOM_BACKEND_MODIFICATIONS",
+                    "User-modified prompt content untouched without --force",
+                )
+
+            # 9b. Test uninstallation with --force to remove/restore cleanly
+            res_un = subprocess.run(
+                ["bash", str(REPO_ROOT / "uninstall.sh"), "--restore-previous", "--clean-backups", "--force", "--target", str(target_proj)],
+                cwd=str(REPO_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(res_un.returncode == 0, "uninstall.sh --restore-previous --force succeeded cleanly")
 
             # CRITICAL ASSERTION: The restored file MUST exist and match original content byte-for-byte!
             self.assert_true(user_original_prompt.exists(), "Restored prompt exists after uninstallation")
@@ -574,13 +710,28 @@ class VerificationSuite:
                     "Restored prompt content matches original pre-sadskill bytes exactly",
                 )
 
+            # CRITICAL ASSERTION: Restored Claude hook must exist and match original content
+            self.assert_true(user_original_hook.exists(), "Restored Claude hook exists after uninstallation")
+            if user_original_hook.exists():
+                self.assert_true(
+                    "USER_ORIGINAL_HOOK" in user_original_hook.read_text(encoding="utf-8"),
+                    "Restored Claude hook matches original pre-sadskill bytes exactly",
+                )
+
+            # CRITICAL ASSERTION: Pre-existing Cursor directory sentinel must survive install and restore
+            self.assert_true(cursor_sentinel.exists(), "Pre-existing Cursor directory sentinel survived install and restore")
+            if cursor_sentinel.exists():
+                self.assert_true(
+                    cursor_sentinel.read_text(encoding="utf-8") == "CURSOR_SENTINEL_SURVIVES",
+                    "Pre-existing Cursor sentinel content survived cleanly",
+                )
+
             # CRITICAL ASSERTION: Unrelated backup MUST NOT be deleted (T04, S02 fix)
             self.assert_true(unrelated_backup.exists(), "Unrelated backup was NOT deleted by --clean-backups")
 
             # Clean removal of non-restored sadskill directories
             self.assert_true(not codex_dest.exists(), "Codex skill directory cleanly removed")
             self.assert_true(not (target_proj / ".cursor" / "rules" / "sadskill.mdc").exists(), "Cursor rule cleanly removed")
-            self.assert_true(not (target_proj / ".cursor" / "skills" / "sadskill").exists(), "Cursor skill directory cleanly removed")
 
     def test_privacy_and_portability(self):
         print("\n--- Testing Privacy & Portability Constraints ---")

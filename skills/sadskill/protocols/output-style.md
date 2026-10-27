@@ -12,7 +12,7 @@ Token waste directly impairs agent speed, intelligence, and cost. This protocol 
 2. **Progressive Disclosure**:
    - Never paste large reference manuals or entire third-party documentation files into the conversation. Load only the specific section needed, extract the operative rule, and cite the file path.
 3. **Batched Mutations**:
-   - When proposing or executing code changes, batch modifications into clean contiguous replacements. Never make five successive single-line edits when one cohesive block achieves the result with 80% fewer prompt roundtrips.
+   - When proposing or executing code changes, batch modifications into clean contiguous replacements. Never make five successive single-line edits when one cohesive block achieves the result with far fewer prompt roundtrips and minimal token overhead.
 4. **Structured Status Indicators**:
    - `[OK]` / `✓`: Success or verified assertion.
    - `[WARN]` / `⚠️`: Warning or non-blocking issue.

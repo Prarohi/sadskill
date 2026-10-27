@@ -151,6 +151,21 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
             break
 
     if existing_idx is not None:
+        # If the destination was already managed by sadskill, preserve the true pre-sadskill backup
+        existing_backup = data["entries"][existing_idx].get("backup", "")
+        existing_backup_hash = data["entries"][existing_idx].get("backup_hash", "")
+        entry["backup"] = existing_backup
+        entry["backup_hash"] = existing_backup_hash
+
+        # If a redundant backup of sadskill's own files was created during reinstall, clean it
+        if backup_p and str(backup_p) != existing_backup and backup_p.exists():
+            try:
+                if backup_p.is_dir():
+                    shutil.rmtree(backup_p)
+                else:
+                    backup_p.unlink()
+            except Exception:
+                pass
         data["entries"][existing_idx] = entry
     else:
         data["entries"].append(entry)
@@ -159,7 +174,7 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
     print(f"   [MANIFEST] Recorded {agent} -> {dest_p}")
 
 
-def perform_restore(manifest_path: Path, target_dir: str = "", dry_run: bool = False):
+def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = False, dry_run: bool = False):
     """Restore backed up files without deleting them afterwards."""
     if not manifest_path.exists():
         print("   [INFO] No manifest found to restore from.")
@@ -188,6 +203,15 @@ def perform_restore(manifest_path: Path, target_dir: str = "", dry_run: bool = F
             print(f"   [WARN] Backup not found at {bak_p}")
             continue
 
+        if dest_p.exists():
+            # Safety check: if user modified the installed file since installation, preserve it unless forced
+            installed_hash = entry.get("content_hash")
+            curr_hash = compute_sha256(dest_p)
+            if installed_hash and curr_hash and curr_hash != installed_hash and not force:
+                print(f"   [CONFLICT] Destination modified since install: {dest_p}")
+                print(f"   [PRESERVE-MODIFIED] Refusing to overwrite modified file without --force. Backup preserved at {bak_p}")
+                continue
+
         print(f"   [RESTORE] Restoring {dest_p} from {bak_p}")
         if not dry_run:
             if dest_p.exists():
@@ -205,7 +229,7 @@ def perform_restore(manifest_path: Path, target_dir: str = "", dry_run: bool = F
     return 0
 
 
-def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previous: bool = False, clean_backups: bool = False, dry_run: bool = False):
+def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previous: bool = False, clean_backups: bool = False, force: bool = False, dry_run: bool = False):
     """Transactional uninstaller: removes only owned files, preserves restored files."""
     allowed_roots = get_allowed_roots(target_dir)
     data = load_manifest(manifest_path)
@@ -214,7 +238,7 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
     # Step 1: If restore_previous requested, perform safe restoration first
     if restore_previous:
         print("-> Performing safe transactional restoration from backups...")
-        perform_restore(manifest_path, target_dir=target_dir, dry_run=dry_run)
+        perform_restore(manifest_path, target_dir=target_dir, force=force, dry_run=dry_run)
         # Reload manifest after restore
         data = load_manifest(manifest_path)
         entries = data.get("entries", [])
@@ -237,6 +261,13 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
             continue
 
         if dest_p.exists():
+            # Safety check: if user modified the installed file since installation, preserve it to prevent data loss
+            installed_hash = entry.get("content_hash")
+            curr_hash = compute_sha256(dest_p)
+            if installed_hash and curr_hash and curr_hash != installed_hash and not force:
+                print(f"   [PRESERVE-MODIFIED] Preserving user-modified file: {dest_p} (use --force to remove)")
+                continue
+
             print(f"   [REMOVE] Removing sadskill-owned artifact: {dest_p}")
             if not dry_run:
                 if dest_p.is_dir():
@@ -251,6 +282,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
     if clean_backups:
         print("-> Cleaning sadskill-recorded backup archives...")
         for entry in entries:
+            if entry.get("restored"):
+                continue
             bak_str = entry.get("backup")
             if not bak_str:
                 continue
@@ -265,9 +298,9 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
                     else:
                         bak_p.unlink()
 
-    if not dry_run and not restore_previous:
-        # Clear entries from manifest
-        data["entries"] = []
+    if not dry_run:
+        # Prune resolved entries from manifest
+        data["entries"] = [e for e in entries if not e.get("restored") and Path(e.get("destination", "")).exists()]
         save_manifest_atomic(manifest_path, data)
 
     print(f"   [OK] Cleaned {removed_count} installed artifacts.")
@@ -290,6 +323,7 @@ def main():
     res = subparsers.add_parser("restore")
     res.add_argument("--manifest", required=True, help="Path to manifest JSON")
     res.add_argument("--target", default="", help="Explicit target dir")
+    res.add_argument("-f", "--force", action="store_true", help="Force overwrite modified destination files")
     res.add_argument("--dry-run", action="store_true", help="Dry run")
 
     # uninstall
@@ -298,6 +332,7 @@ def main():
     un.add_argument("--target", default="", help="Explicit target dir")
     un.add_argument("--restore-previous", action="store_true", help="Restore prior backups")
     un.add_argument("--clean-backups", action="store_true", help="Clean only owned backups")
+    un.add_argument("-f", "--force", action="store_true", help="Force removal or restore of modified destination files")
     un.add_argument("--dry-run", action="store_true", help="Dry run")
 
     args = parser.parse_args()
@@ -316,6 +351,7 @@ def main():
         perform_restore(
             manifest_path=manifest_p,
             target_dir=args.target,
+            force=args.force,
             dry_run=args.dry_run,
         )
     elif args.action == "uninstall":
@@ -324,6 +360,7 @@ def main():
             target_dir=args.target,
             restore_previous=args.restore_previous,
             clean_backups=args.clean_backups,
+            force=args.force,
             dry_run=args.dry_run,
         )
 

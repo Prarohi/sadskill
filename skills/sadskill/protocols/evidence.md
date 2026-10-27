@@ -23,6 +23,7 @@ Evidence records distinguish between self-reported logs and independently verifi
 | `schema_valid` | Evidence JSON format and project-relative file paths valid | Evidence format verified (unexecuted) |
 | `retested` | Independently executed by authorized verifier (`verify-evidence.py --retest`) | Retest passed in target environment |
 | `ci_attested` | Linked to immutable CI run SHA/URL | CI check passed for commit X |
+| `skipped_with_reason` | Non-test task (docs-only, research, read-only analysis) | Documented non-runnable task |
 | `failed` | Non-zero exit code or broken test assertion | Verification failed |
 
 ---
@@ -35,6 +36,7 @@ Evidence records distinguish between self-reported logs and independently verifi
 - For Rust: `cargo test -- <test_name>`, `cargo check`
 - For Go: `go test -v ./...`
 - For CLI/scripts: Direct script invocation with `--help` or assertion flags.
+- For documentation-only, research, or read-only tasks where no runnable harness exists: Record `status: "SKIPPED_WITH_REASON"`, `exit_code: null`, and document the reason in `summary`. Never fabricate fake tests or dummy commands to produce artificial green results.
 
 ### 2. Capture Structured Evidence
 Record the verification event in `.sad/evidence/<YYYYMMDD-HHMMSS>-<slug>.json`:
@@ -72,3 +74,4 @@ Every mode completion must conclude with this dense, scanable proof block:
 1. **Never claim tests passed without quoting the terminal command and exit code 0.**
 2. **Never skip running tests because "the change is simple enough".**
 3. **If no automated test exists for a bug, write a minimal reproduction test first, verify failure, apply the fix, and verify pass.**
+4. **Never fabricate artificial test passes for docs-only or research tasks; accurately declare `SKIPPED_WITH_REASON` or `NOT_APPLICABLE`.**

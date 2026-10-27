@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     name: Verify sadskill (Node ${{ matrix.node-version }})
@@ -15,20 +18,23 @@ jobs:
         node-version: [20, 22]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: '3.11'
 
       - name: Set up Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
           node-version: ${{ matrix.node-version }}
 
       - name: Run sadskill Verification Suite
         run: python3 scripts/verify.py
+
+      - name: Run sadskill Benchmarks Suite
+        run: python3 benchmarks/runner.py
 
       - name: Verify Git Safety Guardrail Hook
         run: |
@@ -42,29 +48,45 @@ jobs:
             exit 1
           fi
 
+          echo "Testing pre-push branch deletion..."
+          set +e
+          echo "(delete) 0000000000000000000000000000000000000000 refs/heads/main 1111111111111111111111111111111111111111" | ./scripts/git-guardrail.sh 2>/dev/null
+          STATUS_PREPUSH=$?
+          set -e
+          if [ $STATUS_PREPUSH -ne 2 ]; then
+            echo "Expected exit code 2 from pre-push deletion guardrail, got $STATUS_PREPUSH"
+            exit 1
+          fi
+
           echo "Testing allowed command..."
           echo "git status" | ./scripts/git-guardrail.sh
           echo "Guardrail verification successful."
 
-      - name: Verify Multi-Agent Sandbox Installation & Uninstallation
+      - name: Verify Multi-Agent Sandbox Installation & Restore
         run: |
           SANDBOX_DIR=$(mktemp -d)
           echo "Testing installation in ${SANDBOX_DIR}..."
+          mkdir -p "${SANDBOX_DIR}/.codex/prompts"
+          echo "ORIGINAL_USER_PROMPT" > "${SANDBOX_DIR}/.codex/prompts/sad-plan.md"
+
           HOME="${SANDBOX_DIR}" ./install.sh all
           test -d "${SANDBOX_DIR}/.codex/skills/sadskill"
           test -d "${SANDBOX_DIR}/.claude/skills/sadskill"
-          test -d "${SANDBOX_DIR}/.gemini/antigravity/skills/sadskill"
+          test -d "${SANDBOX_DIR}/.gemini/skills/sadskill"
 
           echo "Testing non-destructive backup on reinstall..."
           HOME="${SANDBOX_DIR}" ./install.sh all
-          ls -d "${SANDBOX_DIR}/.claude/skills/sadskill.bak."*
+          ls -d "${SANDBOX_DIR}/.codex/prompts/sad-plan.md.bak."*
 
-          echo "Testing uninstallation..."
-          HOME="${SANDBOX_DIR}" ./uninstall.sh --purge --clean-backups
+          echo "Testing uninstallation with --restore-previous..."
+          HOME="${SANDBOX_DIR}" ./uninstall.sh --restore-previous --clean-backups
           test ! -d "${SANDBOX_DIR}/.codex/skills/sadskill"
           test ! -d "${SANDBOX_DIR}/.claude/skills/sadskill"
+          test -f "${SANDBOX_DIR}/.codex/prompts/sad-plan.md"
+          grep -q "ORIGINAL_USER_PROMPT" "${SANDBOX_DIR}/.codex/prompts/sad-plan.md"
+
           rm -rf "${SANDBOX_DIR}"
-          echo "Sandbox installation & uninstallation verified."
+          echo "Sandbox installation & restore verified."
 
       - name: Test Single Skill Discovery
         run: |

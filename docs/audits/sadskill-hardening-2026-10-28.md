@@ -2,16 +2,16 @@
 
 - **Audited Baseline Commit**: `b1701a7576c559df0c9294614ad02886d6f5c6b0` (v0.3.0)
 - **Environment**: Linux x86_64, Python 3.10+, Bash 5.2
-- **Test Suite Status**: 126 / 126 verification checks passing (`scripts/verify.py`), 3-Track Benchmark Suite 100% passing (`benchmarks/runner.py`: 6/6 Track A contracts, 2/2 Track B fixtures, 1/1 Track C 24-task suite validation)
+- **Test Suite Status**: 142 / 142 verification checks passing (`scripts/verify.py`), 3-Track Benchmark Suite 100% passing (`benchmarks/runner.py`: 6/6 Track A contracts, 2/2 Track B fixtures, 1/1 Track C 24-task suite validation)
 
 ---
 
 ## 1. Executive Summary of Critical (P0) Repairs
 
-### P0-01: Repaired Restore-Then-Delete Bug (`uninstall.sh`)
-- **Vulnerability**: `uninstall.sh` previously restored backup archives from the manifest, and then immediately ran legacy unconditional `rm` blocks that deleted the restored files.
-- **Repair**: Replaced with a manifest-driven transactional manager (`scripts/manifest.py`). Restored files are marked `restored: true` and strictly preserved from subsequent cleanup.
-- **Evidence**: Verified in `VerificationSuite.test_sandbox_installer_and_safety` (restored file content matches original bytes exactly).
+### P0-01: Repaired Restore-Then-Delete Bug & Conflict-Safe Refusal (`uninstall.sh`, `scripts/manifest.py`)
+- **Vulnerability**: `uninstall.sh` previously restored backup archives from the manifest, and then immediately ran legacy unconditional `rm` blocks that deleted the restored files. Furthermore, restoring over user-modified files clobbered local edits without warning.
+- **Repair**: Replaced with a manifest-driven transactional manager (`scripts/manifest.py`). Restored files are marked `restored: true` and strictly preserved from subsequent cleanup. Added content hash comparison before restore/removal: user-modified files are safely preserved (`[PRESERVE-MODIFIED]`) with conflict refusal unless `--force` is explicitly provided.
+- **Evidence**: Verified in `VerificationSuite.test_sandbox_installer_and_safety` (restored file content matches original bytes exactly, user-modified files preserved without `--force` and cleanly restored with `--force`).
 
 ### P0-02: Isolated Backup Cleanup (`uninstall.sh`)
 - **Vulnerability**: `--clean-backups` used broad shell glob patterns (`*.bak.*`) inside shared user directories like `~/.codex/prompts/` and `~/.claude/commands/`, risking deletion of backups created by other tools.
@@ -20,7 +20,7 @@
 
 ### P0-03: Evidence Re-Test Interpreter Execution Hardening (`scripts/verify-evidence.py`)
 - **Vulnerability**: `execute_safe_command` allowed arbitrary code strings via general-purpose interpreters (`python -c`, `bash -c`, `node -e`).
-- **Repair**: Enforced a trusted recipe registry. Disallowed inline evaluation flags (`-c`, `-e`) and shell chaining tokens. Implemented isolated process groups with child process termination on timeout.
+- **Repair**: Enforced a trusted recipe registry. Disallowed inline evaluation flags (`-c`, `-e`) and shell chaining tokens. Implemented isolated process groups with child process termination on timeout. Added support for non-executable/docs-only tasks with truthful `SKIPPED_WITH_REASON` status (V-08, T60).
 - **Evidence**: Verified in `VerificationSuite.test_evidence_verifier_safety`.
 
 ### P0-04: Eliminated Unsafe Shell String Interpolation into Python Source (`install.sh`)
@@ -33,12 +33,16 @@
 - **Repair**: Checks for pre-existing hooks and creates a timestamped `.bak` archive before replacement.
 - **Evidence**: Verified in sandbox installation test suite.
 
+### P0-08: Collision-Safe Backup Path Generation (`install.sh`)
+- **Vulnerability**: `install.sh` used naive 1-second timestamps (`.bak.YYYYMMDDHHMMSS`), leading to collisions during same-second reinstalls or rapid CI test runs.
+- **Repair**: Implemented `make_backup_path` helper generating unique paths with timestamp, process ID, and random retry suffix.
+
 ---
 
 ## 2. P1 Guardrails & Diagnostics
 
-1. **Diagnostic Doctor Utility (`scripts/doctor.py`)**: Added capability scanner reporting hook and agent states: `NOT_INSTALLED`, `AVAILABLE`, `REGISTERED`, `ACTIVE`, and `UNSUPPORTED`.
-2. **Git Pre-Push Ref-Update Parsing (`scripts/git-guardrail.sh`)**: Added stdin stream inspection for Git pre-push hook protocol (`<local_ref> <local_oid> <remote_ref> <remote_oid>`), blocking remote branch deletions and non-fast-forward force pushes.
+1. **Diagnostic Doctor Utility (`scripts/doctor.py`)**: Added capability scanner reporting hook and agent states: `NOT_INSTALLED`, `AVAILABLE`, `REGISTERED`, `ACTIVE`, and `UNSUPPORTED`. Added `--enable-hooks` for opt-in, idempotent registration of `git-guardrail.sh` in `~/.claude/settings.json`.
+2. **Git Pre-Push Ref-Update Parsing (`scripts/git-guardrail.sh`)**: Added stdin stream inspection for Git pre-push hook protocol, parsing both 4-token streams (`<local_ref> <local_oid> <remote_ref> <remote_oid>`) and 3-token / empty `local_ref` streams (such as `git push origin :main`), blocking remote branch deletions and non-fast-forward force pushes.
 3. **Structured JSON Hook Parsing**: Swapped fragile single-line `sed` regex with robust Python JSON parser handling escaped characters and multi-line commands.
 4. **Lexical Command Parsing & Commit Message Stripping (`scripts/git-guardrail.sh`)**: Replaced naive `tr ';|&' '\n'` with `shlex.shlex(punctuation_chars=True)` lexer to avoid breaking quoted strings containing punctuation. Stripped commit message bodies (`-m`, `--message`) before SQL analysis, eliminating false positives on architectural commit descriptions.
 5. **Cursor Workspace Skill Directory Packaging & Uninstallation (`install.sh`, `scripts/manifest.py`)**: Added tracking and backup for `.cursor/skills/sadskill` alongside `.cursor/rules/sadskill.mdc`, ensuring complete transactional cleanup upon uninstall.

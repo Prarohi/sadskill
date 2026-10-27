@@ -6,9 +6,9 @@ Plan mode conducts **intense upfront specification** and creates deterministic, 
 
 ## ⚡ The Zero-Waste / High-Density Philosophy
 
-1. **Intense Upfront Planning Saves 80% of Downstream Tokens**:
-   - Speculative code patching is the #1 token waster in autonomous agents. When an agent edits code without knowing exact signatures, it enters a 3-5 turn error cycle fixing imports, type errors, and missing parameters.
-   - 10 minutes spent nailing the exact types, data flows, edge cases, and test assertions upfront prevents hours of trial-and-error edits and circular error loops.
+1. **Intense Upfront Planning Eliminates Downstream Token Waste**:
+   - Speculative code patching is the primary cause of token waste in autonomous agents. When an agent edits code without knowing exact signatures, it enters a multi-turn error cycle fixing imports, type errors, and missing parameters.
+   - Rigorous specification of types, data flows, edge cases, and test assertions upfront prevents circular error loops, repeated patch attempts, and debugging churn.
 2. **Contract-First AST Planning**:
    - Every modified or created function, method, interface, and type must have its full signature declared before any implementation starts.
    - Declare exact parameter names, parameter types, return types, generic bounds, and error types.

@@ -63,6 +63,70 @@ def check_claude_hook():
         return "REGISTERED", f"Hook is registered, but test execution failed: {e}"
 
 
+def enable_claude_hooks():
+    """Opt-in, idempotent registration of git-guardrail.sh in ~/.claude/settings.json."""
+    home = Path.home()
+    hook_file = home / ".claude" / "hooks" / "git-guardrail.sh"
+    settings_file = home / ".claude" / "settings.json"
+
+    if not hook_file.exists():
+        print(f"Error: Guardrail hook not found at {hook_file}. Run ./install.sh first.", file=sys.stderr)
+        return 1
+
+    settings = {}
+    if settings_file.exists():
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    settings = data
+        except Exception as e:
+            print(f"Warning: Could not parse existing settings.json: {e}", file=sys.stderr)
+
+    hooks_config = settings.setdefault("hooks", {})
+    if not isinstance(hooks_config, dict):
+        hooks_config = {}
+        settings["hooks"] = hooks_config
+
+    pre_tool = hooks_config.setdefault("PreToolUse", [])
+    if not isinstance(pre_tool, list):
+        pre_tool = []
+        hooks_config["PreToolUse"] = pre_tool
+
+    already_registered = False
+    for item in pre_tool:
+        cmd_str = item.get("command", "") if isinstance(item, dict) else str(item)
+        if "git-guardrail.sh" in cmd_str:
+            already_registered = True
+            break
+
+    if not already_registered:
+        hook_entry = {
+            "matcher": "Bash",
+            "command": str(hook_file.resolve()),
+        }
+        pre_tool.append(hook_entry)
+
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_settings = settings_file.with_name(f"{settings_file.name}.tmp.{os.getpid()}")
+        try:
+            with open(tmp_settings, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_settings, settings_file)
+            print(f"   [SUCCESS] Registered git-guardrail.sh in {settings_file}", file=sys.stderr)
+        except Exception as e:
+            if tmp_settings.exists():
+                tmp_settings.unlink()
+            print(f"Error saving {settings_file}: {e}", file=sys.stderr)
+            return 1
+    else:
+        print(f"   [INFO] git-guardrail.sh is already registered in {settings_file}", file=sys.stderr)
+
+    return 0
+
+
 def check_codex():
     home = Path.home()
     skill_dir = home / ".codex" / "skills" / "sadskill"
@@ -131,8 +195,14 @@ def run_doctor(target_dir=None, json_output=False):
 def main():
     parser = argparse.ArgumentParser(description="sadskill Doctor Diagnostic Tool")
     parser.add_argument("--target", help="Target project workspace for Cursor inspection")
+    parser.add_argument("--enable-hooks", action="store_true", help="Opt-in registration of git-guardrail.sh in ~/.claude/settings.json")
     parser.add_argument("--json", action="store_true", help="Output JSON results")
     args = parser.parse_args()
+
+    if args.enable_hooks:
+        ret = enable_claude_hooks()
+        if ret != 0:
+            sys.exit(ret)
 
     sys.exit(run_doctor(target_dir=args.target, json_output=args.json))
 

@@ -14,6 +14,7 @@
 ├── plans/                 # Generated implementation plans (YYYY-MM-DD-<slug>.md)
 ├── reports/               # Security audits (security-*.md) and analysis (analysis-*.md)
 ├── checkpoints/           # Resumable session state for multi-step tasks
+├── events/                # Immutable append-only event records (<timestamp>-<uuid>.json)
 └── evidence/              # Structured verification proof logs (*.json)
 ```
 
@@ -29,9 +30,10 @@
 2. **Secret Redaction**:
    - Never persist credentials, tokens, passwords, private keys, or personal identifiers in `.sad/`.
    - Scan memory payloads before writing; redact matching authorization patterns.
-3. **Concurrent Multi-Agent Writers**:
-   - Use atomic append/replace when updating `.sad/history.md` or `.sad/decisions.md`.
-   - Never overwrite existing decisions without documenting rationale and superseding references.
+3. **Concurrent Multi-Agent Writers (Immutable Event Log)**:
+   - To eliminate silent last-writer-wins overwrite hazards when multiple agents collaborate, write append-only immutable event records to `.sad/events/<timestamp>-<uuid>.json`.
+   - Each event record includes: `event_id` (UUID), `timestamp` (ISO 8601), `actor` (agent/human), `base_commit` (Git SHA), `task_id`, `type` (`milestone` | `adr` | `design_token` | `checkpoint`), and `payload`.
+   - Human-readable files (`history.md`, `decisions.md`) are derived from this event log or updated atomically. Never overwrite existing decisions without documenting rationale and superseding references.
 
 ---
 
