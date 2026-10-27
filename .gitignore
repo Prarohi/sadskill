@@ -1,0 +1,33 @@
+# OS & Editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local testing & runtime artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+
+# Local project memory during testing
+.sad/
+.sadskill/
+
+# Temp files
+*.tmp
+*.bak
+
+# Sensitive / Private files & user configuration
+profile.md
+*.env
+*.env.*
+*.local
+credentials.json
+.secrets/
