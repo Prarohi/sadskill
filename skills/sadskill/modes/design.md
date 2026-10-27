@@ -6,11 +6,12 @@ Design mode crafts production-grade, accessible, and aesthetically distinctive w
 
 ## 🎨 Execution Pipeline
 
-### Phase 1: Design Memory Audit
+### Phase 1: Design Memory Audit & Context
 1. Read `.sad/design-memory.md` if present:
    - Note approved color palettes, font pairings, and component tokens.
    - Strictly avoid styles, layouts, or components explicitly rejected in past reviews.
 2. If `~/.sadskill/profile.md` contains design guidance, apply those defaults.
+3. Consult [protocols/research.md](../protocols/research.md) if authorized for external creative inspiration and visual references.
 
 ### Phase 2: Surface Mode Classification
 Identify the surface's primary mode:
@@ -20,11 +21,11 @@ Identify the surface's primary mode:
 - **Experience**: Showcases, creative portfolios, product unveilings. Fluid motion, interactive canvas, high sensory polish.
 
 ### Phase 3: Craft Floor Requirements (Non-Negotiable)
-Before shipping any UI code, verify these absolute requirements:
-1. **Touch & Click Targets**: Minimum 44×44px interactive area for all buttons, links, and icons.
-2. **Zero-Lift Hover Rule**: Card/button hover `translateY(-...)` float is prohibited (preventing generic AI floating-card jitter); use `scale(0.97)` micro-compression on click. (Legitimate entrance and positional transitions like slide-in drawers, bottom sheets, toasts, and tooltips remain permitted).
+Before shipping any UI code, verify these accessibility and craft requirements:
+1. **Touch & Click Targets**: Preferred 44×44px interactive target area (while meeting WCAG 2.2 SC 2.5.8 minimum 24×24px requirement).
+2. **Zero-Lift Hover Rule**: Card/button hover `translateY(-...)` float is prohibited as a style floor (preventing generic AI floating-card jitter); use `scale(0.97)` micro-compression on click. (Legitimate entrance and positional transitions like slide-in drawers, bottom sheets, toasts, and tooltips remain permitted).
 3. **Layout Stability**: Maintain Cumulative Layout Shift (CLS < 0.1) on hover, active states, modal toggles, or dynamic data loading. Always reserve space for images and skeleton loaders.
-4. **Contrast & Readability**: Minimum 4.5:1 contrast ratio for body text; 3:1 for large headers and interface borders (WCAG AA).
+4. **Contrast & Readability**: Minimum 4.5:1 contrast ratio for body text; 3:1 for large headers and interface components (WCAG 2.2 AA SC 1.4.3 & SC 1.4.11).
 5. **Motion Safety**: Wrap all animations and transitions in `@media (prefers-reduced-motion: reduce)`.
 6. **Keyboard & Focus**: Never set `outline: none` without providing a distinct `:focus-visible` ring.
 7. **Optical Typography**: Set explicit tracking (e.g. tighter for large titles, looser for uppercase labels) and proportional leading.

@@ -52,6 +52,32 @@ graph TD
 
 ---
 
-## 6. Suggested Next Steps
+## 6. Substantive Findings (Section 6.4 Schema)
+
+```yaml
+id: ANALYZE-001
+title: God-file refactor in main controller
+severity: high
+confidence: confirmed
+status: static_only
+scope: src/controllers/
+references:
+  - path: src/controllers/main.ts
+    line_start: 1
+    line_end: 1200
+root_cause: Unseparated routing, validation, business logic and database access in a single module
+user_impact: High regression risk, difficult maintenance, slow test iterations
+reproduction: Inspect src/controllers/main.ts line count and responsibility mixing
+recommended_fix: Split into domain-specific route handlers and service layer
+alternatives: Extract shared middleware first
+regression_test: Verify all 12 routes respond identically after decoupling
+estimated_effort: M
+dependencies: []
+```
+
+---
+
+## 7. Suggested Next Steps
 - Execute `/sad-plan <target>` to address top architectural findings.
 - Execute `/sad-sec` if security or auth vulnerabilities were noted.
+

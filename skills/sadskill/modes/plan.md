@@ -42,7 +42,9 @@ Plan mode conducts **intense upfront specification** and creates deterministic, 
 
 ### Phase 3: Adaptive Specification (Tier 1 vs. Tier 2)
 
-Evaluate task scope before generating the plan to prevent instruction over-scaffolding and token waste:
+Evaluate task scope and execution mode per [context.md](../protocols/context.md) and [autonomy.md](../protocols/autonomy.md) before generating the plan to prevent instruction over-scaffolding and token waste:
+
+- **Tiny Task** (typos, single line tweaks, mechanical lint): Minimal 2-5 step internal plan, execute directly without generating an external markdown spec if implementation is already authorized.
 
 #### ⚡ Tier 1: Surgical Plan (Scope: <= 2 files, bug fixes, visual CSS/HTML tweaks, typos)
 - **Format**:
@@ -73,14 +75,16 @@ The plan written to `.sad/plans/<YYYY-MM-DD>-<slug>.md` follows [templates/plan.
 7. **Rollback & Recovery Plan**:
    - Step-by-step instructions to revert code and database migrations cleanly if verification fails.
 
-### Phase 4: Approval Gate & Progressive Disclosure
-1. Write the completed exhaustive plan to `.sad/plans/<YYYY-MM-DD>-<feature-slug>.md`.
+### Phase 4: Mode-Aware Execution or Approval Gate
+1. Write the completed plan to `.sad/plans/<YYYY-MM-DD>-<feature-slug>.md`.
 2. Output a **compact executive summary** (5-10 lines max) in the chat:
    - 1-2 sentence summary of goal and approach.
    - Markdown table of files to create/modify.
    - Verification command.
    - Relative link to the plan markdown: `[Read Full Plan (.sad/plans/<filename>.md)]`.
-3. Stop tool execution and await explicit user approval before writing production code.
+3. **Execution Mode Hand-off**:
+   - If `execution_mode` is `PLAN_ONLY`: stop and present plan to user.
+   - If `execution_mode` is `CONTINUE_UNTIL_DONE` or `IMPLEMENT`: proceed autonomously with implementation and testing without halting for redundant confirmation.
 
 ---
 

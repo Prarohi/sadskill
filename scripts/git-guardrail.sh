@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# sadskill git & database safety guardrail (v0.2.1)
-# Intercepts and blocks destructive Git and SQL operations with robust tokenization.
+# sadskill git & database safety guardrail (v0.3.0)
+# Intercepts and blocks destructive Git, SQL, and ref-update operations.
 # Compatible with Claude Code PreToolUse hooks, Git pre-push hooks, and CLI wrappers.
 
 set -euo pipefail
@@ -11,18 +11,63 @@ if [ ! -t 0 ]; then
 fi
 
 COMMAND=""
+IS_GIT_PRE_PUSH="false"
+
 if [[ -n "$INPUT" ]]; then
-  # Check if input is Claude Code JSON hook payload
-  if echo "$INPUT" | grep -q '"tool_input"'; then
-    COMMAND=$(echo "$INPUT" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+  # 1. Check if input is a Git pre-push ref-update stream:
+  # Lines format: <local_ref> <local_oid> <remote_ref> <remote_oid>
+  if echo "$INPUT" | grep -qE '^refs/[^ ]+[[:space:]]+[0-9a-f]{40}[[:space:]]+refs/[^ ]+[[:space:]]+[0-9a-f]{40}'; then
+    IS_GIT_PRE_PUSH="true"
+  elif echo "$INPUT" | grep -q '"tool_input"'; then
+    # 2. Structured Claude Code PreToolUse JSON extraction via Python
+    COMMAND=$(python3 -c "
+import sys, json
+try:
+    data = json.loads(sys.stdin.read())
+    tool_input = data.get('tool_input', {})
+    if isinstance(tool_input, dict):
+        print(tool_input.get('command', ''))
+    elif isinstance(tool_input, str):
+        print(tool_input)
+except Exception:
+    pass
+" <<< "$INPUT" 2>/dev/null || true)
   fi
-  if [[ -z "$COMMAND" ]]; then
+
+  if [[ "$IS_GIT_PRE_PUSH" != "true" && -z "$COMMAND" ]]; then
     COMMAND="$INPUT"
   fi
 fi
 
-if [[ -z "$COMMAND" && $# -gt 0 ]]; then
+if [[ -z "$COMMAND" && "$IS_GIT_PRE_PUSH" != "true" && $# -gt 0 ]]; then
   COMMAND="$*"
+fi
+
+# Handle Git pre-push ref update inspection
+if [[ "$IS_GIT_PRE_PUSH" == "true" ]]; then
+  ZERO_OID="0000000000000000000000000000000000000000"
+  while read -r local_ref local_oid remote_ref remote_oid; do
+    # Destructive remote branch deletion check
+    if [[ "$local_oid" == "$ZERO_OID" ]]; then
+      if [[ "$remote_ref" =~ refs/heads/(main|master|release|prod) ]]; then
+        echo "BLOCKED: Force deletion of protected remote branch detected: $remote_ref" >&2
+        echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+        exit 2
+      fi
+    fi
+
+    # Non-fast-forward / force push verification via git merge-base if repository available
+    if [[ "$remote_oid" != "$ZERO_OID" && "$local_oid" != "$ZERO_OID" ]]; then
+      if git rev-parse --verify "$remote_oid" >/dev/null 2>&1 && git rev-parse --verify "$local_oid" >/dev/null 2>&1; then
+        if ! git merge-base --is-ancestor "$remote_oid" "$local_oid" 2>/dev/null; then
+          echo "BLOCKED: Non-fast-forward (force push) detected for ref $remote_ref." >&2
+          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+          exit 2
+        fi
+      fi
+    fi
+  done <<< "$INPUT"
+  exit 0
 fi
 
 if [[ -z "$COMMAND" ]]; then
@@ -39,8 +84,15 @@ check_segment() {
     return 0
   fi
 
-  # 1. SQL Destructive Patterns
-  if echo "$seg" | grep -qiE '\b(DROP[[:space:]]+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE[[:space:]]+TABLE|TRUNCATE[[:space:]]+[a-zA-Z0-9_]+|ALTER[[:space:]]+TABLE[[:space:]]+[a-zA-Z0-9_.]+[[:space:]]+DROP[[:space:]]+COLUMN)\b'; then
+  # Strip commit message content from git commit commands so commit descriptions
+  # do not trigger false positive SQL or dangerous verb blocks
+  local check_seg="$seg"
+  if [[ "$check_seg" =~ git([[:space:]]|$) && "$check_seg" =~ commit([[:space:]]|$) ]]; then
+    check_seg=$(echo "$check_seg" | sed -E 's/(-m|--message)[[:space:]=]*("[^"]*"|'\'[^\']*\'')//g')
+  fi
+
+  # 1. SQL Destructive Patterns (evaluated on code outside commit message bodies)
+  if echo "$check_seg" | grep -qiE '\b(DROP[[:space:]]+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE[[:space:]]+TABLE|TRUNCATE[[:space:]]+[a-zA-Z0-9_]+|ALTER[[:space:]]+TABLE[[:space:]]+[a-zA-Z0-9_.]+[[:space:]]+DROP[[:space:]]+COLUMN)\b'; then
     echo "BLOCKED: Destructive SQL query detected in '$seg'." >&2
     echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
     exit 2
@@ -49,13 +101,10 @@ check_segment() {
   # 2. Extract Git command if present
   # Strip leading environment variable assignments (e.g. GIT_PAGER=cat git ...)
   local clean_cmd
-  clean_cmd=$(echo "$seg" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*=[^ ]*[[:space:]]+)*//')
+  clean_cmd=$(echo "$check_seg" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*=[^ ]*[[:space:]]+)*//')
 
   if [[ "$clean_cmd" =~ ^git([[:space:]]|$) ]]; then
-    # Tokenize arguments while ignoring commit message bodies (-m "...")
-    # Strip -m "..." or -m '...' so text inside messages does not trigger false positives
-    local stripped_git
-    stripped_git=$(echo "$clean_cmd" | sed -E 's/-m[[:space:]]*("[^"]*"|'\'[^\']*\'')//g')
+    local stripped_git="$clean_cmd"
 
     # Remove global flags: -C <path>, --git-dir=<path>, --git-dir <path>, --work-tree=<path>, -c <key>=<val>, -p, --no-pager
     local tokens=()
@@ -136,9 +185,38 @@ check_segment() {
   fi
 }
 
-# Split chained commands (; && || |) to prevent hiding destructive commands behind compound expressions
-# We replace delimiters with newlines and check each segment
-echo "$COMMAND" | tr ';&|' '\n' | while IFS= read -r segment; do
+# Split chained commands (; && || |) while strictly respecting quotes
+segments=()
+if command -v python3 >/dev/null 2>&1; then
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && segments+=("$line")
+  done < <(python3 -c "
+import sys, shlex
+cmd = sys.argv[1]
+try:
+    lexer = shlex.shlex(cmd, punctuation_chars=True)
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    current = []
+    for t in tokens:
+        if t in (';', '&&', '||', '|', '&'):
+            if current:
+                print(' '.join(current))
+                current = []
+        else:
+            current.append(t)
+    if current:
+        print(' '.join(current))
+except Exception:
+    print(cmd)
+" "$COMMAND" 2>/dev/null || echo "$COMMAND")
+fi
+
+if [ ${#segments[@]} -eq 0 ]; then
+  segments=("$COMMAND")
+fi
+
+for segment in "${segments[@]}"; do
   check_segment "$segment"
 done
 

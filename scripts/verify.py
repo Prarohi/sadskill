@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-sadskill verification test suite
+sadskill verification test suite (Hardened v0.3.0)
 Validates skill frontmatter, single discoverable skill constraint,
 markdown cross-reference links, commands integrity with $ARGUMENTS,
-vendor indexing, community health files, executable guardrails,
-installation sandboxing, and strict privacy/portability invariants.
+vendor indexing & manifest integrity, community health files, executable guardrails,
+pre-push ref handling, evidence verifier safety & trusted recipes,
+database RLS behavioral fixtures, transactional installer recovery, and strict privacy invariants.
 """
 
 import json
@@ -57,12 +58,10 @@ class VerificationSuite:
             "SKILL.md frontmatter defines 'name: sadskill'",
         )
 
-        # Check that NO other file in the repository exposes top-level frontmatter with 'name:'
         other_skills = []
         for path in REPO_ROOT.rglob("*.md"):
             if path.resolve() == root_skill.resolve():
                 continue
-            # Ignore .git and .sad
             rel = path.relative_to(REPO_ROOT)
             if any(part.startswith(".") for part in rel.parts):
                 continue
@@ -123,6 +122,11 @@ class VerificationSuite:
             "profile.md",
             "safety.md",
             "evidence.md",
+            "context.md",
+            "coverage.md",
+            "advice.md",
+            "autonomy.md",
+            "research.md",
         ]
         for proto in expected_protocols:
             path = SKILL_DIR / "protocols" / proto
@@ -142,20 +146,24 @@ class VerificationSuite:
             "plan.template.md",
             "security-report.template.md",
             "analysis-report.template.md",
+            "coverage-ledger.template.json",
+            "context-handoff.template.json",
         ]
         for tmpl in expected_templates:
             path = SKILL_DIR / "templates" / tmpl
             self.assert_true(path.exists(), f"Template exists: templates/{tmpl}")
 
-    def test_vendor_index_and_sources(self):
-        print("\n--- Testing Vendor Ecosystem & Link Resolution ---")
+    def test_vendor_index_and_manifest(self):
+        print("\n--- Testing Vendor Ecosystem, Manifest & Link Resolution ---")
         index_file = SKILL_DIR / "vendor" / "INDEX.md"
         sources_file = SKILL_DIR / "vendor" / "SOURCES.md"
         third_party_file = REPO_ROOT / "THIRD_PARTY.md"
+        vendor_manifest = SKILL_DIR / "vendor" / "manifest.json"
 
         self.assert_true(index_file.exists(), "skills/sadskill/vendor/INDEX.md exists")
         self.assert_true(sources_file.exists(), "skills/sadskill/vendor/SOURCES.md exists")
         self.assert_true(third_party_file.exists(), "THIRD_PARTY.md exists in root")
+        self.assert_true(vendor_manifest.exists(), "skills/sadskill/vendor/manifest.json exists")
 
         index_content = index_file.read_text(encoding="utf-8")
         links = re.findall(r"\[([^\]]+)\]\(([^)]+\.ref\.md)\)", index_content)
@@ -173,6 +181,10 @@ class VerificationSuite:
             f"All INDEX.md reference links resolve to existing files (broken: {broken_links})",
         )
 
+        if vendor_manifest.exists():
+            vdata = json.loads(vendor_manifest.read_text(encoding="utf-8"))
+            self.assert_true(len(vdata.get("references", [])) == 40, "Vendor manifest tracks all 40 reference files")
+
     def test_community_and_metadata(self):
         print("\n--- Testing Community Health, CI & Agent Metadata ---")
         ci_workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
@@ -181,6 +193,7 @@ class VerificationSuite:
         security_policy = REPO_ROOT / "SECURITY.md"
         openai_yaml = SKILL_DIR / "agents" / "openai.yaml"
         guardrail_script = REPO_ROOT / "scripts" / "git-guardrail.sh"
+        skill_hook = SKILL_DIR / "hooks" / "git-guardrail.sh"
 
         self.assert_true(ci_workflow.exists(), "CI workflow exists at .github/workflows/ci.yml")
         self.assert_true(bug_report.exists(), "Bug report template exists at .github/ISSUE_TEMPLATE/bug_report.yml")
@@ -193,18 +206,26 @@ class VerificationSuite:
             self.assert_true("interface:" in text and "display_name:" in text, "OpenAI YAML contains valid interface schema")
 
         self.assert_true(guardrail_script.exists(), "Executable guardrail exists at scripts/git-guardrail.sh")
-        if guardrail_script.exists():
-            self.assert_true(os.access(guardrail_script, os.X_OK), "scripts/git-guardrail.sh is marked executable")
-
-        skill_hook = SKILL_DIR / "hooks" / "git-guardrail.sh"
         self.assert_true(skill_hook.exists(), "Packaged guardrail exists at skills/sadskill/hooks/git-guardrail.sh")
-        if skill_hook.exists():
+        if guardrail_script.exists() and skill_hook.exists():
+            self.assert_true(os.access(guardrail_script, os.X_OK), "scripts/git-guardrail.sh is marked executable")
             self.assert_true(os.access(skill_hook, os.X_OK), "skills/sadskill/hooks/git-guardrail.sh is marked executable")
+            self.assert_true(guardrail_script.read_bytes() == skill_hook.read_bytes(), "Guardrail root script and packaged hook are byte-identical")
 
         evidence_verifier = REPO_ROOT / "scripts" / "verify-evidence.py"
         self.assert_true(evidence_verifier.exists(), "Evidence verifier exists at scripts/verify-evidence.py")
         if evidence_verifier.exists():
             self.assert_true(os.access(evidence_verifier, os.X_OK), "scripts/verify-evidence.py is marked executable")
+
+        manifest_script = REPO_ROOT / "scripts" / "manifest.py"
+        self.assert_true(manifest_script.exists(), "Manifest manager exists at scripts/manifest.py")
+        if manifest_script.exists():
+            self.assert_true(os.access(manifest_script, os.X_OK), "scripts/manifest.py is marked executable")
+
+        doctor_script = REPO_ROOT / "scripts" / "doctor.py"
+        self.assert_true(doctor_script.exists(), "Doctor script exists at scripts/doctor.py")
+        if doctor_script.exists():
+            self.assert_true(os.access(doctor_script, os.X_OK), "scripts/doctor.py is marked executable")
 
         benchmarks_runner = REPO_ROOT / "benchmarks" / "runner.py"
         benchmarks_tasks = REPO_ROOT / "benchmarks" / "tasks.json"
@@ -213,11 +234,42 @@ class VerificationSuite:
         if benchmarks_runner.exists():
             self.assert_true(os.access(benchmarks_runner, os.X_OK), "benchmarks/runner.py is marked executable")
 
+    def test_guardrail_advanced_hardening(self):
+        print("\n--- Testing Guardrail Advanced Hardening (JSON & Pre-Push) ---")
+        hook = REPO_ROOT / "scripts" / "git-guardrail.sh"
+
+        # 1. Claude Code structured JSON with escaped quotes
+        json_payload = '{"tool_name": "Bash", "tool_input": {"command": "git reset --hard HEAD~1"}}'
+        res_json = subprocess.run(["bash", str(hook)], input=json_payload, text=True, capture_output=True)
+        self.assert_true(res_json.returncode == 2, f"Claude Code JSON destructive payload blocked with exit 2 (got {res_json.returncode})")
+
+        # 2. Git pre-push hook ref-update stream deletion
+        pre_push_payload = "refs/heads/main 0000000000000000000000000000000000000000 refs/heads/main 1111111111111111111111111111111111111111\n"
+        res_ref = subprocess.run(["bash", str(hook)], input=pre_push_payload, text=True, capture_output=True)
+        self.assert_true(res_ref.returncode == 2, f"Git pre-push branch deletion of protected ref blocked with exit 2 (got {res_ref.returncode})")
+
+        # 3. Benign commit message containing dangerous phrase
+        commit_msg_cmd = 'git commit -m "fix git reset --hard issue in docs"'
+        res_msg = subprocess.run(["bash", str(hook), commit_msg_cmd], text=True, capture_output=True)
+        self.assert_true(res_msg.returncode == 0, f"Git commit with dangerous word inside -m allowed with exit 0 (got {res_msg.returncode})")
+
+        # 4. Benign commit message containing semicolon and SQL keywords (preventing false positive split)
+        commit_sql_cmd = 'git commit -m "fix; DROP TABLE users in migration"'
+        res_sql = subprocess.run(["bash", str(hook), commit_sql_cmd], text=True, capture_output=True)
+        self.assert_true(res_sql.returncode == 0, f"Git commit with semicolon and SQL inside -m allowed with exit 0 (got {res_sql.returncode})")
+
+        # 5. Compound command with benign commit followed by destructive SQL query
+        compound_sql_cmd = 'git commit -m "normal commit"; DROP TABLE users'
+        res_compound = subprocess.run(["bash", str(hook), compound_sql_cmd], text=True, capture_output=True)
+        self.assert_true(res_compound.returncode == 2, f"Compound command with DROP TABLE blocked with exit 2 (got {res_compound.returncode})")
+
     def test_benchmarks_execution(self):
         print("\n--- Testing Reproducible Benchmark Suite ---")
         runner = REPO_ROOT / "benchmarks" / "runner.py"
         res = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True)
         self.assert_true(res.returncode == 0, f"Reproducible benchmarks passed 100% (exit code {res.returncode})")
+        suite_24 = REPO_ROOT / "benchmarks" / "tasks" / "suite_24.json"
+        self.assert_true(suite_24.exists(), "24-task benchmark evaluation suite exists at benchmarks/tasks/suite_24.json")
 
     def test_version_consistency(self):
         print("\n--- Testing Version Consistency Across Files ---")
@@ -225,11 +277,13 @@ class VerificationSuite:
         readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         install_text = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
         uninstall_text = (REPO_ROOT / "uninstall.sh").read_text(encoding="utf-8")
+        guardrail_text = (REPO_ROOT / "scripts" / "git-guardrail.sh").read_text(encoding="utf-8")
 
         self.assert_true("version: 0.3.0" in skill_text, "SKILL.md defines version: 0.3.0")
         self.assert_true("v0.3.0" in readme_text, "README.md references v0.3.0")
         self.assert_true("v0.3.0" in install_text, "install.sh references v0.3.0")
         self.assert_true("v0.3.0" in uninstall_text, "uninstall.sh references v0.3.0")
+        self.assert_true("v0.3.0" in guardrail_text, "git-guardrail.sh references v0.3.0")
 
     def test_evidence_verifier_safety(self):
         print("\n--- Testing Evidence Verifier Hardening & Safety ---")
@@ -254,7 +308,7 @@ class VerificationSuite:
             bad_record = {
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "traversal-test",
-                "command": "python3 -c 'print(1)'",
+                "command": "python3 test.py",
                 "exit_code": 0,
                 "summary": "malicious record",
                 "files_touched": ["../../etc/passwd"],
@@ -296,13 +350,81 @@ class VerificationSuite:
                 f"verify-evidence --retest rejected shell chaining tokens (got exit {res_chain.returncode})",
             )
 
-    def test_behavioral_fixture(self):
-        print("\n--- Testing Real Behavioral Benchmark Fixture ---")
+        # 4. Strict type check: boolean exit_code rejected (T16)
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            bool_record = {
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "bool-test",
+                "command": "python3 test.py",
+                "exit_code": False,
+                "summary": "boolean exit code record",
+                "files_touched": [],
+            }
+            (ev_dir / "bad-bool.json").write_text(json.dumps(bool_record), encoding="utf-8")
+            res_bool = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_bool.returncode == 1,
+                f"verify-evidence rejected boolean exit_code (got exit {res_bool.returncode})",
+            )
+
+        # 5. Untrusted interpreter flag -c rejected in --retest (T20)
+        with tempfile.TemporaryDirectory() as proj_dir:
+            ev_dir = Path(proj_dir) / ".sad" / "evidence"
+            ev_dir.mkdir(parents=True)
+            untrusted_cmd_record = {
+                "timestamp": "2026-10-28T04:00:00Z",
+                "task_slug": "untrusted-eval",
+                "command": "python3 -c 'print(1)'",
+                "exit_code": 0,
+                "summary": "untrusted eval record",
+                "files_touched": [],
+            }
+            (ev_dir / "untrusted.json").write_text(json.dumps(untrusted_cmd_record), encoding="utf-8")
+            res_untrusted = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir, "--retest"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(
+                res_untrusted.returncode == 1,
+                f"verify-evidence --retest rejected untrusted -c flag (got exit {res_untrusted.returncode})",
+            )
+
+        # 6. Clean JSON output check (T26)
+        with tempfile.TemporaryDirectory() as proj_dir:
+            res_json = subprocess.run(
+                [sys.executable, str(verifier), "--project-root", proj_dir, "--json"],
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(res_json.returncode == 0, "verify-evidence --json exited 0 on clean baseline")
+            try:
+                parsed = json.loads(res_json.stdout.strip())
+                self.assert_true("exit_code" in parsed and "records" in parsed, "verify-evidence --json emitted valid JSON on stdout")
+            except Exception as e:
+                self.assert_true(False, f"verify-evidence --json stdout was not valid JSON: {e}")
+
+    def test_behavioral_fixtures(self):
+        print("\n--- Testing Behavioral Benchmark Fixtures ---")
+        # 1. Tenant isolation in-memory fixture
         fixture_grader = REPO_ROOT / "benchmarks" / "fixtures" / "tenant-isolation" / "grader.py"
         self.assert_true(fixture_grader.exists(), "Tenant isolation fixture grader exists")
         if fixture_grader.exists():
             res = subprocess.run([sys.executable, str(fixture_grader)], capture_output=True, text=True)
             self.assert_true(res.returncode == 0, f"Tenant isolation behavioral tests passed cleanly (exit {res.returncode})")
+
+        # 2. Real database RLS fixture
+        rls_grader = REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"
+        self.assert_true(rls_grader.exists(), "Real database RLS fixture grader exists")
+        if rls_grader.exists():
+            res_rls = subprocess.run([sys.executable, str(rls_grader)], capture_output=True, text=True)
+            self.assert_true(res_rls.returncode == 0, f"Real database RLS behavioral tests passed cleanly (exit {res_rls.returncode})")
 
     def test_markdown_relative_links(self):
         print("\n--- Testing All Markdown Relative Links ---")
@@ -317,6 +439,12 @@ class VerificationSuite:
             SKILL_DIR / "modes" / "backend.md",
             SKILL_DIR / "modes" / "security.md",
             SKILL_DIR / "modes" / "analyze.md",
+            SKILL_DIR / "protocols" / "context.md",
+            SKILL_DIR / "protocols" / "coverage.md",
+            SKILL_DIR / "protocols" / "advice.md",
+            SKILL_DIR / "protocols" / "autonomy.md",
+            SKILL_DIR / "protocols" / "research.md",
+            SKILL_DIR / "protocols" / "memory.md",
         ]
 
         for doc in files_to_check:
@@ -324,10 +452,8 @@ class VerificationSuite:
                 continue
             text = doc.read_text(encoding="utf-8")
             for label, url in link_pattern.findall(text):
-                # Ignore external URLs, mailto, and anchor jumps
                 if url.startswith(("http://", "https://", "mailto:", "#")):
                     continue
-                # Strip anchor fragments
                 clean_url = url.split("#")[0]
                 if not clean_url:
                     continue
@@ -340,13 +466,38 @@ class VerificationSuite:
             f"All intra-document relative links resolve (broken: {broken})",
         )
 
-    def test_sandbox_installer(self):
-        print("\n--- Testing Multi-Agent Sandbox Installation & Backups ---")
+    def test_sandbox_installer_and_safety(self):
+        print("\n--- Testing Multi-Agent Sandbox Installation, Safety & Restore ---")
         with tempfile.TemporaryDirectory() as temp_dir:
             env = os.environ.copy()
             env["HOME"] = temp_dir
 
-            # Run initial installation
+            # 1. Test CLI exit codes on invalid arguments (T12, T13)
+            res_bad_agent = subprocess.run(["bash", str(REPO_ROOT / "install.sh"), "--agent"], env=env, capture_output=True, text=True)
+            self.assert_true(res_bad_agent.returncode == 2, f"install.sh missing --agent value exited with code 2 (got {res_bad_agent.returncode})")
+
+            res_bad_arg = subprocess.run(["bash", str(REPO_ROOT / "install.sh"), "--unknown-option"], env=env, capture_output=True, text=True)
+            self.assert_true(res_bad_arg.returncode == 2, f"install.sh unknown option exited with code 2 (got {res_bad_arg.returncode})")
+
+            # 2. Test --help exits with code 0 (T14)
+            res_help = subprocess.run(["bash", str(REPO_ROOT / "install.sh"), "--help"], env=env, capture_output=True, text=True)
+            self.assert_true(res_help.returncode == 0, f"install.sh --help exited with code 0 (got {res_help.returncode})")
+
+            # 3. Seed pre-existing user files to test safe restoration (T01, T02, T04)
+            codex_prompts = Path(temp_dir) / ".codex" / "prompts"
+            codex_prompts.mkdir(parents=True)
+            user_original_prompt = codex_prompts / "sad-plan.md"
+            user_original_prompt.write_text("USER_ORIGINAL_PROMPT_CONTENT", encoding="utf-8")
+
+            claude_hooks = Path(temp_dir) / ".claude" / "hooks"
+            claude_hooks.mkdir(parents=True)
+            user_original_hook = claude_hooks / "git-guardrail.sh"
+            user_original_hook.write_text("#!/bin/bash\n# USER_ORIGINAL_HOOK", encoding="utf-8")
+
+            unrelated_backup = codex_prompts / "other-tool.md.bak.keep"
+            unrelated_backup.write_text("UNRELATED_BACKUP_PRESERVED", encoding="utf-8")
+
+            # 4. Run initial installation
             res1 = subprocess.run(
                 ["bash", str(REPO_ROOT / "install.sh"), "all"],
                 cwd=str(REPO_ROOT),
@@ -361,20 +512,11 @@ class VerificationSuite:
             self.assert_true(codex_dest.exists(), "Codex skill directory created in sandbox")
             self.assert_true(claude_dest.exists(), "Claude skill directory created in sandbox")
 
-            # Run second installation to verify backup creation
-            res2 = subprocess.run(
-                ["bash", str(REPO_ROOT / "install.sh"), "all"],
-                cwd=str(REPO_ROOT),
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            self.assert_true(res2.returncode == 0, "Second install.sh all succeeded without error")
+            # Check that pre-existing prompt was backed up
+            found_baks = list(codex_prompts.glob("sad-plan.md.bak.*"))
+            self.assert_true(len(found_baks) > 0, "Pre-existing prompt backed up upon installation")
 
-            backups = list((Path(temp_dir) / ".claude" / "skills").glob("sadskill.bak.*"))
-            self.assert_true(len(backups) > 0, f"Non-destructive backup created on reinstall (found {len(backups)})")
-
-            # Test Cursor per-project target installation
+            # 5. Run Cursor per-project target installation
             target_proj = Path(temp_dir) / "sample_project"
             target_proj.mkdir()
             res_cur = subprocess.run(
@@ -385,22 +527,60 @@ class VerificationSuite:
                 text=True,
             )
             self.assert_true(res_cur.returncode == 0, "install.sh --agent cursor --target succeeded")
-            self.assert_true((target_proj / ".cursor" / "rules" / "sadskill.mdc").exists(), "Cursor rule .cursor/rules/sadskill.mdc created in target")
+            self.assert_true((target_proj / ".cursor" / "rules" / "sadskill.mdc").exists(), "Cursor rule created in target")
+            self.assert_true((target_proj / ".cursor" / "skills" / "sadskill").exists(), "Cursor skill directory created in target")
 
             manifest_file = Path(temp_dir) / ".sadskill" / "install-manifest.json"
-            self.assert_true(manifest_file.exists(), "Installation manifest ~/.sadskill/install-manifest.json created")
+            self.assert_true(manifest_file.exists(), "Installation manifest created")
 
-            # Test uninstallation
-            res_un = subprocess.run(
-                ["bash", str(REPO_ROOT / "uninstall.sh"), "--purge", "--clean-backups", "--target", str(target_proj)],
+            # 6. Test Gemini CLI agent installation
+            res_gem = subprocess.run(
+                ["bash", str(REPO_ROOT / "install.sh"), "--agent", "gemini"],
                 cwd=str(REPO_ROOT),
                 env=env,
                 capture_output=True,
                 text=True,
             )
-            self.assert_true(res_un.returncode == 0, "uninstall.sh succeeded cleanly")
+            self.assert_true(res_gem.returncode == 0, "install.sh --agent gemini succeeded")
+            self.assert_true((Path(temp_dir) / ".gemini" / "skills" / "sadskill").exists(), "Gemini CLI skill directory created in sandbox")
+
+            # 7. Test Doctor utility
+            res_doc = subprocess.run(
+                [sys.executable, str(REPO_ROOT / "scripts" / "doctor.py"), "--json", "--target", str(target_proj)],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(res_doc.returncode == 0, "doctor.py --json executed successfully")
+            doc_data = json.loads(res_doc.stdout)
+            self.assert_true(doc_data["cursor"]["status"] == "INSTALLED", "doctor correctly diagnosed Cursor as INSTALLED")
+            self.assert_true(doc_data["antigravity_gemini"]["status"] == "INSTALLED", "doctor correctly diagnosed Gemini CLI / Antigravity as INSTALLED")
+
+            # 8. Test uninstallation with --restore-previous (T01, T03, S01 fix)
+            res_un = subprocess.run(
+                ["bash", str(REPO_ROOT / "uninstall.sh"), "--restore-previous", "--clean-backups", "--target", str(target_proj)],
+                cwd=str(REPO_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assert_true(res_un.returncode == 0, "uninstall.sh --restore-previous succeeded cleanly")
+
+            # CRITICAL ASSERTION: The restored file MUST exist and match original content byte-for-byte!
+            self.assert_true(user_original_prompt.exists(), "Restored prompt exists after uninstallation")
+            if user_original_prompt.exists():
+                self.assert_true(
+                    user_original_prompt.read_text(encoding="utf-8") == "USER_ORIGINAL_PROMPT_CONTENT",
+                    "Restored prompt content matches original pre-sadskill bytes exactly",
+                )
+
+            # CRITICAL ASSERTION: Unrelated backup MUST NOT be deleted (T04, S02 fix)
+            self.assert_true(unrelated_backup.exists(), "Unrelated backup was NOT deleted by --clean-backups")
+
+            # Clean removal of non-restored sadskill directories
             self.assert_true(not codex_dest.exists(), "Codex skill directory cleanly removed")
             self.assert_true(not (target_proj / ".cursor" / "rules" / "sadskill.mdc").exists(), "Cursor rule cleanly removed")
+            self.assert_true(not (target_proj / ".cursor" / "skills" / "sadskill").exists(), "Cursor skill directory cleanly removed")
 
     def test_privacy_and_portability(self):
         print("\n--- Testing Privacy & Portability Constraints ---")
@@ -427,19 +607,15 @@ class VerificationSuite:
 
             rel_path = str(rel)
 
-            # Check machine paths
             if re.search(p_home, content):
                 violations.append((rel_path, "Machine user home directory path detected"))
 
-            # Check brain mentions
             if p_brain in content:
                 violations.append((rel_path, "Internal brain reference detected"))
 
-            # Check local dialect mentions
             if re.search(p_lang, content, re.IGNORECASE):
                 violations.append((rel_path, "Personal language reference detected"))
 
-            # Check standalone personal name (case-insensitive, word boundary, ignoring repo handle)
             for m in re.finditer(p_name, content, re.IGNORECASE):
                 violations.append((rel_path, f"Standalone personal name detected: {m.group(0)}"))
 
@@ -452,14 +628,15 @@ class VerificationSuite:
         self.test_frontmatter_and_discovery()
         self.test_commands_integrity()
         self.test_modes_and_protocols()
-        self.test_vendor_index_and_sources()
+        self.test_vendor_index_and_manifest()
         self.test_community_and_metadata()
+        self.test_guardrail_advanced_hardening()
         self.test_version_consistency()
         self.test_evidence_verifier_safety()
-        self.test_behavioral_fixture()
+        self.test_behavioral_fixtures()
         self.test_benchmarks_execution()
         self.test_markdown_relative_links()
-        self.test_sandbox_installer()
+        self.test_sandbox_installer_and_safety()
         self.test_privacy_and_portability()
 
         print("\n==========================================")

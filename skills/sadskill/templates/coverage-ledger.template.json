@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SadskillCoverageLedger",
+  "type": "object",
+  "required": [
+    "repository",
+    "timestamp",
+    "status",
+    "total_tracked_files",
+    "scanned_files",
+    "subsystems"
+  ],
+  "properties": {
+    "repository": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["FULL_COVERAGE", "PARTIAL_COVERAGE"]
+    },
+    "total_tracked_files": {
+      "type": "integer"
+    },
+    "scanned_files": {
+      "type": "integer"
+    },
+    "coverage_percentage": {
+      "type": "number"
+    },
+    "excluded_paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "subsystems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "files_count": { "type": "integer" },
+          "inspected_files": { "type": "integer" },
+          "risk_level": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] }
+        }
+      }
+    }
+  }
+}

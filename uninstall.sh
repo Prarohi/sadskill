@@ -2,33 +2,39 @@
 # sadskill uninstaller: clean removal from agent environments (v0.3.0)
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${PWD}"
 PURGE="false"
 CLEAN_BACKUPS="false"
 RESTORE_PREVIOUS="false"
+DRY_RUN="false"
 MANIFEST_FILE="${HOME}/.sadskill/install-manifest.json"
 
 show_help() {
-  echo "Usage: ./uninstall.sh [options]"
-  echo ""
-  echo "Options:"
-  echo "  -t, --target <dir>     Target project directory for Cursor removal (default: current working dir)"
-  echo "      --restore-previous Restore original files from .bak timestamp archives if available"
-  echo "      --clean-backups    Remove all .bak timestamp archives created during installation"
-  echo "      --purge            Remove ~/.sadskill user profile directory"
-  echo "  -h, --help             Show this help message and exit"
-  exit 0
+  local exit_code="${1:-0}"
+  cat << 'EOF'
+Usage: ./uninstall.sh [options]
+
+Options:
+  -t, --target <dir>     Target project directory for Cursor removal (default: current working dir)
+      --restore-previous Restore original files from .bak timestamp archives if available
+      --clean-backups    Remove .bak timestamp archives created by sadskill
+      --dry-run          Preview actions without modifying or removing files
+      --purge            Remove ~/.sadskill user profile directory
+  -h, --help             Show this help message and exit
+EOF
+  exit "$exit_code"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
-      show_help
+      show_help 0
       ;;
     -t|--target)
-      if [[ $# -lt 2 ]]; then
+      if [[ $# -lt 2 || "$2" =~ ^- ]]; then
         echo "Error: --target requires a value." >&2
-        show_help
+        show_help 2
       fi
       TARGET_DIR="$2"
       shift 2
@@ -45,94 +51,91 @@ while [[ $# -gt 0 ]]; do
       CLEAN_BACKUPS="true"
       shift
       ;;
+    --dry-run)
+      DRY_RUN="true"
+      shift
+      ;;
     *)
-      echo "Unknown option: $1" >&2
-      show_help
+      echo "Error: Unknown option: $1" >&2
+      show_help 2
       ;;
   esac
 done
 
-echo "=== Uninstalling sadskill ==="
+echo "=== Uninstalling sadskill (v0.3.0) ==="
 
-# Optional restoration from manifest
-if [[ "$RESTORE_PREVIOUS" == "true" && -f "$MANIFEST_FILE" ]]; then
-  echo "-> Attempting to restore original files from backup archives..."
-  python3 -c "
-import json, os, shutil
-manifest_path = '$MANIFEST_FILE'
-try:
-    with open(manifest_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    for entry in reversed(data.get('entries', [])):
-        dest = entry.get('destination')
-        bak = entry.get('backup')
-        if bak and os.path.exists(bak) and dest:
-            print(f'   [RESTORE] Restoring {dest} from {bak}')
-            if os.path.isdir(dest):
-                shutil.rmtree(dest)
-            elif os.path.isfile(dest):
-                os.remove(dest)
-            shutil.move(bak, dest)
-except Exception as e:
-    print(f'   [WARN] Restoration encountered error: {e}')
-" 2>/dev/null || true
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "   [DRY-RUN MODE] No files will be removed or modified."
 fi
 
-# Codex removal
-if [[ -d "${HOME}/.codex/skills/sadskill" ]]; then
-  echo "-> Removing from OpenAI Codex / ChatGPT Desktop..."
-  rm -rf "${HOME}/.codex/skills/sadskill"
-  rm -f "${HOME}/.codex/prompts/sad-plan.md" \
-        "${HOME}/.codex/prompts/sad-design.md" \
-        "${HOME}/.codex/prompts/sad-backend.md" \
-        "${HOME}/.codex/prompts/sad-sec.md" \
-        "${HOME}/.codex/prompts/sad-analyze.md"
-  if [[ "$CLEAN_BACKUPS" == "true" ]]; then
-    rm -rf "${HOME}/.codex/skills/sadskill.bak."* "${HOME}/.codex/prompts/"*.bak.*
+# Use manifest-driven uninstaller if manifest exists
+if [[ -f "$MANIFEST_FILE" ]]; then
+  echo "-> Processing uninstallation via verified manifest ledger..."
+  opts=(--manifest "$MANIFEST_FILE" --target "$TARGET_DIR")
+  if [[ "$RESTORE_PREVIOUS" == "true" ]]; then
+    opts+=(--restore-previous)
   fi
-  echo "   [OK] Removed from Codex"
-fi
+  if [[ "$CLEAN_BACKUPS" == "true" ]]; then
+    opts+=(--clean-backups)
+  fi
+  if [[ "$DRY_RUN" == "true" ]]; then
+    opts+=(--dry-run)
+  fi
 
-# Claude removal
-if [[ -d "${HOME}/.claude/skills/sadskill" ]]; then
-  echo "-> Removing from Claude Code..."
-  rm -rf "${HOME}/.claude/skills/sadskill"
-  rm -f "${HOME}/.claude/commands/sad-plan.md" \
-        "${HOME}/.claude/commands/sad-design.md" \
-        "${HOME}/.claude/commands/sad-backend.md" \
-        "${HOME}/.claude/commands/sad-sec.md" \
-        "${HOME}/.claude/commands/sad-analyze.md" \
-        "${HOME}/.claude/hooks/git-guardrail.sh"
-  if [[ "$CLEAN_BACKUPS" == "true" ]]; then
-    rm -rf "${HOME}/.claude/skills/sadskill.bak."* "${HOME}/.claude/commands/"*.bak.*
-  fi
-  echo "   [OK] Removed from Claude Code"
-fi
+  python3 "${SCRIPT_DIR}/scripts/manifest.py" uninstall "${opts[@]}"
+else
+  # Fallback for unmanaged/legacy installs without a manifest:
+  # Check and remove only verified sadskill installations without deleting restored or unrelated files.
+  echo "-> Notice: Manifest ledger not found. Running safe fallback uninstallation..."
 
-# Antigravity removal
-if [[ -d "${HOME}/.gemini/antigravity/skills/sadskill" ]]; then
-  echo "-> Removing from Google Antigravity..."
-  rm -rf "${HOME}/.gemini/antigravity/skills/sadskill"
-  if [[ "$CLEAN_BACKUPS" == "true" ]]; then
-    rm -rf "${HOME}/.gemini/antigravity/skills/sadskill.bak."*
-  fi
-  echo "   [OK] Removed from Antigravity"
-fi
+  remove_safe_file() {
+    local file="$1"
+    if [[ -f "$file" ]]; then
+      if grep -q "sadskill" "$file" 2>/dev/null; then
+        echo "   [REMOVE] Removing verified sadskill file: $file"
+        if [[ "$DRY_RUN" != "true" ]]; then
+          rm -f "$file"
+        fi
+      else
+        echo "   [PRESERVE] Skipping file without sadskill signature: $file"
+      fi
+    fi
+  }
 
-# Cursor removal
-if [[ -f "${TARGET_DIR}/.cursor/rules/sadskill.mdc" || -d "${TARGET_DIR}/.cursor/skills/sadskill" ]]; then
-  echo "-> Removing Cursor workspace rule and skill in ${TARGET_DIR}..."
-  rm -f "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
-  rm -rf "${TARGET_DIR}/.cursor/skills/sadskill"
-  if [[ "$CLEAN_BACKUPS" == "true" ]]; then
-    rm -f "${TARGET_DIR}/.cursor/rules/sadskill.mdc.bak."*
-  fi
-  echo "   [OK] Removed Cursor rules and workspace skills"
+  remove_safe_dir() {
+    local dir="$1"
+    if [[ -d "$dir" && "$(basename "$dir")" == "sadskill" ]]; then
+      echo "   [REMOVE] Removing sadskill directory: $dir"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        rm -rf "$dir"
+      fi
+    fi
+  }
+
+  remove_safe_dir "${HOME}/.codex/skills/sadskill"
+  for f in "${HOME}/.codex/prompts/sad-"*.md; do
+    remove_safe_file "$f"
+  done
+
+  remove_safe_dir "${HOME}/.claude/skills/sadskill"
+  for f in "${HOME}/.claude/commands/sad-"*.md; do
+    remove_safe_file "$f"
+  done
+  remove_safe_file "${HOME}/.claude/hooks/git-guardrail.sh"
+
+  remove_safe_dir "${HOME}/.gemini/antigravity/skills/sadskill"
+
+  remove_safe_file "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
+  remove_safe_dir "${TARGET_DIR}/.cursor/skills/sadskill"
 fi
 
 if [[ "$PURGE" == "true" ]]; then
-  echo "-> Purging ~/.sadskill directory..."
-  rm -rf "${HOME}/.sadskill"
+  echo "-> Purging ~/.sadskill user profile directory..."
+  if [[ "$DRY_RUN" != "true" ]]; then
+    rm -rf "${HOME}/.sadskill"
+  else
+    echo "   [DRY-RUN] Would remove ${HOME}/.sadskill"
+  fi
 fi
 
 echo "=== sadskill uninstalled successfully ==="

@@ -1,0 +1,366 @@
+{
+  "schema_version": "1.0.0",
+  "total_references": 40,
+  "references": [
+    {
+      "path": "skills/sadskill/vendor/mattpocock/codebase-design.ref.md",
+      "category": "Architecture",
+      "organization": "mattpocock",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "04bfb31d931228417f96037e5ca7dc21f6613060a254ec60304cd738539f91a4",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/mattpocock/tdd.ref.md",
+      "category": "Testing",
+      "organization": "mattpocock",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "409fca3fa6bff4929dfb4bef278a6fb183d14e0ee22b730e57733c10d3f29350",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/mattpocock/domain-modeling.ref.md",
+      "category": "Type Systems",
+      "organization": "mattpocock",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "18aa43499c9e570e778a5fe0bc3f1ef504692076d89aebba29a1ab50b87f7d9b",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/mattpocock/code-review.ref.md",
+      "category": "Code Review",
+      "organization": "mattpocock",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "0f3b547a4172465a6085c0292d468252b03a0eaadc76b40b03f96011d574d41a",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/mattpocock/improve-architecture.ref.md",
+      "category": "Architecture",
+      "organization": "mattpocock",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "f6e162be442a34fbd5dd90b909a7cce41b33404bba8393665f37cf7dc3083dd8",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/superpowers/brainstorming.ref.md",
+      "category": "Ideation",
+      "organization": "superpowers",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "7324ee36354e78191a306b6e46b1b4d6dbb450104481783ead5a16f270ba9ea5",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/superpowers/writing-plans.ref.md",
+      "category": "Planning",
+      "organization": "superpowers",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "6ed0d42e3c42cd8f74492584ffee9299febaf3fc5d1c17d5d640fcc19bcdcbda",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/superpowers/subagent-driven-development.ref.md",
+      "category": "Multi-Agent",
+      "organization": "superpowers",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "2b466269c5fdd6d3dca0e1a0eaf9799c74c5cdf94d6fc97811a5ce7bef797839",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/karpathy/guidelines.ref.md",
+      "category": "Core Engineering",
+      "organization": "karpathy",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "fbcb6866726cb0b28a3186107c64be1693ec4adfa4febfd20d2c3928ad8e9cec",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/humanizer/humanizer-core.ref.md",
+      "category": "Communication",
+      "organization": "humanizer",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "a079fc20cd2f5f7fd8657edd04c6455c30fc225f56475d879869ecd9c6f8637b",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/attention-span/attention-span.ref.md",
+      "category": "Reader UX",
+      "organization": "attention-span",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "aa708d1d3aaf5a9261097b87a87ae9c0b22741b8be88d74eec89b027bf0803c1",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/impeccable/craft-floor.ref.md",
+      "category": "Frontend Quality",
+      "organization": "impeccable",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "71e4b179ec9e53dc74a62fdc6905f3bc47463ca47eea4c904df7af0d1e5a466a",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/impeccable/modes.ref.md",
+      "category": "Frontend UX",
+      "organization": "impeccable",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "4ab1d814b26d44547d83abd33b37f563e43f65d562ea579bcc7e8552d9f5610b",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/impeccable/typography-and-spacing.ref.md",
+      "category": "Design Tokens",
+      "organization": "impeccable",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "60e72982eb3a6c3042a80649c5a2f2fbe5e6d2e809970449d22e0c981bea74c6",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/taste/taste-vocabulary.ref.md",
+      "category": "Creative Direction",
+      "organization": "taste",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "6bf8fdff31d27ac024378a1694223dd5426ec811aef31ecbff44abfb94bb7ae5",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/shadcn/component-patterns.ref.md",
+      "category": "Components",
+      "organization": "shadcn",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "7d5e23ad8d6d4145fe0ee4d30fbe39da1e054f25d11ff22148f0cafad2aeb9cc",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/vercel/web-design-guidelines.ref.md",
+      "category": "Frontend UX",
+      "organization": "vercel",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "dfd7d2bff7c5add75d351ac74d557c01656ad7416e750ad2e6c10f6da32f2b50",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/vercel/react-next-patterns.ref.md",
+      "category": "Full Stack",
+      "organization": "vercel",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "fc68c2428e42d20d69bbcbd18bdbe0daf698123d90840ad032279e900ce3bac9",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/anthropic/frontend-design.ref.md",
+      "category": "Frontend UX",
+      "organization": "anthropic",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "3a198a66d4db6c7be20c5078d24247678aede3b99381b01b18469d71b4343e33",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/supabase/postgres-best-practices.ref.md",
+      "category": "Database",
+      "organization": "supabase",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "7540065f619b806af7d7263c6680dbc4094db3410f3ab715bef5f20691a10cb2",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/supabase/rls-and-migrations.ref.md",
+      "category": "Database Security",
+      "organization": "supabase",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "2fce4ff17f88094705d1f46b9e14228aec75cf30f36d7d976355a5395b8ffa75",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/owasp/owasp-top-10.ref.md",
+      "category": "Security",
+      "organization": "owasp",
+      "license": "CC-BY-SA-4.0",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "26e35ff0201727d0395b751f65f2d2e6abb3498ddfecea5407009f72d43ea489",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/owasp/api-security.ref.md",
+      "category": "API Security",
+      "organization": "owasp",
+      "license": "CC-BY-SA-4.0",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "cf9166fb71bce6f08faee31bef47706a7cda8b63e7af8ac9956421bd7b2c0b3b",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/ecc/codebase-onboarding.ref.md",
+      "category": "Reconnaissance",
+      "organization": "ecc",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "118092fb3d7360508dcef1546549e8c0c3908d2a19358f7ee1642cfaf906c029",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/ecc/repo-scan.ref.md",
+      "category": "Code Health",
+      "organization": "ecc",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "6f40e0508954ba2e6096e20d02f51eb31a61c4706063b3eec6c7ec100189f36f",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/ecc/security-review.ref.md",
+      "category": "Security",
+      "organization": "ecc",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "e436ecc3a105857981514a38f26bb6c0af27e71c07a2c5276a95ebd3b006fb4e",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/animation/apple-design.ref.md",
+      "category": "Animation",
+      "organization": "animation",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "3b6d162a29528dc7c72f098e5f68181cba9fad4286c183a53461f6c823e1e9f5",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/animation/animate-fundamentals.ref.md",
+      "category": "Animation",
+      "organization": "animation",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "fadb2ee069a85b6fad4211978f9463f1237c3df33cac3d8988713b11ea738b32",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/animation/gsap-framer-scroll.ref.md",
+      "category": "Motion",
+      "organization": "animation",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "e30f2ccbec85e7d001735a0938db4959b3a3a01ac7f5b96175abef0529e400d3",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/modern-web/modern-web-guidance.ref.md",
+      "category": "Web Standards",
+      "organization": "modern-web",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "e4a2f5534757c7a7466a7d80d6e82faa9126d1b35305df0b2dd1402321fc8ab8",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/modern-web/a11y-debugging.ref.md",
+      "category": "Accessibility",
+      "organization": "modern-web",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "8c330f7a418392874f69414cda840313f3a3bf2ad89fb2bc3e37ef9994655e67",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/marketing/landing-page-copy.ref.md",
+      "category": "Marketing",
+      "organization": "marketing",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "238dec4654399f2ba44ccd5e6ebc63e9b311a330652427037243c1a3eb92747f",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/cloudflare/edge-workers-d1.ref.md",
+      "category": "Edge & Serverless",
+      "organization": "cloudflare",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "0393d4f26f1ea955bf566cf6d40bb58dd0f48c755c2bf68124bdc9eae79e7f8b",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/linear/linear-issue-workflow.ref.md",
+      "category": "Workflow",
+      "organization": "linear",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "abbdc9ae16ef07efa737348bb9dc5beaa32c7a5674f215d95c317f67357ed682",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/ios/ios-simulator.ref.md",
+      "category": "Mobile QA",
+      "organization": "ios",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "738bb2de9c32f2412696f37d52f0f85ec1c77a6389e440ad0f6283bc73b28bab",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/waza/craftsmanship.ref.md",
+      "category": "Engineering Culture",
+      "organization": "waza",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "931fecbcdb7c3caca3ad88765e4ac04cb0755f7e6e387e6a08e857156180d248",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/octopus/multi-model-consensus.ref.md",
+      "category": "Architecture",
+      "organization": "octopus",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "525656d82871a3cc4e749e6f1e4ae074ea92558ad2dbaf065b1796b4b36c1baf",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/octopus/discipline-mode.ref.md",
+      "category": "Verification",
+      "organization": "octopus",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "0412661a510766872f0d4e26ba8075a4e0d6bdc889d4f4f7455bb9454654a107",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/addyosmani/web-vitals.ref.md",
+      "category": "Frontend Performance",
+      "organization": "addyosmani",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "380274f6c142e0c5431e6e7f8456fcaf9a433cb439ca83de197c53dbd93bab11",
+      "verified_at": "2026-10-28"
+    },
+    {
+      "path": "skills/sadskill/vendor/integralist/systems-design.ref.md",
+      "category": "Distributed Systems",
+      "organization": "integralist",
+      "license": "MIT",
+      "adaptation_type": "curated_excerpt",
+      "sha256": "466a7dc6bd25de37aa2567c20e5e86f797c0d01aca1962f16cffd56bf9661c8b",
+      "verified_at": "2026-10-28"
+    }
+  ]
+}

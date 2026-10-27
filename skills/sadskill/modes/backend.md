@@ -14,14 +14,16 @@ Backend mode enforces schema-first engineering, reversible migrations, zero-trus
    - Financial & Decimal: Use `numeric(10,2)` or integer cents. Never floating point numbers.
    - Enums vs Foreign Keys: Prefer small lookup tables or check constraints over hardcoded database enums that hinder migration.
 
-### Phase 2: Reversible Migrations
-1. Always write dual migration scripts:
-   - `up.sql`: Applies the schema changes.
+### Phase 2: Reversible Migrations & Data Safety
+1. Paired migration scripts:
+   - `up.sql`: Applies the forward schema changes.
    - `down.sql`: Exact reversal logic (drops tables, restores columns, drops constraints in reverse order).
-2. Avoid destructive non-nullable additions on populated tables. Follow the expand/contract pattern:
-   - Add column as nullable.
-   - Backfill default values in chunks.
-   - Add `NOT NULL` constraint and application validation.
+2. For irreversible operations (e.g. dropping data columns or truncating tables):
+   - Document explicit backup requirements and snapshot restore procedures.
+   - Use the expand/contract pattern for schema evolution:
+     - Add column as nullable.
+     - Backfill default values in manageable transaction batches.
+     - Add `NOT NULL` constraint and application validation.
 
 ### Phase 3: Row Level Security (RLS) & Access Control
 1. **Zero-Trust Baseline**:
@@ -33,16 +35,17 @@ Backend mode enforces schema-first engineering, reversible migrations, zero-trus
    - Write separate policies for `SELECT`, `INSERT`, `UPDATE`, and `DELETE`.
    - Never write a catch-all `ALL` policy unless universally applicable.
    - Verify that non-authenticated requests cannot bypass authorization filters.
+   - Validate RLS in a real database environment with role impersonation tests (e.g. Tenant A vs Tenant B).
 
 ### Phase 4: Indexing & Query Performance
 1. **Rule of Indexing**:
-   - Foreign keys: Always index columns used in `REFERENCES` joins.
+   - Foreign keys: Index columns used in `REFERENCES` joins where workload indicates write costs are outweighed by join query speed.
    - Composite indexes: Order equality columns first (`status = 'active'`), then range columns (`created_at > ...`).
    - Partial indexes: Use `WHERE deleted_at IS NULL` or `WHERE is_active = true` to keep index trees compact.
    - JSONB / Search: Use `GIN` index for containment (`@>`) or full-text search.
 2. **Safe Query Performance Analysis**:
    - For read queries (`SELECT`): Run `EXPLAIN (ANALYZE, BUFFERS)` to verify index scans over sequential scans on large tables.
-   - For write queries (`INSERT`, `UPDATE`, `DELETE`): Never run `ANALYZE` bare, as it executes mutations. Use `EXPLAIN (BUFFERS)` without `ANALYZE` or wrap inside a transaction rollback:
+   - For write queries (`INSERT`, `UPDATE`, `DELETE`): Use `EXPLAIN (BUFFERS)` without `ANALYZE` in production, or test inside staging transactions with explicit rollback:
      ```sql
      BEGIN;
      EXPLAIN (ANALYZE, BUFFERS) DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '90 days';

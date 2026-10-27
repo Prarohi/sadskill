@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SadskillContextHandoff",
+  "type": "object",
+  "required": [
+    "handoff_version",
+    "source_mode",
+    "target_mode",
+    "task_id",
+    "user_goal",
+    "authorized_scope"
+  ],
+  "properties": {
+    "handoff_version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "source_mode": {
+      "type": "string",
+      "enum": ["analyze", "plan", "design", "backend", "security", "implement"]
+    },
+    "target_mode": {
+      "type": "string",
+      "enum": ["analyze", "plan", "design", "backend", "security", "implement"]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "user_goal": {
+      "type": "string"
+    },
+    "authorized_scope": {
+      "type": "string"
+    },
+    "key_findings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "accepted_decisions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "rejected_options": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "open_risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "test_commands": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "required_permissions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "completion_definition": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

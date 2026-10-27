@@ -208,9 +208,92 @@ TASK_EVALUATORS = {
 }
 
 
+def run_track_b_fixtures():
+    print("\n--- Track B: Behavioral Fixture Graders ---")
+    fixtures = [
+        ("Tenant Isolation Fixture", REPO_ROOT / "benchmarks" / "fixtures" / "tenant-isolation" / "grader.py"),
+        ("Database RLS Fixture", REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"),
+    ]
+    passed = 0
+    results = []
+    for name, grader_path in fixtures:
+        if not grader_path.exists():
+            print(f"  ❌ FAIL: Grader not found at {grader_path}")
+            results.append({"name": name, "status": "FAIL", "reason": "Missing grader"})
+            continue
+        res = subprocess.run([sys.executable, str(grader_path)], capture_output=True, text=True)
+        if res.returncode == 0:
+            passed += 1
+            print(f"  ✓ PASS: {name} behavioral checks passed cleanly (exit 0)")
+            results.append({"name": name, "status": "PASS"})
+        else:
+            print(f"  ❌ FAIL: {name} exited with code {res.returncode}")
+            results.append({"name": name, "status": "FAIL", "reason": res.stderr.strip()})
+    return passed, len(fixtures), results
+
+
+def run_track_c_suite():
+    print("\n--- Track C: 24-Task Real Evaluation Suite Validation ---")
+    suite_file = REPO_ROOT / "benchmarks" / "tasks" / "suite_24.json"
+    if not suite_file.exists():
+        print(f"  ❌ FAIL: 24-task benchmark suite file missing: {suite_file}")
+        return 0, 1, [{"status": "FAIL", "reason": "Missing suite_24.json"}]
+
+    try:
+        tasks = json.loads(suite_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"  ❌ FAIL: Invalid JSON in suite_24.json: {e}")
+        return 0, 1, [{"status": "FAIL", "reason": str(e)}]
+
+    expected_categories = {
+        "Bugfix": 4,
+        "Backend & Security": 4,
+        "Frontend & Design": 4,
+        "Architecture & Reliability": 4,
+        "Full-Codebase Analysis": 4,
+        "Autonomy, Research & Context": 4,
+    }
+
+    required_fields = [
+        "id", "name", "category", "difficulty", "repo_snapshot",
+        "user_prompt", "tool_requirements", "budget", "fixture_seed",
+        "baseline_branch", "sadskill_branch", "hidden_grader",
+        "safety_scope", "expected_outputs", "success_metrics",
+        "evaluation_metadata", "reproduction_procedure",
+    ]
+
+    cat_counts = {}
+    schema_errors = []
+
+    for t in tasks:
+        cat = t.get("category", "Unknown")
+        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        for field in required_fields:
+            if field not in t:
+                schema_errors.append(f"Task {t.get('id')} missing field: {field}")
+
+    if schema_errors:
+        print(f"  ❌ FAIL: Schema errors in suite_24.json: {schema_errors[:3]}")
+        return 0, 1, [{"status": "FAIL", "errors": schema_errors}]
+
+    all_cats_match = True
+    for cat, exp in expected_categories.items():
+        actual = cat_counts.get(cat, 0)
+        if actual < exp:
+            print(f"  ❌ FAIL: Category '{cat}' has {actual} tasks, expected {exp}")
+            all_cats_match = False
+        else:
+            print(f"  ✓ PASS: Category '{cat}': {actual}/{exp} tasks fully specified")
+
+    if len(tasks) >= 24 and all_cats_match:
+        print(f"  ✓ PASS: Complete 24-task benchmark suite ({len(tasks)} tasks) validated successfully.")
+        return 1, 1, [{"status": "PASS", "total_tasks": len(tasks)}]
+    return 0, 1, [{"status": "FAIL", "reason": "Category count mismatch"}]
+
+
 def run_benchmarks(output_file=None):
     print("==================================================")
-    print("  sadskill Contract & Policy Verification Suite   ")
+    print("  sadskill Benchmark & Evaluation Suite (v0.3.0)  ")
     print("==================================================")
 
     if not TASKS_FILE.exists():
@@ -223,6 +306,7 @@ def run_benchmarks(output_file=None):
         print(f"Error parsing tasks file: {e}", file=sys.stderr)
         return 1
 
+    print("\n--- Track A: Deterministic Policy & Contract Checks ---")
     passed = 0
     total = len(tasks)
     results = []
@@ -235,7 +319,6 @@ def run_benchmarks(output_file=None):
 
         evaluator = TASK_EVALUATORS.get(tid)
         if evaluator is None:
-            # FIX EVAL-02: Unknown task ID must immediately FAIL
             print(f"  ❌ FAIL: No evaluator registered for task ID '{tid}' (UNSUPPORTED_TASK)")
             results.append({"id": tid, "status": "FAIL", "reason": "UNSUPPORTED_TASK"})
             continue
@@ -254,26 +337,41 @@ def run_benchmarks(output_file=None):
             print(f"  ❌ FAIL: {notes}")
             results.append({"id": tid, "status": "FAIL", "reason": notes})
 
-    # FIX EVAL-03: Dynamic pass rate calculation
     pass_rate = (passed / total * 100.0) if total > 0 else 0.0
+    print(f"\nTrack A Results: {passed}/{total} Contract Checks Passed ({pass_rate:.1f}%)")
+
+    # Track B: Behavioral Fixtures
+    b_pass, b_total, b_res = run_track_b_fixtures()
+
+    # Track C: 24-Task Evaluation Suite
+    c_pass, c_total, c_res = run_track_c_suite()
+
+    all_passed = (passed == total) and (b_pass == b_total) and (c_pass == c_total)
 
     print("\n==================================================")
-    print(f"Verification Results: {passed}/{total} Passed ({pass_rate:.1f}% Pass Rate)")
+    print(f"Overall Benchmark Status: {'ALL PASS (100%)' if all_passed else 'FAILURES DETECTED'}")
+    print(f"  - Track A (Contracts): {passed}/{total}")
+    print(f"  - Track B (Fixtures):  {b_pass}/{b_total}")
+    print(f"  - Track C (24 Tasks):  {c_pass}/{c_total}")
     print("==================================================")
 
-    # Save summary report if specified or to benchmarks/results/
     if output_file:
         out_path = Path(output_file).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        summary = {"passed": passed, "total": total, "pass_rate_pct": round(pass_rate, 2), "results": results}
+        summary = {
+            "track_a_contracts": {"passed": passed, "total": total, "results": results},
+            "track_b_fixtures": {"passed": b_pass, "total": b_total, "results": b_res},
+            "track_c_suite_24": {"passed": c_pass, "total": c_total, "results": c_res},
+            "overall_success": all_passed,
+        }
         out_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         print(f"Saved verification summary to: {out_path}")
 
-    return 0 if passed == total else 1
+    return 0 if all_passed else 1
 
 
 def main():
-    parser = argparse.ArgumentParser(description="sadskill Contract & Policy Verification Suite")
+    parser = argparse.ArgumentParser(description="sadskill Contract & Benchmark Evaluation Suite")
     parser.add_argument("--output", help="Optional path to write verification JSON summary")
     args = parser.parse_args()
 

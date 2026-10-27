@@ -7,39 +7,44 @@ TARGET_AGENT="auto"
 TARGET_DIR="${PWD}"
 TARGET_DIR_EXPLICIT="false"
 NO_BACKUP="false"
+DRY_RUN="false"
 MANIFEST_FILE="${HOME}/.sadskill/install-manifest.json"
 
 show_help() {
-  echo "Usage: ./install.sh [options]"
-  echo ""
-  echo "Options:"
-  echo "  -a, --agent <name>     Target agent: auto, codex, claude, cursor, antigravity, all (default: auto)"
-  echo "  -t, --target <dir>     Target project directory for Cursor installation (default: current working dir)"
-  echo "      --no-backup        Overwrite existing installations without creating .bak timestamp archives"
-  echo "  -h, --help             Show this help message and exit"
-  echo ""
-  echo "Primary Recommended Installation (Universal):"
-  echo "  npx skills add sadafbabu/sadskill"
-  exit 0
+  local exit_code="${1:-0}"
+  cat << 'EOF'
+Usage: ./install.sh [options]
+
+Options:
+  -a, --agent <name>     Target agent: auto, codex, claude, cursor, antigravity, gemini, all (default: auto)
+  -t, --target <dir>     Target project directory for Cursor installation (default: current working dir)
+      --no-backup        Overwrite existing installations without creating .bak timestamp archives
+      --dry-run          Preview proposed installation changes without writing files
+  -h, --help             Show this help message and exit
+
+Primary Recommended Installation (Universal):
+  npx skills add sadafbabu/sadskill
+EOF
+  exit "$exit_code"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
-      show_help
+      show_help 0
       ;;
     -a|--agent)
-      if [[ $# -lt 2 ]]; then
+      if [[ $# -lt 2 || "$2" =~ ^- ]]; then
         echo "Error: --agent requires a value." >&2
-        show_help
+        show_help 2
       fi
       TARGET_AGENT="$2"
       shift 2
       ;;
     -t|--target)
-      if [[ $# -lt 2 ]]; then
+      if [[ $# -lt 2 || "$2" =~ ^- ]]; then
         echo "Error: --target requires a value." >&2
-        show_help
+        show_help 2
       fi
       TARGET_DIR="$2"
       TARGET_DIR_EXPLICIT="true"
@@ -49,49 +54,49 @@ while [[ $# -gt 0 ]]; do
       NO_BACKUP="true"
       shift
       ;;
-    auto|codex|claude|cursor|antigravity|all)
+    --dry-run)
+      DRY_RUN="true"
+      shift
+      ;;
+    auto|codex|claude|cursor|antigravity|gemini|all)
       TARGET_AGENT="$1"
       shift
       ;;
     *)
-      echo "Unknown argument: $1" >&2
-      show_help
+      echo "Error: Unknown argument: $1" >&2
+      show_help 2
       ;;
   esac
 done
 
 echo "=== Installing sadskill (v0.3.0) ==="
 
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "   [DRY-RUN MODE] No filesystem modifications will be made."
+fi
+
 mkdir -p "${HOME}/.sadskill"
 
-# Manifest tracker
+# Manifest tracker using robust python helper
 record_manifest_entry() {
   local agent="$1"
   local dest="$2"
   local backup_path="${3:-}"
-  local timestamp
-  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  # Simple JSON append / update via Python
-  python3 -c "
-import json, os
-manifest_path = '$MANIFEST_FILE'
-data = {'version': '0.3.0', 'entries': []}
-if os.path.exists(manifest_path):
-    try:
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except Exception:
-        pass
-data['entries'].append({
-    'agent': '$agent',
-    'destination': '$dest',
-    'backup': '$backup_path',
-    'installed_at': '$timestamp'
-})
-with open(manifest_path, 'w', encoding='utf-8') as f:
-    json.dump(data, f, indent=2)
-" 2>/dev/null || true
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "   [DRY-RUN MANIFEST] Would record: agent=${agent}, dest=${dest}, backup=${backup_path}"
+    return 0
+  fi
+
+  if ! python3 "${SCRIPT_DIR}/scripts/manifest.py" record \
+    --manifest "$MANIFEST_FILE" \
+    --agent "$agent" \
+    --destination "$dest" \
+    --backup "$backup_path" \
+    --target "$TARGET_DIR"; then
+    echo "Error: Failed to record manifest entry for destination: $dest" >&2
+    exit 1
+  fi
 }
 
 backup_and_install_skill() {
@@ -101,16 +106,27 @@ backup_and_install_skill() {
 
   if [[ -d "$dest" ]]; then
     if [[ "$NO_BACKUP" == "true" ]]; then
-      rm -rf "$dest"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        rm -rf "$dest"
+      else
+        echo "   [DRY-RUN] Would remove existing: ${dest}"
+      fi
     else
       local backup="${dest}.bak.$(date +%Y%m%d%H%M%S)"
       echo "   [INFO] Preserving existing installation at ${backup}"
-      mv "$dest" "$backup"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        mv "$dest" "$backup"
+      fi
       backup_dest="$backup"
     fi
   fi
-  mkdir -p "$(dirname "$dest")"
-  cp -r "${SCRIPT_DIR}/skills/sadskill" "$dest"
+
+  if [[ "$DRY_RUN" != "true" ]]; then
+    mkdir -p "$(dirname "$dest")"
+    cp -r "${SCRIPT_DIR}/skills/sadskill" "$dest"
+  else
+    echo "   [DRY-RUN] Would copy skill to ${dest}"
+  fi
   record_manifest_entry "$agent" "$dest" "$backup_dest"
 }
 
@@ -120,7 +136,9 @@ install_codex() {
   local prompts_dir="${codex_dir}/prompts"
 
   echo "-> Configuring for OpenAI Codex / ChatGPT Desktop..."
-  mkdir -p "${skills_dir}" "${prompts_dir}"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    mkdir -p "${skills_dir}" "${prompts_dir}"
+  fi
 
   backup_and_install_skill "codex" "${skills_dir}/sadskill"
 
@@ -130,9 +148,15 @@ install_codex() {
       local cmd_backup=""
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
         cmd_backup="${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$target_cmd" "$cmd_backup"
+        if [[ "$DRY_RUN" != "true" ]]; then
+          mv "$target_cmd" "$cmd_backup"
+        fi
       fi
-      cp "$cmd" "$target_cmd"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        cp "$cmd" "$target_cmd"
+      else
+        echo "   [DRY-RUN] Would install prompt to ${target_cmd}"
+      fi
       record_manifest_entry "codex_prompt" "$target_cmd" "$cmd_backup"
     fi
   done
@@ -143,9 +167,12 @@ install_claude() {
   local claude_dir="${HOME}/.claude"
   local skills_dir="${claude_dir}/skills"
   local commands_dir="${claude_dir}/commands"
+  local hooks_dir="${claude_dir}/hooks"
 
   echo "-> Configuring for Claude Code..."
-  mkdir -p "${skills_dir}" "${commands_dir}"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    mkdir -p "${skills_dir}" "${commands_dir}" "${hooks_dir}"
+  fi
 
   backup_and_install_skill "claude" "${skills_dir}/sadskill"
 
@@ -155,19 +182,36 @@ install_claude() {
       local cmd_backup=""
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
         cmd_backup="${target_cmd}.bak.$(date +%Y%m%d%H%M%S)"
-        mv "$target_cmd" "$cmd_backup"
+        if [[ "$DRY_RUN" != "true" ]]; then
+          mv "$target_cmd" "$cmd_backup"
+        fi
       fi
-      cp "$cmd" "$target_cmd"
+      if [[ "$DRY_RUN" != "true" ]]; then
+        cp "$cmd" "$target_cmd"
+      else
+        echo "   [DRY-RUN] Would install command to ${target_cmd}"
+      fi
       record_manifest_entry "claude_command" "$target_cmd" "$cmd_backup"
     fi
   done
 
-  local hooks_dir="${claude_dir}/hooks"
-  mkdir -p "${hooks_dir}"
+  # Safe guardrail hook installation with backup
   local guardrail_target="${hooks_dir}/git-guardrail.sh"
-  cp "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "$guardrail_target"
-  chmod +x "$guardrail_target"
-  record_manifest_entry "claude_hook" "$guardrail_target" ""
+  local hook_backup=""
+  if [[ -f "$guardrail_target" && "$NO_BACKUP" != "true" ]] && ! cmp -s "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "$guardrail_target"; then
+    hook_backup="${guardrail_target}.bak.$(date +%Y%m%d%H%M%S)"
+    echo "   [INFO] Preserving existing Claude hook at ${hook_backup}"
+    if [[ "$DRY_RUN" != "true" ]]; then
+      mv "$guardrail_target" "$hook_backup"
+    fi
+  fi
+  if [[ "$DRY_RUN" != "true" ]]; then
+    cp "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "$guardrail_target"
+    chmod +x "$guardrail_target"
+  else
+    echo "   [DRY-RUN] Would install guardrail hook to ${guardrail_target}"
+  fi
+  record_manifest_entry "claude_hook" "$guardrail_target" "$hook_backup"
 
   echo "   [OK] Installed skill, commands, and guardrail hook to ${claude_dir}"
   echo "   [HOOK STATUS: AVAILABLE] File placed at ${guardrail_target}."
@@ -186,19 +230,39 @@ install_cursor() {
   local rules_dir="${target_path}/.cursor/rules"
   local target_skill_dir="${target_path}/.cursor/skills/sadskill"
   echo "-> Configuring for Cursor in: ${target_path}..."
-  mkdir -p "${rules_dir}" "${target_skill_dir}"
 
-  # Deploy full skill into workspace .cursor/skills for relative link resolution
-  cp -r "${SCRIPT_DIR}/skills/sadskill/"* "${target_skill_dir}/"
+  local skill_backup=""
+  if [[ -d "$target_skill_dir" && "$NO_BACKUP" != "true" ]]; then
+    skill_backup="${target_skill_dir}.bak.$(date +%Y%m%d%H%M%S)"
+    echo "   [INFO] Preserving existing Cursor skill directory at ${skill_backup}"
+    if [[ "$DRY_RUN" != "true" ]]; then
+      mv "$target_skill_dir" "$skill_backup"
+    fi
+  elif [[ -d "$target_skill_dir" && "$NO_BACKUP" == "true" ]]; then
+    if [[ "$DRY_RUN" != "true" ]]; then
+      rm -rf "$target_skill_dir"
+    fi
+  fi
+
+  if [[ "$DRY_RUN" != "true" ]]; then
+    mkdir -p "${rules_dir}" "${target_skill_dir}"
+    cp -r "${SCRIPT_DIR}/skills/sadskill/"* "${target_skill_dir}/"
+  else
+    echo "   [DRY-RUN] Would create ${rules_dir} and ${target_skill_dir}"
+  fi
+  record_manifest_entry "cursor_skill" "$target_skill_dir" "$skill_backup"
 
   local rule_file="${rules_dir}/sadskill.mdc"
   local rule_backup=""
   if [[ -f "$rule_file" && "$NO_BACKUP" != "true" ]]; then
     rule_backup="${rule_file}.bak.$(date +%Y%m%d%H%M%S)"
-    mv "$rule_file" "$rule_backup"
+    if [[ "$DRY_RUN" != "true" ]]; then
+      mv "$rule_file" "$rule_backup"
+    fi
   fi
 
-  cat << 'EOF' > "${rule_file}"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    cat << 'EOF' > "${rule_file}"
 ---
 description: "sadskill: Unified autonomous engineering workflow (plan, design, backend, sec, analyze)"
 globs: "*"
@@ -225,6 +289,9 @@ alwaysApply: false
 3. **Safety Guardrails**: Never execute destructive operations (`git reset --hard`, `git push -f`, `git clean -fd`, `DROP TABLE`) without explicit user authorization.
 4. **Human Voice**: Lead with answers, strip AI buzzwords ("delve", "seamless"), maintain technical density.
 EOF
+  else
+    echo "   [DRY-RUN] Would write Cursor rule to ${rule_file}"
+  fi
 
   record_manifest_entry "cursor_rule" "$rule_file" "$rule_backup"
   echo "   [OK] Generated self-contained Cursor rule at ${rule_file}"
@@ -235,9 +302,24 @@ install_antigravity() {
   local skills_dir="${agy_dir}/skills"
 
   echo "-> Configuring for Google Antigravity..."
-  mkdir -p "${skills_dir}"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    mkdir -p "${skills_dir}"
+  fi
 
   backup_and_install_skill "antigravity" "${skills_dir}/sadskill"
+  echo "   [OK] Installed skill to ${skills_dir}/sadskill"
+}
+
+install_gemini() {
+  local gemini_dir="${HOME}/.gemini"
+  local skills_dir="${gemini_dir}/skills"
+
+  echo "-> Configuring for Gemini CLI..."
+  if [[ "$DRY_RUN" != "true" ]]; then
+    mkdir -p "${skills_dir}"
+  fi
+
+  backup_and_install_skill "gemini" "${skills_dir}/sadskill"
   echo "   [OK] Installed skill to ${skills_dir}/sadskill"
 }
 
@@ -260,11 +342,15 @@ case "$TARGET_AGENT" in
   antigravity)
     install_antigravity
     ;;
+  gemini)
+    install_gemini
+    ;;
   all)
     install_codex
     install_claude
     install_cursor
     install_antigravity
+    install_gemini
     ;;
   auto)
     installed_count=0
@@ -280,20 +366,25 @@ case "$TARGET_AGENT" in
       install_antigravity
       installed_count=$((installed_count + 1))
     fi
+    if [[ -d "${HOME}/.gemini/skills" || (-d "${HOME}/.gemini" && ! -d "${HOME}/.gemini/antigravity") ]]; then
+      install_gemini
+      installed_count=$((installed_count + 1))
+    fi
     if [[ -d "${TARGET_DIR}/.cursor" || -d "${HOME}/.cursor" ]]; then
       install_cursor
       installed_count=$((installed_count + 1))
     fi
     if [[ $installed_count -eq 0 ]]; then
-      echo "No existing agent directory found. Installing to standard Codex, Claude, and Antigravity locations..."
+      echo "No existing agent directory found. Installing to standard Codex, Claude, Gemini CLI, and Antigravity locations..."
       install_codex
       install_claude
+      install_gemini
       install_antigravity
     fi
     ;;
   *)
-    echo "Unknown agent: $TARGET_AGENT (valid options: auto, codex, claude, cursor, antigravity, all)" >&2
-    exit 1
+    echo "Error: Unknown agent: $TARGET_AGENT (valid options: auto, codex, claude, cursor, antigravity, gemini, all)" >&2
+    exit 2
     ;;
 esac
 
