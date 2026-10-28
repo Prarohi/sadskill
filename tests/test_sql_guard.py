@@ -93,6 +93,40 @@ class SQLGuardTests(unittest.TestCase):
                 destructive, reason = sql_guard.inspect_sql(q)
                 self.assertFalse(destructive, f"Bounded delete query was blocked: {q} ({reason})")
 
+    def test_unbounded_delete_variants_blocked(self):
+        cases = [
+            "DELETE FROM users RETURNING id;",
+            "DELETE FROM users USING accounts;",
+            "WITH cte AS (SELECT 1) DELETE FROM users RETURNING *;",
+            "DELETE FROM users WHERE TRUE;",
+            "DELETE FROM users WHERE 1=1;",
+            "SELECT 1; DELETE FROM users RETURNING *;",
+            'DELETE FROM "accounts";',
+            "ALTER TABLE users DROP CONSTRAINT important;",
+        ]
+        for query in cases:
+            with self.subTest(query=query):
+                self.assertTrue(sql_guard.inspect_sql(query)[0])
+
+    def test_strings_and_comments_are_not_sql_commands(self):
+        safe = [
+            "SELECT 'DROP TABLE users; DELETE FROM accounts';",
+            "SELECT $TRUNCATE TABLE users;$;",
+            "SELECT $tag$DELETE FROM users;$tag$;",
+            'SELECT "DROP TABLE" FROM users;',
+            "SELECT 'it''s DROP TABLE users';",
+            "SELECT /* outer /* inner */ */ 1;",
+            "SELECT 1 -- DROP TABLE users\n;",
+        ]
+        for query in safe:
+            with self.subTest(query=query):
+                self.assertFalse(sql_guard.inspect_sql(query)[0])
+
+    def test_unterminated_literals_and_comments_fail_closed(self):
+        for query in ("SELECT 'oops", "SELECT /* oops", "SELECT $tag$oops"):
+            with self.subTest(query=query):
+                self.assertTrue(sql_guard.inspect_sql(query)[0])
+
     def test_cli_execution_codes(self):
         # Test CLI exit code 0 for safe query
         res_safe = subprocess.run(

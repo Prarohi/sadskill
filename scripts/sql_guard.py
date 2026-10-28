@@ -1,112 +1,126 @@
 #!/usr/bin/env python3
-"""sadskill Deep SQL Semantic Tokenizer & Guardrail.
-Inspects SQL queries for destructive mutating statements across comments,
-CTEs, multi-statement payloads, and unbounded DELETE queries.
-"""
+"""Conservative lexical SQL mutation guard; not a SQL parser or permission boundary."""
 
 import argparse
 import re
 import sys
 
+_DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$")
+
+
+def _scan_sql(sql: str, *, mask_literals: bool) -> str:
+    """Remove comments and optionally literal contents without merging tokens."""
+    out = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+        if ch == "-" and nxt == "-":
+            i += 2
+            while i < n and sql[i] not in "\r\n":
+                i += 1
+            out.append(" ")
+            continue
+        if ch == "/" and nxt == "*":
+            i += 2
+            depth = 1
+            while i < n and depth:
+                if sql.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif sql.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            if depth:
+                raise ValueError("unterminated SQL block comment")
+            out.append(" ")
+            continue
+        if ch in ("'", '"'):
+            start, quote = i, ch
+            i += 1
+            while i < n:
+                if sql[i] == quote:
+                    if i + 1 < n and sql[i + 1] == quote:
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                if sql[i] == "\\" and i + 1 < n:
+                    i += 2
+                else:
+                    i += 1
+            else:
+                raise ValueError("unterminated SQL quote")
+            out.append((" ident " if quote == '"' else " ") if mask_literals else sql[start:i])
+            continue
+        if ch == "$":
+            match = _DOLLAR_QUOTE.match(sql, i)
+            if match:
+                tag = match.group(0)
+                end = sql.find(tag, match.end())
+                if end < 0:
+                    raise ValueError("unterminated SQL dollar quote")
+                out.append(" " if mask_literals else sql[i:end + len(tag)])
+                i = end + len(tag)
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
 
 def strip_sql_comments(sql: str) -> str:
-    """Removes single-line (--) and multi-line (/* */) comments while preserving strings."""
-    tokens = []
-    i = 0
-    n = len(sql)
-    in_single_quote = False
-    in_double_quote = False
-
-    while i < n:
-        c = sql[i]
-        next_c = sql[i + 1] if i + 1 < n else ""
-
-        # Handle string quoting
-        if c == "'" and not in_double_quote:
-            in_single_quote = not in_single_quote
-            tokens.append(c)
-            i += 1
-            continue
-        if c == '"' and not in_single_quote:
-            in_double_quote = not in_double_quote
-            tokens.append(c)
-            i += 1
-            continue
-
-        if not in_single_quote and not in_double_quote:
-            # Single-line comment: -- ...
-            if c == "-" and next_c == "-":
-                i += 2
-                while i < n and sql[i] not in ("\n", "\r"):
-                    i += 1
-                continue
-            # Multi-line comment: /* ... */
-            if c == "/" and next_c == "*":
-                i += 2
-                while i + 1 < n and not (sql[i] == "*" and sql[i + 1] == "/"):
-                    i += 1
-                i += 2  # skip closing */
-                tokens.append(" ")
-                continue
-
-        tokens.append(c)
-        i += 1
-
-    return "".join(tokens)
+    """Remove comments without altering string contents."""
+    return _scan_sql(sql, mask_literals=False)
 
 
 def inspect_sql(sql_query: str) -> tuple[bool, str]:
-    """Evaluates whether SQL query contains destructive operations.
-    Returns (is_destructive, reason).
-    """
-    clean_sql = strip_sql_comments(sql_query).strip()
-    if not clean_sql:
-        return False, ""
+    """Return (blocked, reason); only a defense-in-depth heuristic."""
+    try:
+        clean = _scan_sql(sql_query, mask_literals=True)
+    except ValueError as exc:
+        return True, f"Cannot safely inspect malformed SQL: {exc}"
 
-    # Normalize whitespace
-    normalized = re.sub(r"\s+", " ", clean_sql)
-
-    # 1. DROP operations
-    drop_match = re.search(
-        r"\bDROP\s+(?:DATABASE|SCHEMA|TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX|COLUMN)\b",
-        normalized,
-        re.IGNORECASE,
-    )
-    if drop_match:
-        return True, f"Destructive SQL DROP operation detected: {drop_match.group(0)}"
-
-    # 2. ALTER TABLE ... DROP COLUMN
-    if re.search(r"\bALTER\s+TABLE\s+[^\s;]+\s+DROP\s+COLUMN\b", normalized, re.IGNORECASE):
-        return True, "Destructive ALTER TABLE DROP COLUMN detected"
-
-    # 3. TRUNCATE operations
-    truncate_match = re.search(r"\bTRUNCATE\s+(?:TABLE\s+)?([a-zA-Z0-9_.\"']+)\b", normalized, re.IGNORECASE)
-    if truncate_match:
-        return True, f"Destructive SQL TRUNCATE operation detected on {truncate_match.group(1)}"
-
-    # 4. Unbounded DELETE FROM without WHERE clause
-    # Checks for standalone DELETE FROM <table>; or end of string without WHERE
-    unbounded_delete = re.search(
-        r"\bDELETE\s+FROM\s+[a-zA-Z0-9_.\"']+\s*(?:;|$)(?!\s*WHERE\b)",
-        normalized,
-        re.IGNORECASE,
-    )
-    if unbounded_delete:
-        return True, "Unbounded DELETE FROM query detected without WHERE clause"
-
+    for statement in clean.split(";"):
+        normalized = re.sub(r"\s+", " ", statement).strip()
+        if not normalized:
+            continue
+        if re.search(
+            r"\bDROP\s+(?:TABLE|DATABASE|SCHEMA|VIEW|MATERIALIZED\s+VIEW|INDEX|"
+            r"COLUMN|OWNED|ROLE|USER|FUNCTION|TRIGGER|POLICY|EXTENSION)\b",
+            normalized, re.I,
+        ):
+            return True, "Destructive SQL DROP operation detected"
+        if re.search(r"\bALTER\s+TABLE\b.*\bDROP\s+(?:COLUMN|CONSTRAINT)\b", normalized, re.I):
+            return True, "Destructive ALTER TABLE DROP operation detected"
+        if re.search(r"\bTRUNCATE\b", normalized, re.I):
+            return True, "Destructive SQL TRUNCATE operation detected"
+        for match in re.finditer(r"\bDELETE\s+FROM\b", normalized, re.I):
+            remainder = normalized[match.end():]
+            where = re.search(r"\bWHERE\b", remainder, re.I)
+            if where is None:
+                return True, "Unbounded DELETE FROM query detected without WHERE clause"
+            condition = remainder[where.end():].strip()
+            if re.match(
+                r"(?:\(?\s*(?:TRUE|1\s*=\s*1)\s*\)?)(?:\s+(?:RETURNING|ORDER|LIMIT)\b|$)",
+                condition, re.I,
+            ):
+                return True, "Unbounded DELETE FROM query detected with unconditional WHERE"
     return False, ""
 
 
 def main():
-    parser = argparse.ArgumentParser(description="sadskill SQL Safety Guard")
-    parser.add_argument("query", help="SQL statement string to inspect")
+    parser = argparse.ArgumentParser(
+        description="Conservative SQL guard; not an SQL parser or sandbox"
+    )
+    parser.add_argument("query", help="SQL query text to inspect")
     args = parser.parse_args()
-
-    destructive, reason = inspect_sql(args.query)
-    if destructive:
+    blocked, reason = inspect_sql(args.query)
+    if blocked:
         print(f"BLOCKED: {reason}", file=sys.stderr)
         sys.exit(2)
-    print("ALLOWED: SQL query is non-destructive")
+    print("ALLOWED BY HEURISTIC: no known destructive SQL pattern detected")
     sys.exit(0)
 
 
