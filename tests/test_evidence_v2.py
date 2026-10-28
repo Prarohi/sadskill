@@ -17,6 +17,7 @@ SPEC.loader.exec_module(VERIFIER)
 
 canonical_record_hash = VERIFIER.canonical_record_hash
 create_evidence_record = VERIFIER.create_evidence_record
+generate_slsa_predicate = VERIFIER.generate_slsa_predicate
 verify_evidence = VERIFIER.verify_evidence
 
 
@@ -128,6 +129,35 @@ class EvidenceV2Tests(unittest.TestCase):
         code, records = verify_evidence(project_root=self.root)
         self.assertEqual(code, 1)
         self.assertTrue(any("broken hash chain" in r.get("reason", "") for r in records))
+
+    def test_slsa_predicate_generation_and_cli(self):
+        rec_path = create_evidence_record(
+            project_root=self.root,
+            task_slug="slsa-test-task",
+            command="echo 'verifying slsa provenance'",
+            exit_code=0,
+            summary="SLSA test completed",
+            files_touched=["README.md"],
+        )
+        data = json.loads(rec_path.read_text(encoding="utf-8"))
+        predicate = generate_slsa_predicate(data)
+
+        self.assertEqual(predicate["_type"], "https://in-toto.io/Statement/v1")
+        self.assertEqual(predicate["predicateType"], "https://slsa.dev/provenance/v1")
+        self.assertEqual(predicate["subject"][0]["name"], "sadskill-evidence-slsa-test-task")
+        self.assertIn("sha256", predicate["subject"][0]["digest"])
+        self.assertEqual(predicate["predicate"]["buildDefinition"]["buildType"], "https://sadskill.dev/evidence/v2")
+
+        # Test CLI flag --emit-slsa
+        res = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/verify-evidence.py"), "--project-root", str(self.root), "--emit-slsa"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(res.returncode, 0)
+        cli_stmt = json.loads(res.stdout)
+        self.assertEqual(cli_stmt["_type"], "https://in-toto.io/Statement/v1")
+        self.assertEqual(cli_stmt["predicateType"], "https://slsa.dev/provenance/v1")
 
 
 if __name__ == "__main__":

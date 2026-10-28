@@ -73,6 +73,28 @@ class GuardrailAdversarialTests(unittest.TestCase):
         self.assert_blocked('echo "building project" && sudo bash -c "git reset --hard"')
         self.assert_blocked('ls -la; env bash -c "DROP TABLE users;"')
 
+    def test_sql_comment_obfuscation(self):
+        self.assert_blocked('psql -c "/* safe comment */ DROP/**/TABLE/**/users;"')
+        self.assert_blocked('sqlite3 test.db "/* test */ TRUNCATE/**/logs;"')
+        self.assert_blocked('mysql -e "-- comment\nALTER TABLE users DROP COLUMN ssn;"')
+
+    def test_base64_encoded_payloads(self):
+        # "git reset --hard" -> Z2l0IHJlc2V0IC0taGFyZA==
+        self.assert_blocked('echo "Z2l0IHJlc2V0IC0taGFyZA==" | base64 -d | sh')
+        # "rm -rf .git" -> cm0gLXJmIC5naXQ=
+        self.assert_blocked('echo "cm0gLXJmIC5naXQ=" | base64 --decode | bash')
+
+    def test_git_config_alias_tampering(self):
+        self.assert_blocked('git config alias.st "reset --hard"')
+        self.assert_blocked('git config alias.wipe "clean -fd"')
+        self.assert_blocked('git config --global alias.danger "push --force"')
+        self.assert_allowed('git config alias.ci "commit"')
+        self.assert_allowed('git config alias.co "checkout"')
+
+    def test_unbounded_sql_deletion(self):
+        self.assert_blocked('psql -c "DELETE FROM users;"')
+        self.assert_allowed('psql -c "DELETE FROM users WHERE id = 123;"')
+
     def test_benign_commands_with_wrappers_are_allowed(self):
         self.assert_allowed("env git status")
         self.assert_allowed("sudo git log -n 5")

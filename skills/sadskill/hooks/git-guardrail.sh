@@ -115,7 +115,7 @@ if command -v python3 >/dev/null 2>&1; then
   python_output=""
   exit_status=0
   python_output=$(python3 -c '
-import sys, json, shlex, re
+import sys, json, shlex, re, base64
 
 cmd_str = sys.argv[1]
 
@@ -237,9 +237,92 @@ def parse_command_string(cmd_str, depth=0):
         results.extend(unwrap_tokens(seg_tokens, depth))
     return results
 
+def strip_sql_comments(sql):
+    tokens = []
+    i = 0
+    n = len(sql)
+    in_single_quote = False
+    in_double_quote = False
+    while i < n:
+        c = sql[i]
+        next_c = sql[i + 1] if i + 1 < n else ""
+        if c == chr(39) and not in_double_quote:
+            in_single_quote = not in_single_quote
+            tokens.append(c)
+            i += 1
+            continue
+        if c == chr(34) and not in_single_quote:
+            in_double_quote = not in_double_quote
+            tokens.append(c)
+            i += 1
+            continue
+        if not in_single_quote and not in_double_quote:
+            if c == "-" and next_c == "-":
+                i += 2
+                while i < n and sql[i] not in ("\n", "\r"):
+                    i += 1
+                continue
+            if c == "/" and next_c == "*":
+                i += 2
+                while i + 1 < n and not (sql[i] == "*" and sql[i + 1] == "/"):
+                    i += 1
+                i += 2
+                tokens.append(" ")
+                continue
+        tokens.append(c)
+        i += 1
+    return "".join(tokens)
+
+def inspect_sql(sql_query):
+    clean_sql = strip_sql_comments(sql_query).strip()
+    if not clean_sql:
+        return False, ""
+    normalized = re.sub(r"\s+", " ", clean_sql)
+    drop_match = re.search(
+        r"\bDROP\s+(?:DATABASE|SCHEMA|TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX|COLUMN)\b",
+        normalized,
+        re.IGNORECASE,
+    )
+    if drop_match:
+        return True, "Destructive SQL DROP operation detected: " + drop_match.group(0)
+    if re.search(r"\bALTER\s+TABLE\s+[^\s;]+\s+DROP\s+COLUMN\b", normalized, re.IGNORECASE):
+        return True, "Destructive ALTER TABLE DROP COLUMN detected"
+    truncate_match = re.search(r"\bTRUNCATE\s+(?:TABLE\s+)?([\w.\"]+)\b", normalized, re.IGNORECASE)
+    if truncate_match:
+        return True, "Destructive SQL TRUNCATE operation detected on " + truncate_match.group(1)
+    unbounded_delete = re.search(
+        r"\bDELETE\s+FROM\s+[\w.\"]+\s*(?:;|$)(?!\s*WHERE\b)",
+        normalized,
+        re.IGNORECASE,
+    )
+    if unbounded_delete:
+        return True, "Unbounded DELETE FROM query detected without WHERE clause"
+    return False, ""
+
+def check_base64_payloads(tokens):
+    for tok in tokens:
+        t = tok.strip(chr(39) + chr(34))
+        if len(t) >= 8 and len(t) % 4 == 0 and re.match(r"^[A-Za-z0-9+/]+={0,2}$", t):
+            try:
+                decoded = base64.b64decode(t).decode("utf-8", errors="ignore")
+                if decoded and any(kw in decoded.lower() for kw in ("git", "rm", "drop", "truncate", "delete")):
+                    sub_cmds = parse_command_string(decoded)
+                    for sc in sub_cmds:
+                        b, r = check_atomic_command(sc)
+                        if b:
+                            return True, "Base64 encoded destructive payload detected: " + r
+            except Exception:
+                pass
+    return False, ""
+
 def check_atomic_command(tokens):
     if not tokens:
         return False, ""
+
+    b64_blocked, b64_reason = check_base64_payloads(tokens)
+    if b64_blocked:
+        return True, b64_reason
+
     cmd = tokens[0].lower().rsplit("/", 1)[-1]
     if cmd == "rm":
         has_r = False
@@ -291,6 +374,10 @@ def check_atomic_command(tokens):
         elif verb == "stash":
             if any(a in ("drop", "clear") for a in args):
                 return True, "'\''git stash " + " ".join(args) + "'\'' destroys saved stashes."
+        elif verb == "config":
+            cfg_val = " ".join(args).lower()
+            if any(danger in cfg_val for danger in ("reset --hard", "clean -fd", "clean -f", "push --force")):
+                return True, "Destructive git config alias detected in '\''git config " + " ".join(args) + "'\''."
         elif verb == "push":
             for push_arg in args:
                 if push_arg.startswith("--force") or push_arg == "--delete" or push_arg.startswith("+") or push_arg.startswith(":"):
@@ -303,6 +390,10 @@ def check_atomic_command(tokens):
         return False, ""
 
     full_str = " ".join(tokens)
+    sql_blocked, sql_reason = inspect_sql(full_str)
+    if sql_blocked:
+        return True, "Destructive SQL operation detected in '\''" + full_str + "'\'': " + sql_reason
+
     if re.search(r"\b(DROP\s+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE\s+TABLE|TRUNCATE\s+[a-zA-Z0-9_]+|ALTER\s+TABLE\s+[a-zA-Z0-9_.]+\s+DROP\s+COLUMN)\b", full_str, re.IGNORECASE):
         return True, "Destructive SQL query detected in '\''" + full_str + "'\''."
 

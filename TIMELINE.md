@@ -20,3 +20,15 @@ All major milestones, fixes, architectural evolutions, and test results for `sad
 - **Master Plan Directory**: Created dedicated `/md/` folder containing 9 comprehensive strategy, audit, and execution blueprints (`00_MASTER_EXECUTIVE_SUMMARY.md` through `08_ACTIONABLE_ROADMAP_AND_MILESTONES.md`).
 - **Scorecard Established**: Rated all 10 core dimensions from architecture to real-agent battle readiness, identifying the composite score of 8.9/10 and the exact technical steps needed to reach a defensible 10.0/10.
 - **Verification Integrity**: Confirmed 154/154 verify checks pass with 0 privacy/leakage violations and exactly 1 single skill discovered under `npx skills`.
+
+---
+
+### [2026-10-29 02:10:00 UTC] - Full Master Plan Implementation (Phases 3-5: Security, Memory, CLI, Provenance)
+- **Deep SQL AST Tokenizer**: Built `scripts/sql_guard.py` to strip single- and multi-line comments (`--` and `/* */`), detect destructive mutating SQL queries across `DROP`, `TRUNCATE`, `ALTER TABLE ... DROP COLUMN`, and unbounded `DELETE FROM` without `WHERE`.
+- **Adversarial Guardrail Hardening**: Upgraded `scripts/git-guardrail.sh` and `skills/sadskill/hooks/git-guardrail.sh` to block base64-encoded destructive commands (`echo "..." | base64 -d | sh`), git config alias tampering (`git config alias.st "reset --hard"`), and comment-obfuscated SQL commands.
+- **Linux Bubblewrap Sandbox Containment**: Created `scripts/sandbox.sh` offering OS-level filesystem isolation, read-only system and `.git` mounts, and offline network unsharing (`--unshare-net`).
+- **Zero-Dependency BM25 Memory Search & Compaction**: Implemented in-memory BM25 ranker (`scripts/sad_memory.py`) to search ADRs, milestones, and events with compact context generation (<= 400 tokens) alongside chronological JSONL compaction (`compact_memory`).
+- **SLSA Level 3 In-Toto Predicate Provenance**: Added `generate_slsa_predicate` and `--emit-slsa` flag to `scripts/verify-evidence.py` conforming to the SLSA Provenance v1.0 specification.
+- **Unified `sad` CLI Binary**: Delivered `bin/sad` and `scripts/sad_cli.py` featuring visual ANSI HUD badges, supporting `init`, `doctor`, `bench`, `verify`, `memory`, `guard`, and `sandbox`.
+- **Signed One-Liner Web Installer**: Added `scripts/web-install.sh` for friction-free onboarding.
+- **Comprehensive Unit Testing**: Added 4 new test suites (`tests/test_sql_guard.py`, `tests/test_sandbox.py`, `tests/test_memory_search.py`, `tests/test_sad_cli.py`). All test suites passing with 100% success rate.

@@ -1,6 +1,12 @@
 """Release precedence must not skip a stable upgrade after a prerelease."""
 
+from pathlib import Path
+import sys
 import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.sadskill_core import parse_version, version_text
 

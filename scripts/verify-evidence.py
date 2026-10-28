@@ -759,6 +759,53 @@ def create_evidence_record(
     return out_file
 
 
+def generate_slsa_predicate(evidence_data: dict, builder_id: str = "https://github.com/Prarohi/sadskill/scripts/verify-evidence.py") -> dict:
+    """Generates an in-toto SLSA Provenance v1.0 Statement predicate for an evidence record."""
+    canonical_digest = canonical_record_hash(evidence_data)
+    task_slug = evidence_data.get("task_slug", "unknown-task")
+    timestamp = evidence_data.get("timestamp", datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"))
+    commit_sha = evidence_data.get("commit_sha", "0" * 40)
+
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+            {
+                "name": f"sadskill-evidence-{task_slug}",
+                "digest": {
+                    "sha256": canonical_digest
+                }
+            }
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+            "buildDefinition": {
+                "buildType": "https://sadskill.dev/evidence/v2",
+                "externalParameters": {
+                    "command": evidence_data.get("command", ""),
+                    "task_slug": task_slug
+                },
+                "internalParameters": {
+                    "exit_code": evidence_data.get("exit_code", 0),
+                    "worktree_dirty": evidence_data.get("worktree_dirty", False),
+                    "commit_sha": commit_sha,
+                    "previous_record_hash": evidence_data.get("previous_record_hash", "GENESIS")
+                }
+            },
+            "runDetails": {
+                "builder": {
+                    "id": builder_id
+                },
+                "metadata": {
+                    "invocationId": f"urn:sadskill:invocation:{canonical_digest[:16]}",
+                    "startedOn": timestamp,
+                    "finishedOn": timestamp
+                }
+            }
+        }
+    }
+    return statement
+
+
 def verify_evidence(
     project_root=None,
     evidence_dir=None,
@@ -1143,8 +1190,22 @@ def main():
     )
     parser.add_argument("--timeout", type=int, default=30, help="Per-command timeout in seconds (default: 30, range 1-300)")
     parser.add_argument("--json", action="store_true", help="Output JSON results")
+    parser.add_argument("--emit-slsa", action="store_true", help="Emit in-toto SLSA Provenance v1.0 Statement for evidence records")
 
     args = parser.parse_args()
+
+    if args.emit_slsa:
+        ev_dir = Path(args.evidence_dir) if args.evidence_dir else (detect_project_root(args.project_root) / ".sad" / "evidence")
+        statements = []
+        if ev_dir.exists():
+            for ef in sorted(ev_dir.glob("*.json")):
+                try:
+                    data = json.loads(ef.read_text(encoding="utf-8"))
+                    statements.append(generate_slsa_predicate(data))
+                except Exception:
+                    pass
+        print(json.dumps(statements if len(statements) != 1 else (statements[0] if statements else {}), indent=2))
+        sys.exit(0)
 
     if args.print_context:
         if args.json:
