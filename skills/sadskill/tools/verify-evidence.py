@@ -693,6 +693,72 @@ def is_valid_iso_timestamp(ts: str) -> bool:
         return False
 
 
+def canonical_record_hash(data: dict) -> str:
+    """Computes SHA-256 over canonical JSON without record_hash or signature."""
+    clean = {k: v for k, v in data.items() if k not in ("record_hash", "signature")}
+    canonical_bytes = json.dumps(clean, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical_bytes).hexdigest()
+
+
+def create_evidence_record(
+    project_root: Path,
+    task_slug: str,
+    command: str,
+    exit_code: int,
+    summary: str,
+    files_touched: list,
+    status: str = "COMPLETED",
+    evidence_version: str = "2.0",
+    output_dir: Path = None,
+) -> Path:
+    """Creates a cryptographic Evidence v2 record in .sad/evidence/."""
+    root = Path(project_root).resolve()
+    ev_dir = output_dir or (root / ".sad" / "evidence")
+    ev_dir.mkdir(parents=True, exist_ok=True)
+
+    proj_id = project_identity(root)
+    ctx = git_context(root)
+    commit_sha = ctx["commit_sha"] if ctx else "0" * 40
+    worktree_dirty = ctx["worktree_dirty"] if ctx else False
+    worktree_digest = ctx["worktree_digest"] if ctx else "0" * 64
+
+    existing_files = sorted(ev_dir.glob("*.json"))
+    prev_hash = "GENESIS"
+    if existing_files:
+        try:
+            last_record = json.loads(existing_files[-1].read_text(encoding="utf-8"))
+            if "record_hash" in last_record:
+                prev_hash = last_record["record_hash"]
+            else:
+                prev_hash = canonical_record_hash(last_record)
+        except Exception:
+            pass
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    record = {
+        "timestamp": now_iso,
+        "task_slug": task_slug,
+        "command": command,
+        "exit_code": exit_code,
+        "summary": summary,
+        "files_touched": files_touched,
+        "project_id": proj_id,
+        "commit_sha": commit_sha,
+        "worktree_dirty": worktree_dirty,
+        "worktree_digest": worktree_digest,
+        "status": status,
+        "evidence_version": evidence_version,
+        "previous_record_hash": prev_hash,
+    }
+
+    record["record_hash"] = canonical_record_hash(record)
+
+    time_prefix = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    out_file = ev_dir / f"{time_prefix}-{task_slug}.json"
+    out_file.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    return out_file
+
+
 def verify_evidence(
     project_root=None,
     evidence_dir=None,
@@ -745,6 +811,7 @@ def verify_evidence(
     # Check current git commit for freshness binding
     current_context = git_context(root)
     current_project_id = project_identity(root)
+    last_seen_record_hash = None
 
     for ef in evidence_files:
         log(f"\n-> Inspecting evidence record: {ef.name}")
@@ -794,6 +861,42 @@ def verify_evidence(
             errors += 1
             records.append({"file": ef.name, "status": "FAILED", "reason": f"Missing keys: {missing}"})
             continue
+
+        # Evidence v2 Cryptographic Provenance & Hash-Chain Verification
+        ev_version = str(data.get("evidence_version", "1.0"))
+        has_hash = "record_hash" in data
+        has_prev = "previous_record_hash" in data
+
+        if ev_version == "2.0" or has_hash or has_prev:
+            expected_record_hash = canonical_record_hash(data)
+            if has_hash:
+                if not isinstance(data["record_hash"], str) or not re.fullmatch(r"[0-9a-fA-F]{64}", data["record_hash"]):
+                    log("   [FAIL] record_hash must be a 64-character SHA-256 hex string.")
+                    errors += 1
+                    records.append({"file": ef.name, "status": "FAILED", "reason": "invalid record_hash format"})
+                    continue
+                if data["record_hash"].lower() != expected_record_hash.lower():
+                    log(f"   [FAIL] Evidence record hash mismatch (recorded: {data['record_hash'][:12]}..., expected: {expected_record_hash[:12]}...).")
+                    errors += 1
+                    records.append({"file": ef.name, "status": "FAILED", "reason": "record_hash mismatch"})
+                    continue
+
+            if has_prev:
+                prev_val = data["previous_record_hash"]
+                if last_seen_record_hash is None:
+                    if prev_val not in ("GENESIS", "genesis") and not re.fullmatch(r"[0-9a-fA-F]{64}", str(prev_val)):
+                        log("   [FAIL] Initial previous_record_hash must be 'GENESIS' or a SHA-256 digest.")
+                        errors += 1
+                        records.append({"file": ef.name, "status": "FAILED", "reason": "invalid genesis hash"})
+                        continue
+                else:
+                    if str(prev_val).lower() != str(last_seen_record_hash).lower():
+                        log(f"   [FAIL] Provenance hash chain broken at {ef.name} (expected {last_seen_record_hash[:12]}..., got {str(prev_val)[:12]}...).")
+                        errors += 1
+                        records.append({"file": ef.name, "status": "FAILED", "reason": "broken hash chain"})
+                        continue
+
+            last_seen_record_hash = data.get("record_hash", expected_record_hash)
 
         ci_attestation = data.get("ci_attestation")
         if "ci_attestation" in data and not isinstance(ci_attestation, dict):

@@ -1,48 +1,67 @@
 {
-  "passed": 6,
-  "total": 6,
-  "results": [
-    {
-      "id": "task-01-tier1-bugfix",
-      "status": "PASS",
-      "notes": [
-        "Adaptive Tier 1 specification verified"
-      ]
-    },
-    {
-      "id": "task-02-zero-lift-ui",
-      "status": "PASS",
-      "notes": [
-        "Zero-Lift hover rule & 44px hit targets verified"
-      ]
-    },
-    {
-      "id": "task-03-schema-migration",
-      "status": "PASS",
-      "notes": [
-        "Reversible migrations & zero-trust RLS verified"
-      ]
-    },
-    {
-      "id": "task-04-owasp-sec-audit",
-      "status": "PASS",
-      "notes": [
-        "Read-only security audit contract verified"
-      ]
-    },
-    {
-      "id": "task-05-tier2-ast-contract",
-      "status": "PASS",
-      "notes": [
-        "Contract-First AST & Mermaid data flow verified"
-      ]
-    },
-    {
-      "id": "task-06-safety-guardrail",
-      "status": "PASS",
-      "notes": [
-        "OS-level destructive command interception verified (exit code 2)"
-      ]
-    }
-  ]
+  "track_a_static_checks": {
+    "passed": 6,
+    "total": 6,
+    "results": [
+      {
+        "id": "task-01-tier1-bugfix",
+        "status": "STATIC_CHECK_PASS",
+        "notes": "Tier 1 plan definition present, Mermaid diagram omission for lean tokens verified, 2-file threshold rule verified"
+      },
+      {
+        "id": "task-02-zero-lift-ui",
+        "status": "STATIC_CHECK_PASS",
+        "notes": "44px touch target minimum verified, Zero-Lift rule documented in README and design mode, Micro-compression scale(0.97) on click verified"
+      },
+      {
+        "id": "task-03-schema-migration",
+        "status": "STATIC_CHECK_PASS",
+        "notes": "Paired up.sql / down.sql migration requirement verified, Row Level Security requirement verified, timestamptz timezone requirement verified"
+      },
+      {
+        "id": "task-04-owasp-sec-audit",
+        "status": "STATIC_CHECK_PASS",
+        "notes": "Strictly Read-Only security contract verified across command adapters, OWASP Top 10 coverage verified in security mode, Secret leak detection requirements verified"
+      },
+      {
+        "id": "task-05-tier2-ast-contract",
+        "status": "STATIC_CHECK_PASS",
+        "notes": "Contract-First AST signatures requirement verified, Mermaid architecture and data flow requirements verified"
+      },
+      {
+        "id": "task-06-safety-guardrail",
+        "status": "STATIC_CHECK_PASS",
+        "notes": "Destructive command intercepted with exit 2; benign command allowed with exit 0"
+      }
+    ]
+  },
+  "track_b_fixtures": {
+    "passed": 2,
+    "total": 2,
+    "results": [
+      {
+        "name": "Tenant Isolation Fixture",
+        "status": "FIXTURE_PASS"
+      },
+      {
+        "name": "SQLite RLS Simulation Fixture",
+        "status": "FIXTURE_PASS"
+      }
+    ]
+  },
+  "track_c0_catalog": {
+    "passed": 24,
+    "total": 24,
+    "results": [
+      {
+        "status": "CATALOG_VALID",
+        "total_tasks": 24
+      }
+    ]
+  },
+  "track_c1_real_agent_evaluation": {
+    "status": "NOT_EXECUTED",
+    "run_count": 0
+  },
+  "local_validation_checks_passed": true
 }

@@ -2,7 +2,7 @@
 name: sadskill
 description: "One engineering workflow. Any coding agent. Turn AI-generated code into verified, maintainable software. Provides 5 high-leverage workflows: /sad-plan (adaptive planning & spec), /sad-design (UI/UX & polish), /sad-backend (schema & RLS), /sad-sec (security & OWASP audit), and /sad-analyze (architecture & code health)."
 metadata:
-  version: 0.4.0
+  version: 0.5.0
   author: sadafbabu
   license: MIT
 ---

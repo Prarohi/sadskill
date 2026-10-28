@@ -5,7 +5,20 @@ All notable changes to the `sadskill` project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - Unreleased
+## [0.5.0] - 2026-10-29
+
+### Added
+- **12-Task C1 Comparative Agent Benchmark Harness**: Runnable benchmarking suite (`benchmarks/harness/runner.py`) across 12 realistic defect scenarios (C1-01 through C1-12) evaluating `plain`, `sadskill`, and `competitor` conditions. Supports deterministic `--provider mock` and real agent execution (`--provider codex`) with fail-closed authentication checking (`NOT_EXECUTED_NO_AUTH`).
+- **Canonical Guardrail Parser**: Recursive AST command unwrapper supporting wrappers (`env`, `sudo`, `command`, `exec`, `nohup`, `nice`) and nested shell interpreters (`bash -c`, `sh -c`, `zsh -c`) to prevent evasive bypass of destructive Git, SQL, and filesystem operations.
+- **Evidence v2 & Cryptographic Provenance**: Enhanced independent evidence verification (`scripts/verify-evidence.py`) with canonical JSON hashing, SHA-256 provenance hash-chaining across runs, and GitHub Artifact Attestation compatibility.
+- **Concurrency-Safe Project Memory (`.sad/`)**: Advisory file locking and immutable append-only event log (`scripts/sad_memory.py`) preventing multi-agent race conditions or silent lost updates.
+- **Agent Plugin Packaging**: Root `plugin.json` conforming to OpenAI Agent Plugin and Cursor standards while strictly maintaining single-skill discovery (`npx skills add . -l`).
+
+### Changed
+- Promoted version across repository components to `0.5.0`.
+- Hardened pre-push branch deletion and force-push checks.
+
+## [0.4.0] - 2026-10-29
 
 ### Fixed
 - Refuse missing ownership hashes, noncanonical artifacts and unrelated backup paths before destructive operations; inventory orphan recovery without claiming installed ownership.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# sadskill git & database safety guardrail (v0.3.0)
-# Intercepts and blocks destructive Git, SQL, and ref-update operations.
+# sadskill git & database safety guardrail (v0.5.0)
+# Intercepts and blocks destructive Git, SQL, filesystem, and ref-update operations.
+# Features canonical AST/wrapper unwrapping (sudo, env, command, exec, bash -c, sh -c).
 # Compatible with Claude Code PreToolUse hooks, Git pre-push hooks, and CLI wrappers.
 
 set -euo pipefail
@@ -12,6 +13,7 @@ fi
 
 COMMAND=""
 IS_GIT_PRE_PUSH="false"
+IS_JSON_INPUT="false"
 
 if [[ -n "$INPUT" ]]; then
   # 1. Check if input is a Git pre-push ref-update stream:
@@ -20,6 +22,7 @@ if [[ -n "$INPUT" ]]; then
   if echo "$INPUT" | grep -qE '^[[:space:]]*([^[:space:]]+[[:space:]]+)?[0-9a-f]{40}[[:space:]]+refs/[^[:space:]]+[[:space:]]+[0-9a-f]{40}'; then
     IS_GIT_PRE_PUSH="true"
   elif echo "$INPUT" | grep -q '"tool_input"'; then
+    IS_JSON_INPUT="true"
     # 2. Structured Claude Code PreToolUse JSON extraction via Python
     COMMAND=$(python3 -c "
 import sys, json
@@ -107,169 +110,237 @@ if [[ -z "$COMMAND" ]]; then
   exit 0
 fi
 
-# Function to inspect a single atomic command segment
-check_segment() {
-  local seg="$1"
-  # Trim leading and trailing whitespace
-  seg="$(echo "$seg" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-
-  if [[ -z "$seg" ]]; then
-    return 0
-  fi
-
-  # Strip commit message content from git commit commands so commit descriptions
-  # do not trigger false positive SQL or dangerous verb blocks
-  local check_seg="$seg"
-  if [[ "$check_seg" =~ git([[:space:]]|$) && "$check_seg" =~ commit([[:space:]]|$) ]]; then
-    check_seg=$(echo "$check_seg" | sed -E 's/(-m|--message)[[:space:]=]*("[^"]*"|'\'[^\']*\'')//g')
-  fi
-
-  # 1. SQL Destructive Patterns (evaluated on code outside commit message bodies)
-  if echo "$check_seg" | grep -qiE '\b(DROP[[:space:]]+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE[[:space:]]+TABLE|TRUNCATE[[:space:]]+[a-zA-Z0-9_]+|ALTER[[:space:]]+TABLE[[:space:]]+[a-zA-Z0-9_.]+[[:space:]]+DROP[[:space:]]+COLUMN)\b'; then
-    echo "BLOCKED: Destructive SQL query detected in '$seg'." >&2
-    echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-    exit 2
-  fi
-
-  # 2. Extract Git command if present
-  # Strip leading environment variable assignments (e.g. GIT_PAGER=cat git ...)
-  local clean_cmd
-  clean_cmd=$(echo "$check_seg" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*=[^ ]*[[:space:]]+)*//')
-
-  if [[ "$clean_cmd" =~ ^git([[:space:]]|$) ]]; then
-    local stripped_git="$clean_cmd"
-
-    # Remove global flags: -C <path>, --git-dir=<path>, --git-dir <path>, --work-tree=<path>, -c <key>=<val>, -p, --no-pager
-    local raw_tokens=()
-    if command -v python3 >/dev/null 2>&1; then
-      # Preserve quoted option values (notably `git -C "path with spaces"`).
-      # NUL separators also preserve whitespace inside individual arguments.
-      local parsed_token
-      while IFS= read -r -d '' parsed_token; do
-        raw_tokens+=("$parsed_token")
-      done < <(python3 -c '
-import shlex, sys
-sys.stdout.write("\0".join(shlex.split(sys.argv[1])) + "\0")
-' "$stripped_git")
-    else
-      read -r -a raw_tokens <<< "$stripped_git"
-    fi
-    local idx=1
-    local verb=""
-    local args=()
-
-    while [ $idx -lt ${#raw_tokens[@]} ]; do
-      local tok="${raw_tokens[$idx]}"
-      case "$tok" in
-        -C|--git-dir|--work-tree|-c)
-          idx=$((idx + 2))
-          continue
-          ;;
-        --git-dir=*|--work-tree=*|-c=*|--no-pager|-p)
-          idx=$((idx + 1))
-          continue
-          ;;
-        *)
-          if [[ -z "$verb" && ! "$tok" =~ ^- ]]; then
-            verb="$tok"
-          else
-            args+=("$tok")
-          fi
-          idx=$((idx + 1))
-          ;;
-      esac
-    done
-
-    local args_str="${args[*]:-}"
-
-    # Check dangerous Git verbs
-    case "$verb" in
-      reset)
-        if [[ "$args_str" =~ --hard ]]; then
-          echo "BLOCKED: 'git reset --hard' destroys working tree modifications." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
-        fi
-        ;;
-      push)
-        local push_arg
-        for push_arg in "${args[@]}"; do
-          # A nonempty source in source:destination is an ordinary refspec.
-          # Only an empty source deletes; a leading + requests a force push.
-          if [[ "$push_arg" == --force* || "$push_arg" == --delete ||
-                "$push_arg" =~ ^-[^-]*[fd] || "$push_arg" == +* ||
-                "$push_arg" == :* ]]; then
-            echo "BLOCKED: Destructive or force push detected in 'git push $args_str'." >&2
-            echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-            exit 2
-          fi
-        done
-        ;;
-      clean)
-        if [[ "$args_str" =~ (-f|-fd|-df|-x) ]]; then
-          echo "BLOCKED: 'git clean' permanently deletes untracked files." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
-        fi
-        ;;
-      branch)
-        if [[ "$args_str" =~ (-D|--delete[[:space:]]+-f) ]]; then
-          echo "BLOCKED: Force branch deletion detected in 'git branch $args_str'." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
-        fi
-        ;;
-      checkout|restore)
-        if [[ "$args_str" =~ (^|[[:space:]])(\.|\*|-A)($|[[:space:]]) ]]; then
-          echo "BLOCKED: Full working tree discard detected in 'git $verb $args_str'." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
-        fi
-        ;;
-      stash)
-        if [[ "$args_str" =~ (drop|clear) ]]; then
-          echo "BLOCKED: 'git stash $args_str' destroys saved stashes." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
-        fi
-        ;;
-    esac
-  fi
-}
-
-# Split chained commands (; && || |) while strictly respecting quotes
-segments=()
+# Canonical AST / recursive command inspection via Python
 if command -v python3 >/dev/null 2>&1; then
-  while IFS= read -r line; do
-    [[ -n "$line" ]] && segments+=("$line")
-  done < <(python3 -c "
-import sys, shlex
-cmd = sys.argv[1]
-try:
-    lexer = shlex.shlex(cmd, punctuation_chars=True)
-    lexer.whitespace_split = True
-    tokens = list(lexer)
+  python_output=""
+  exit_status=0
+  python_output=$(python3 -c '
+import sys, json, shlex, re
+
+cmd_str = sys.argv[1]
+
+WRAPPER_COMMANDS = {"sudo", "env", "command", "exec", "nohup", "nice", "time", "ionice", "chroot"}
+SHELL_INTERPRETERS = {"bash", "sh", "zsh", "dash", "ksh"}
+
+def unwrap_tokens(tokens, depth=0):
+    if depth > 10 or not tokens:
+        return [tokens] if tokens else []
+    idx = 0
+    while idx < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*", tokens[idx]):
+        idx += 1
+    tokens = tokens[idx:]
+    if not tokens:
+        return []
+    base_cmd = tokens[0].lower().rsplit("/", 1)[-1]
+    if base_cmd in WRAPPER_COMMANDS:
+        idx = 1
+        if base_cmd == "env":
+            while idx < len(tokens):
+                tok = tokens[idx]
+                if tok in ("-i", "--ignore-environment", "-0", "--null"):
+                    idx += 1
+                elif tok in ("-u", "--unset"):
+                    idx += 2
+                elif tok.startswith("-u") or tok.startswith("--unset="):
+                    idx += 1
+                elif tok == "--":
+                    idx += 1
+                    break
+                elif re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*", tok):
+                    idx += 1
+                elif tok.startswith("-"):
+                    idx += 1
+                else:
+                    break
+        elif base_cmd == "sudo":
+            while idx < len(tokens):
+                tok = tokens[idx]
+                if tok in ("-u", "-g", "-p", "-h", "-r", "-t", "-T", "-C"):
+                    idx += 2
+                elif tok == "--":
+                    idx += 1
+                    break
+                elif tok.startswith("-"):
+                    idx += 1
+                else:
+                    break
+        elif base_cmd == "command":
+            while idx < len(tokens):
+                tok = tokens[idx]
+                if tok in ("-p", "-v", "-V"):
+                    idx += 1
+                elif tok == "--":
+                    idx += 1
+                    break
+                else:
+                    break
+        else:
+            while idx < len(tokens) and tokens[idx].startswith("-"):
+                if tokens[idx] == "--":
+                    idx += 1
+                    break
+                idx += 1
+        remaining = tokens[idx:]
+        if remaining:
+            return unwrap_tokens(remaining, depth + 1)
+        return []
+
+    if base_cmd in SHELL_INTERPRETERS:
+        idx = 1
+        c_arg = None
+        while idx < len(tokens):
+            tok = tokens[idx]
+            if tok == "-c":
+                if idx + 1 < len(tokens):
+                    c_arg = tokens[idx + 1]
+                break
+            elif tok.startswith("-") and "c" in tok and not tok.startswith("--"):
+                if idx + 1 < len(tokens):
+                    c_arg = tokens[idx + 1]
+                break
+            elif tok == "--":
+                if idx + 1 < len(tokens) and tokens[idx + 1] == "-c" and idx + 2 < len(tokens):
+                    c_arg = tokens[idx + 2]
+                break
+            idx += 1
+        if c_arg:
+            return parse_command_string(c_arg, depth + 1)
+
+    return [tokens]
+
+def parse_command_string(cmd_str, depth=0):
+    if depth > 10 or not cmd_str.strip():
+        return []
+    try:
+        lexer = shlex.shlex(cmd_str, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except Exception:
+        tokens = cmd_str.split()
+    segments = []
     current = []
     for t in tokens:
-        if t in (';', '&&', '||', '|', '&'):
+        if t in (";", "&&", "||", "|", "&"):
             if current:
-                print(' '.join(current))
+                segments.append(" ".join(current))
                 current = []
         else:
             current.append(t)
     if current:
-        print(' '.join(current))
-except Exception:
-    print(cmd)
-" "$COMMAND" 2>/dev/null || echo "$COMMAND")
+        segments.append(" ".join(current))
+    results = []
+    for seg in segments:
+        try:
+            seg_tokens = shlex.split(seg)
+        except Exception:
+            seg_tokens = seg.split()
+        results.extend(unwrap_tokens(seg_tokens, depth))
+    return results
+
+def check_atomic_command(tokens):
+    if not tokens:
+        return False, ""
+    cmd = tokens[0].lower().rsplit("/", 1)[-1]
+    if cmd == "rm":
+        has_r = False
+        targets = []
+        for tok in tokens[1:]:
+            if tok.startswith("-") and not tok.startswith("--"):
+                if "r" in tok.lower() or "R" in tok:
+                    has_r = True
+            elif tok in ("-r", "-R", "--recursive"):
+                has_r = True
+            elif not tok.startswith("-"):
+                targets.append(tok)
+        if has_r and any(t in ("/", "~", "$HOME", "/*", "*", ".git", ".git/") for t in targets):
+            return True, "Destructive file removal detected in '\''" + " ".join(tokens) + "'\''."
+
+    if cmd == "git":
+        idx = 1
+        verb = ""
+        args = []
+        while idx < len(tokens):
+            tok = tokens[idx]
+            if tok in ("-C", "--git-dir", "--work-tree", "-c"):
+                idx += 2
+                continue
+            elif tok.startswith(("--git-dir=", "--work-tree=", "-c=")) or tok in ("-p", "--no-pager"):
+                idx += 1
+                continue
+            else:
+                if not verb and not tok.startswith("-"):
+                    verb = tok.lower()
+                else:
+                    args.append(tok)
+                idx += 1
+
+        if verb == "reset":
+            if any(a == "--hard" or a.startswith("--hard") for a in args):
+                return True, "'\''git reset --hard'\'' destroys working tree modifications."
+        elif verb == "clean":
+            for a in args:
+                if a in ("-f", "-fd", "-df", "-x", "-fx", "-xf", "--force") or (a.startswith("-") and "f" in a):
+                    return True, "'\''git clean'\'' permanently deletes untracked files."
+        elif verb == "branch":
+            if any(a in ("-D", "-f", "--force") for a in args):
+                if "-D" in args or ("--delete" in args and any(f in args for f in ("-f", "--force"))):
+                    return True, "Force branch deletion detected in '\''git branch " + " ".join(args) + "'\''."
+        elif verb in ("checkout", "restore"):
+            if any(a in (".", "*", "-A", "--all") for a in args):
+                return True, "Full working tree discard detected in '\''git " + verb + " " + " ".join(args) + "'\''."
+        elif verb == "stash":
+            if any(a in ("drop", "clear") for a in args):
+                return True, "'\''git stash " + " ".join(args) + "'\'' destroys saved stashes."
+        elif verb == "push":
+            for push_arg in args:
+                if push_arg.startswith("--force") or push_arg == "--delete" or push_arg.startswith("+") or push_arg.startswith(":"):
+                    return True, "Destructive or force push detected in '\''git push " + " ".join(args) + "'\''."
+                if re.match(r"^-[^-]*[fd]", push_arg):
+                    return True, "Destructive or force push detected in '\''git push " + " ".join(args) + "'\''."
+            for push_arg in args:
+                if push_arg in ("--delete", "-d"):
+                    return True, "Destructive branch deletion detected in '\''git push " + " ".join(args) + "'\''."
+        return False, ""
+
+    full_str = " ".join(tokens)
+    if re.search(r"\b(DROP\s+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE\s+TABLE|TRUNCATE\s+[a-zA-Z0-9_]+|ALTER\s+TABLE\s+[a-zA-Z0-9_.]+\s+DROP\s+COLUMN)\b", full_str, re.IGNORECASE):
+        return True, "Destructive SQL query detected in '\''" + full_str + "'\''."
+
+    return False, ""
+
+atomic_cmds = parse_command_string(cmd_str)
+for ac in atomic_cmds:
+    blocked, reason = check_atomic_command(ac)
+    if blocked:
+        print("BLOCKED: " + reason)
+        sys.exit(2)
+
+sys.exit(0)
+' "$COMMAND" 2>&1) || exit_status=$?
+
+  if [ $exit_status -eq 2 ]; then
+    echo "$python_output" >&2
+    echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+    exit 2
+  elif [ $exit_status -ne 0 ]; then
+    # Python error fallback
+    echo "$python_output" >&2
+    exit $exit_status
+  fi
+  exit 0
 fi
 
-if [ ${#segments[@]} -eq 0 ]; then
-  segments=("$COMMAND")
+# Fallback basic inspection when python3 is not available
+if echo "$COMMAND" | grep -qiE '\b(DROP[[:space:]]+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE[[:space:]]+TABLE)\b'; then
+  echo "BLOCKED: Destructive SQL query detected in '$COMMAND'." >&2
+  echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+  exit 2
 fi
 
-for segment in "${segments[@]}"; do
-  check_segment "$segment"
-done
+if [[ "$COMMAND" =~ git[[:space:]]+reset[[:space:]]+--hard ]]; then
+  echo "BLOCKED: 'git reset --hard' destroys working tree modifications." >&2
+  echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+  exit 2
+fi
 
 exit 0
