@@ -23,6 +23,7 @@ def tar_bytes(files, special=None):
             content = payload.encode("utf-8")
             entry = tarfile.TarInfo(ROOT + "/" + path)
             entry.size = len(content)
+            entry.mode = 0o755 if path.endswith(".sh") else 0o644
             archive.addfile(entry, io.BytesIO(content))
         if special is not None:
             archive.addfile(special)
@@ -81,6 +82,16 @@ class VerifiedWebInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.marker.read_text(), "--agent codex")
         self.assertIn("safe extraction verified", result.stdout)
+
+    def test_verified_helper_retains_executable_permission(self):
+        digest = self.prepare({
+            "VERSION": "0.5.0\n",
+            "install.sh": '#!/bin/bash\n[ -x "$(dirname "$0")/helper.sh" ] && printf ok > "$WEB_TEST_MARKER"\n',
+            "helper.sh": "#!/bin/bash\nexit 0\n",
+        })
+        result = self.call(digest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.marker.read_text(), "ok")
 
     def test_mismatched_digest_prevents_execution(self):
         self.prepare()
