@@ -1,0 +1,33 @@
+name: Contributor task
+description: Assign a scoped implementation or verification task
+title: "[TASK]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and desired behavior
+      description: Describe the user-visible problem and what completion looks like.
+    validations:
+      required: true
+  - type: input
+    id: base
+    attributes:
+      label: Base branch and prerequisites
+      description: State the intended base and any PR that must integrate first.
+      placeholder: main; no prerequisites
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and boundaries
+      description: Include paths in/out of scope, dependency/service permissions and assigned contributor/reviewer when known. Never include credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance examples and verification
+      description: Include the regression or edge cases, exact checks needed and evidence to attach to the PR.
+    validations:
+      required: true

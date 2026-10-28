@@ -66,6 +66,8 @@
 
 ## 4. Implementation Backlog Ledger (S01–S60)
 
+This ledger records implementation scope, not a product-success score. Rows about protocols describe guidance in files; they do not prove an agent followed it. `FIXED` is limited to the stated repository behavior or artifact. Host activation, cross-platform execution and real-agent comparisons require their own observed evidence. The incomplete validation and benchmark work below remains open.
+
 | ID | Priority | Description | Affected Paths | Acceptance Evidence | Status |
 |---|---|---|---|---|---|
 | S01 | P0 | Fix restore-then-delete bug | `uninstall.sh`, `scripts/manifest.py` | Byte-identical prompt restored without deletion | **FIXED** |
@@ -83,26 +85,26 @@
 | S13 | P1 | Guardrail classifier hardening | `scripts/git-guardrail.sh` | Dangerous keywords inside `-m` messages allowed | **FIXED** |
 | S14 | P1 | Eliminate duplicate hook drift | `scripts/git-guardrail.sh`, `hooks/` | Byte-for-byte identity enforced in CI verify | **FIXED** |
 | S15 | P1 | Host-specific tool coverage matrix | `docs/compatibility.md` | Documented supported discovery & invocation | **FIXED** |
-| S16 | P1 | Verify 5 workflow invocations per host | `commands/`, `skills/sadskill/SKILL.md` | Slash commands and universal triggers documented | **FIXED** |
+| S16 | P1 | Verify 5 workflow invocations per host | `commands/`, `skills/sadskill/SKILL.md` | Adapters/triggers documented; actual five-workflow execution in every host not performed | **NOT_EXECUTED** |
 | S17 | P1 | Correct Gemini CLI and Antigravity paths | `install.sh`, `docs/compatibility.md` | Discovered at standard `~/.gemini/skills` | **FIXED** |
 | S18 | P1 | Correct auto/all target semantics | `install.sh` | Cursor clearly skipped with note inside repo | **FIXED** |
 | S19 | P1 | Correct CLI error exit codes | `install.sh`, `uninstall.sh` | Invalid options exit 2, `--help` exits 0 | **FIXED** |
-| S20 | P2 | Cross-platform install tests | `tests/`, `scripts/verify.py` | Portable path resolution using Pathlib | **FIXED** |
+| S20 | P2 | Cross-platform install tests | `tests/`, `scripts/verify.py` | Linux sandbox coverage exists; Windows/macOS execution remains unverified | **PARTIAL** |
 | S21 | P1 | Strict evidence schema validation | `scripts/verify-evidence.py` | Non-int exit_code and non-list files rejected | **FIXED** |
-| S22 | P1 | Implement provenance state transitions | `scripts/verify-evidence.py` | REPORTED vs RETESTED vs CI_ATTESTED | **FIXED** |
-| S23 | P1 | Retest recipe registry + sandbox | `scripts/verify-evidence.py` | Trusted recipes only; process group isolation | **FIXED** |
+| S22 | P1 | Implement provenance state transitions | `scripts/verify-evidence.py` | Local schema/retest states supported; external claims stay CI_CLAIMED, not CI_ATTESTED | **PARTIAL** |
+| S23 | P1 | Retest recipe registry + sandbox | `scripts/verify-evidence.py` | Trusted recipes and process-group timeout control exist; no general OS containment for hostile repository code | **PARTIAL** |
 | S24 | P2 | Correct evidence `--json` stdout | `scripts/verify-evidence.py` | Stdout is parseable standalone JSON (logs on stderr) | **FIXED** |
 | S25 | P2 | Bound timeout and process tree killing | `scripts/verify-evidence.py` | 1-300s validation; os.killpg on timeout | **FIXED** |
 | S26 | P2 | Restrict evidence root and symlinks | `scripts/verify-evidence.py` | External symlinks escaping root rejected | **FIXED** |
 | S27 | P2 | Tie evidence to commit/dirty state | `scripts/verify-evidence.py` | Records project git state when available | **FIXED** |
-| S28 | P2 | Optional CI attestation validation | `scripts/verify-evidence.py` | Validates CI attestation dictionary metadata | **FIXED** |
+| S28 | P2 | Optional CI attestation validation | `scripts/verify-evidence.py` | Metadata is treated as a claim; independent trusted GitHub attestation lookup is not implemented | **PARTIAL** |
 | S29 | P1 | Separate contract checks from real benchmarks | `benchmarks/runner.py`, `docs/` | Contract checks clearly distinguished in docs | **FIXED** |
-| S30 | P1 | Build behavioral benchmark fixtures | `benchmarks/fixtures/` | Grader harnesses for real code behavior | **FIXED** |
-| S31 | P1 | Hidden behavioral graders | `benchmarks/fixtures/` | Test suites fail intentionally broken submissions | **FIXED** |
-| S32 | P1 | Plain-agent and control baselines | `docs/benchmark-methodology.md` | Documented methodology for matched comparisons | **FIXED** |
-| S33 | P1 | Record token/cost/time honestly | `docs/benchmark-methodology.md` | Unavailable metrics reported as N/A | **FIXED** |
-| S34 | P2 | Expand benchmark task suite | `benchmarks/tasks.json` | 6 core contract checks + behavioral fixtures | **FIXED** |
-| S35 | P2 | Repeated runs and variance | `docs/benchmark-methodology.md` | Defined repeated evaluation procedures | **FIXED** |
+| S30 | P1 | Build behavioral benchmark fixtures | `benchmarks/fixtures/` | Prebuilt fixtures exercise code behavior; they are not agent repairs of initially broken tasks | **FIXTURE_ONLY** |
+| S31 | P1 | Hidden behavioral graders | `benchmarks/fixtures/` | Existing graders are visible fixture tests; no isolated C1 hidden-grader runner is implemented | **NOT_IMPLEMENTED** |
+| S32 | P1 | Plain-agent and control baselines | `docs/benchmark-methodology.md` | Methodology documented; zero matched PLAIN/SADSKILL/SUPERPOWERS agent trials | **NOT_EXECUTED** |
+| S33 | P1 | Record token/cost/time honestly | `docs/benchmark-methodology.md` | Reporting policy exists; no C1 telemetry has been collected | **PARTIAL** |
+| S34 | P2 | Expand benchmark task suite | `benchmarks/tasks.json`, `benchmarks/tasks/suite_24.json` | Six contract checks and 24 catalog entries; 24 runnable broken snapshots/graders are absent | **PARTIAL** |
+| S35 | P2 | Repeated runs and variance | `docs/benchmark-methodology.md` | Method defined; repeated trials and variance measurements not performed | **NOT_EXECUTED** |
 | S36 | P1 | Conversation-aware intent model | `skills/sadskill/protocols/context.md` | TaskContext and instruction precedence rules | **FIXED** |
 | S37 | P1 | Whole-codebase discovery | `skills/sadskill/protocols/coverage.md` | Repository mapping and entry point discovery | **FIXED** |
 | S38 | P1 | Coverage ledger with exclusions | `templates/coverage-ledger.template.json` | Explicit tracked vs excluded path accounting | **FIXED** |
