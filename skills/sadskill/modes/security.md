@@ -101,6 +101,8 @@ By contract, `/sad-sec` operates in **Strictly Read-Only** mode by default. It o
 ---
 
 ## 🔗 Vendor Synergies
+- **Supabase authorization**: Load [Supabase guidance](../references/supabase.md) when reviewing Auth, RLS, API keys, privileged functions, or Storage policies.
+- **Vercel deployment credentials**: Load [Vercel guidance](../references/vercel.md) when reviewing environment variables, PR builds, or release access.
 - **OWASP**: [owasp/owasp-top-10.ref.md](../vendor/owasp/owasp-top-10.ref.md) and [owasp/api-security.ref.md](../vendor/owasp/api-security.ref.md).
 - **ECC Security**: [ecc/security-review.ref.md](../vendor/ecc/security-review.ref.md).
 - **Database Hardening**: [supabase/rls-and-migrations.ref.md](../vendor/supabase/rls-and-migrations.ref.md).

@@ -38,6 +38,8 @@ Sadskill transforms autonomous coding agents from unpredictable code generators 
 
 ## 📊 Why `sadskill`? Core Advantages
 
+Platform-specific guidance loads only for relevant tasks: [Supabase](skills/sadskill/references/supabase.md), [Vercel](skills/sadskill/references/vercel.md), and [Bklit UI charts](skills/sadskill/references/bklit-ui.md). These guides preserve the project's selected stack and authorization boundaries; they do not configure hosted services or install UI dependencies by themselves.
+
 | Dimension | Default Plain Coding Agent | Agent Powered by `sadskill` |
 |---|---|---|
 | **Verification Proof** | Claims *"all tests pass"* blindly without proof | Verifiable terminal proof with exit code `0` recorded in `.sad/evidence/` via trusted recipes |
