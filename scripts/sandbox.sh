@@ -57,6 +57,15 @@ if [[ ! -d "$PROJECT_DIR" ]]; then
   exit 78
 fi
 PROJECT_DIR="$(cd -- "$PROJECT_DIR" && pwd -P)"
+
+# The current user home is not a safe narrow project workspace.
+if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+  USER_HOME="$(cd -- "$HOME" && pwd -P)"
+  if [[ "$PROJECT_DIR" == "$USER_HOME" ]]; then
+    echo "ERROR: refusing entire HOME as writable sandbox project: $PROJECT_DIR" >&2
+    exit 78
+  fi
+fi
 case "$PROJECT_DIR" in
   /|/home|/tmp|/var|/mnt|/media|/opt|/workspace|/workspaces|/Users|/etc|/usr|/bin|/sbin|/lib|/lib64|/boot|/dev|/proc|/sys|/run|/root|/snap|/srv)
     echo "ERROR: refusing broad writable sandbox mount: $PROJECT_DIR" >&2
