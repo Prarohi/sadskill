@@ -188,6 +188,10 @@ def _gitlink_paths(project_root, *, index):
         fields = metadata.split()
         if not separator or len(fields) != 3:
             return None
+        if index and fields[2] != b"0":
+            # An unmerged index has competing content versions whose file data
+            # is not represented by a single checkout snapshot.
+            return None
         if fields[0] != b"160000":
             continue
         path = Path(os.fsdecode(raw_path))
