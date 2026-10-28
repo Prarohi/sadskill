@@ -5,6 +5,7 @@ overwritten; hook detection must understand the OFFICIAL nested schema.
 
 import json
 import os
+import re
 import stat
 import unittest
 
@@ -163,7 +164,10 @@ class ClaudeSettingsTests(SandboxCase):
         with open(self.settings_path, "w", encoding="utf-8") as fh:
             json.dump({"hooks": {"PreToolUse": [{
                 "matcher": "Write",
-                "hooks": [{"type": "command", "command": hook}],
+                "hooks": [
+                    {"type": "command", "command": hook},
+                    {"type": "command", "command": "echo user-owned"},
+                ],
             }]}}, fh)
 
         before = self.run_doctor("--json")
@@ -173,7 +177,11 @@ class ClaudeSettingsTests(SandboxCase):
         enabled = self._enable()
         self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
         groups = self._load()["hooks"]["PreToolUse"]
-        self.assertTrue(any(group.get("matcher") == "Write" for group in groups))
+        self.assertTrue(any(
+            group.get("matcher") == "Write"
+            and any(sub.get("command") == "echo user-owned" for sub in group.get("hooks", []))
+            for group in groups
+        ), "registration removed an unrelated Write hook")
         self.assertTrue(any(
             group.get("matcher") == "Bash"
             and any(sub.get("command") == hook for sub in group.get("hooks", []))
@@ -183,6 +191,348 @@ class ClaudeSettingsTests(SandboxCase):
         after = self.run_doctor("--json")
         self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
         self.assertEqual(json.loads(after.stdout)["claude_hook"]["status"], "LOCAL_TEST_PASSED")
+
+    def test_plain_matcher_is_exact_not_a_regex_substring(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "B",
+                "hooks": [{"type": "command", "command": hook}],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        self.assertFalse(any(group.get("matcher") == "B" for group in groups))
+        self.assertTrue(any(
+            group.get("matcher") == "Bash"
+            and any(sub.get("command") == hook for sub in group.get("hooks", []))
+            for group in groups
+        ), "plain matcher 'B' incorrectly suppressed exact Bash registration")
+
+    def test_python_only_regex_does_not_suppress_exact_bash_registration(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        python_only_matcher = r"(?P<tool>Bash)"
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": python_only_matcher,
+                "hooks": [
+                    {"type": "command", "command": hook},
+                    {"type": "command", "command": "echo user-owned"},
+                ],
+            }]}}, fh)
+
+        # This is valid Python regex syntax but invalid JavaScript RegExp
+        # syntax, which Claude Code uses for matcher expressions.
+        self.assertEqual(re.search(python_only_matcher, "Bash").group("tool"), "Bash")
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        self.assertTrue(any(
+            group.get("matcher") == python_only_matcher
+            and any(sub.get("command") == "echo user-owned" for sub in group.get("hooks", []))
+            and not any(sub.get("command") == hook for sub in group.get("hooks", []))
+            for group in groups
+        ), "registration failed to preserve unrelated handlers in the user's regex group")
+        self.assertTrue(any(
+            group.get("matcher") == "Bash"
+            and any(sub.get("command") == hook for sub in group.get("hooks", []))
+            for group in groups
+        ), "Python-only regex incorrectly suppressed exact Bash registration")
+
+    def test_python_inline_flags_are_not_treated_as_shared_regex(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        matcher = "(?i)Bash"
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": matcher,
+                "hooks": [{"type": "command", "command": hook}],
+            }]}}, fh)
+
+        self.assertEqual(re.search(matcher, "Bash").group(0), "Bash")
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        owned = [
+            (group, sub)
+            for group in groups for sub in group.get("hooks", [])
+            if sub.get("command") == hook
+        ]
+        self.assertEqual(len(owned), 1)
+        self.assertEqual(owned[0][0].get("matcher"), "Bash")
+
+    def test_normalization_preserves_user_hook_command_arguments(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        command = hook + " --custom-mode"
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "(?i)Bash",
+                "hooks": [{"type": "command", "command": command}],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        owned = [
+            (group, sub)
+            for group in groups for sub in group.get("hooks", [])
+            if isinstance(sub, dict) and sub.get("command", "").startswith(hook)
+        ]
+        self.assertEqual(len(owned), 1)
+        self.assertEqual(owned[0][0].get("matcher"), "Bash")
+        self.assertEqual(owned[0][1]["command"], command)
+
+    def test_conflicting_owned_hook_arguments_fail_without_writing_settings(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        original = {
+            "hooks": {"PreToolUse": [
+                {
+                    "matcher": "Bash.*",
+                    "hooks": [{"type": "command", "command": hook + " --one"}],
+                },
+                {
+                    "matcher": "(?i)Bash",
+                    "hooks": [{"type": "command", "command": hook + " --two"}],
+                },
+            ]},
+        }
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump(original, fh)
+        before = self.read_bytes(self.settings_path)
+
+        enabled = self._enable()
+        self.assertNotEqual(enabled.returncode, 0)
+        self.assertIn("conflicting owned Claude hook", enabled.stderr)
+        self.assertEqual(self.read_bytes(self.settings_path), before)
+
+    def test_shell_quoting_differences_fail_without_writing_settings(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        original = {
+            "hooks": {"PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": hook + ' "$HOME/target"',
+                    }],
+                },
+                {
+                    "matcher": "(?i)Bash",
+                    "hooks": [{
+                        "type": "command",
+                        "command": hook + " '$HOME/target'",
+                    }],
+                },
+            ]},
+        }
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump(original, fh)
+        before = self.read_bytes(self.settings_path)
+
+        enabled = self._enable()
+        self.assertNotEqual(enabled.returncode, 0)
+        self.assertIn("conflicting owned Claude hook", enabled.stderr)
+        self.assertEqual(self.read_bytes(self.settings_path), before)
+
+    def test_owned_non_command_type_is_normalized_to_executable_command(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "(?i)Bash",
+                "hooks": [{"type": "prompt", "command": hook}],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        owned = [
+            (group, sub)
+            for group in groups for sub in group.get("hooks", [])
+            if isinstance(sub, dict) and sub.get("command") == hook
+        ]
+        self.assertEqual(len(owned), 1)
+        self.assertEqual(owned[0][0].get("matcher"), "Bash")
+        self.assertEqual(owned[0][1]["type"], "command")
+
+    def test_legacy_flat_migration_preserves_hook_arguments(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        command = hook + " --custom-mode"
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "(?i)Bash",
+                "command": command,
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        owned = [
+            (group, sub)
+            for group in groups for sub in group.get("hooks", [])
+            if isinstance(sub, dict) and sub.get("command", "").startswith(hook)
+        ]
+        self.assertEqual(len(owned), 1)
+        self.assertEqual(owned[0][0].get("matcher"), "Bash")
+        self.assertEqual(owned[0][1]["command"], command)
+
+    def test_legacy_migration_refuses_to_overwrite_malformed_pretool_value(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        settings = {
+            "hooks": {
+                "PreToolUse": None,
+                "Stop": [{"command": hook + " --custom-mode"}],
+            },
+        }
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump(settings, fh)
+        before = self.read_bytes(self.settings_path)
+
+        enabled = self._enable()
+        self.assertNotEqual(enabled.returncode, 0)
+        self.assertIn("hooks.PreToolUse has an unexpected shape", enabled.stderr)
+        self.assertEqual(self.read_bytes(self.settings_path), before)
+
+    def test_regex_matcher_is_normalized_without_duplicate_hook(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        matcher = "Bash.*"
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": matcher,
+                "hooks": [{"type": "command", "command": hook}],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        owned_handlers = [
+            (group, sub)
+            for group in groups
+            if isinstance(group, dict)
+            for sub in group.get("hooks", [])
+            if isinstance(sub, dict) and sub.get("command") == hook
+        ]
+        self.assertEqual(len(owned_handlers), 1, "valid shared regex caused duplicate execution")
+        self.assertEqual(owned_handlers[0][0].get("matcher"), "Bash")
+
+    def test_catch_all_matchers_are_normalized_to_bash_only(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        cases = [
+            ({"hooks": [
+                {"type": "command", "command": hook},
+                {"type": "command", "command": "echo user-owned"},
+            ]}, None),
+            ({"matcher": "*", "hooks": [
+                {"type": "command", "command": hook},
+                {"type": "command", "command": "echo user-owned"},
+            ]}, "*"),
+            ({"matcher": ".*", "hooks": [
+                {"type": "command", "command": hook},
+                {"type": "command", "command": "echo user-owned"},
+            ]}, ".*"),
+            ({"matcher": "Bash|Write", "hooks": [
+                {"type": "command", "command": hook},
+                {"type": "command", "command": "echo user-owned"},
+            ]}, "Bash|Write"),
+        ]
+        for group, original_matcher in cases:
+            with self.subTest(matcher=original_matcher):
+                with open(self.settings_path, "w", encoding="utf-8") as fh:
+                    json.dump({"hooks": {"PreToolUse": [group]}}, fh)
+                enabled = self._enable()
+                self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+                groups = self._load()["hooks"]["PreToolUse"]
+                self.assertTrue(any(
+                    item.get("matcher") == original_matcher
+                    and any(sub.get("command") == "echo user-owned"
+                            for sub in item.get("hooks", []))
+                    for item in groups
+                ), "normalization removed an unrelated user handler")
+                owned = [
+                    (item, sub)
+                    for item in groups for sub in item.get("hooks", [])
+                    if isinstance(sub, dict) and sub.get("command") == hook
+                ]
+                self.assertEqual(len(owned), 1)
+                self.assertEqual(owned[0][0].get("matcher"), "Bash")
+
+    def test_if_filtered_handler_is_normalized_and_other_handlers_survive(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": hook,
+                        "if": "Bash(git status)",
+                    },
+                    {"type": "command", "command": "echo user-owned"},
+                ],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        self.assertTrue(any(
+            group.get("matcher") == "Bash"
+            and any(sub.get("command") == "echo user-owned" for sub in group.get("hooks", []))
+            for group in groups
+        ), "registration dropped an unrelated hook")
+        owned = [
+            (group, sub)
+            for group in groups for sub in group.get("hooks", [])
+            if sub.get("command") == hook
+        ]
+        self.assertEqual(len(owned), 1, "normalization left duplicate guardrail handlers")
+        self.assertNotIn("if", owned[0][1], "filtered Sadskill handler was not normalized")
+        self.assertTrue(any(
+            group.get("matcher") == "Bash"
+            and any(
+                sub.get("command") == hook and not sub.get("if")
+                for sub in group.get("hooks", [])
+            )
+            for group in groups
+        ), "registration failed to add an unrestricted Bash handler")
+
+    def test_explicit_null_matcher_and_if_are_not_unrestricted(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": None,
+                "hooks": [{"type": "command", "command": hook, "if": None}],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        self.assertTrue(any(
+            group.get("matcher") == "Bash"
+            and any(
+                sub.get("command") == hook and "if" not in sub
+                for sub in group.get("hooks", [])
+            )
+            for group in groups
+        ), "explicit null values incorrectly suppressed a known-good Bash handler")
+
+    def test_explicit_empty_if_is_not_assumed_unrestricted(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": hook, "if": ""}],
+            }]}}, fh)
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        groups = self._load()["hooks"]["PreToolUse"]
+        self.assertTrue(any(
+            group.get("matcher") == "Bash"
+            and any(
+                sub.get("command") == hook and "if" not in sub
+                for sub in group.get("hooks", [])
+            )
+            for group in groups
+        ), "explicit empty if was treated as an unfiltered handler")
 
     def test_same_basename_external_hook_is_not_claimed_or_removed(self):
         external = os.path.join(self.home, ".other-tool", "git-guardrail.sh")
@@ -264,11 +614,28 @@ class ClaudeSettingsTests(SandboxCase):
         self.assertEqual(rc.returncode, 0, rc.stdout + rc.stderr)
         report = json.loads(rc.stdout)
         status = report.get("claude_hook", {}).get("status")
+        self.assertNotEqual(status, "HOST_VERIFIED_ACTIVE",
+                            "local diagnostic claimed host activation without confirmation")
         allowed = {
             "NOT_INSTALLED", "AVAILABLE", "REGISTERED",
             "LOCAL_TEST_PASSED", "HOST_VERIFIED_ACTIVE", "UNKNOWN",
         }
         self.assertIn(status, allowed, f"untruthful hook status: {status!r}")
+
+    def test_host_verified_status_requires_explicit_confirmation_flag(self):
+        hook = os.path.join(self.home, GUARDRAIL)
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": hook}],
+            }]}}, fh)
+
+        ordinary = self.run_doctor("--json")
+        confirmed = self.run_doctor("--confirm-active", "--json")
+        self.assertEqual(ordinary.returncode, 0, ordinary.stdout + ordinary.stderr)
+        self.assertEqual(confirmed.returncode, 0, confirmed.stdout + confirmed.stderr)
+        self.assertEqual(json.loads(ordinary.stdout)["claude_hook"]["status"], "LOCAL_TEST_PASSED")
+        self.assertEqual(json.loads(confirmed.stdout)["claude_hook"]["status"], "HOST_VERIFIED_ACTIVE")
 
 
 if __name__ == "__main__":

@@ -123,20 +123,23 @@ def _our_nested_subhooks(settings):
 
 
 def _matcher_applies_to_bash(item):
-    """Whether a Claude PreToolUse matcher can dispatch for the Bash tool.
+    """Whether a matcher is restricted to the exact Bash tool name.
 
-    The matcher is a regular expression over the tool name. An omitted
-    matcher applies to every tool; malformed or non-string values fail closed.
+    Registration must not run the command guardrail on arbitrary tool input.
+    Omitted, wildcard, multi-tool, and regex matchers are normalized to the
+    exact Bash matcher instead of being interpreted by Python as JavaScript.
     """
-    matcher = item.get("matcher")
-    if matcher is None:
-        return True
+    if "matcher" not in item:
+        return False
+    matcher = item["matcher"]
     if not isinstance(matcher, str):
         return False
-    try:
-        return re.search(matcher, "Bash") is not None
-    except re.error:
+    if matcher in ("", "*"):
         return False
+    if re.fullmatch(r"[A-Za-z0-9_ ,|-]+", matcher):
+        names = [name.strip() for name in re.split(r"[|,]", matcher)]
+        return bool(names) and all(name == "Bash" for name in names)
+    return False
 
 
 def _group_has_our_command(item):
@@ -144,12 +147,98 @@ def _group_has_our_command(item):
     if not _matcher_applies_to_bash(item):
         return False
     if "hooks" not in item:
-        return _is_our_command(item.get("command"))
+        return _is_our_command(item.get("command")) and "if" not in item
     subhooks = item.get("hooks")
     return isinstance(subhooks, list) and any(
-        isinstance(sub, dict) and _is_our_command(sub.get("command"))
+        isinstance(sub, dict)
+        and sub.get("type") == "command"
+        and _is_our_command(sub.get("command"))
+        and "if" not in sub
         for sub in subhooks
     )
+
+
+def _normalize_owned_pretool_hooks(groups):
+    """Leave one unrestricted Sadskill handler under an exact Bash matcher.
+
+    Preserve unrelated matcher groups and handlers. Sadskill's own older or
+    filtered registrations are safe to normalize because their command path
+    identifies ownership; retaining an unverified regex beside a new exact
+    registration could execute the same guardrail twice.
+    """
+    records = []
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            continue
+        for sub in group["hooks"]:
+            if isinstance(sub, dict) and _is_our_command(sub.get("command")):
+                records.append((group, sub))
+    if not records:
+        return False
+    if (len(records) == 1
+            and _group_has_our_command(records[0][0])
+            and records[0][1].get("type") == "command"
+            and "if" not in records[0][1]):
+        return False
+
+    normalized = None
+    common_command = None
+    common_options = None
+    for _group, sub in records:
+        normalized = dict(sub)
+        # The hook path proves ownership, but optional command arguments may
+        # be user-configured. Preserve the complete command string verbatim.
+        normalized["type"] = "command"
+        normalized.pop("if", None)
+        command = normalized.get("command")
+        if not isinstance(command, str):
+            return None
+        options = dict(normalized)
+        options.pop("command", None)
+        if common_command is None:
+            common_command = command
+            common_options = options
+        elif command != common_command or options != common_options:
+            # Different arguments or execution options may be deliberate.
+            # Compare command strings exactly: shell quoting can change
+            # expansion even when shlex produces the same token list.
+            return None
+
+    new_groups = []
+    placed = False
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            new_groups.append(group)
+            continue
+        owned = [
+            sub for sub in group["hooks"]
+            if isinstance(sub, dict) and _is_our_command(sub.get("command"))
+        ]
+        if not owned:
+            new_groups.append(group)
+            continue
+        remaining = [
+            sub for sub in group["hooks"]
+            if not (isinstance(sub, dict) and _is_our_command(sub.get("command")))
+        ]
+        if remaining:
+            group["hooks"] = remaining
+            new_groups.append(group)
+        elif not placed:
+            group["matcher"] = "Bash"
+            group["hooks"] = [normalized]
+            new_groups.append(group)
+            placed = True
+        # A later group containing only Sadskill-owned entries is redundant
+        # and is dropped. Mixed groups above retain every unrelated handler.
+
+    if not placed:
+        new_groups.append({
+            "matcher": "Bash",
+            "hooks": [normalized],
+        })
+    groups[:] = new_groups
+    return True
 
 
 def _is_registered(settings):
@@ -351,18 +440,29 @@ def enable_claude_hooks():
     # Migrate legacy flat sadskill entries into the official nested schema.
     flat_ours = list(_our_flat_items(settings))
     if flat_ours:
+        flat_ids = {id(item) for item in flat_ours}
         for event, groups in list(hooks_config.items()):
             if not isinstance(groups, list):
                 continue
-            kept = [
-                item for item in groups
-                if not (isinstance(item, dict) and "hooks" not in item
-                        and _is_our_command(item.get("command")))
-            ]
-            if len(kept) != len(groups):
-                hooks_config[event] = kept
+            migrated = []
+            for item in groups:
+                if not isinstance(item, dict) or id(item) not in flat_ids:
+                    migrated.append(item)
+                    continue
+                # In the legacy layout, matcher is group-level and the other
+                # fields describe the command hook. Preserve the full command
+                # string and its arguments during the schema conversion.
+                subhook = {key: value for key, value in item.items() if key != "matcher"}
+                subhook.setdefault("type", "command")
+                group = {}
+                if "matcher" in item:
+                    group["matcher"] = item["matcher"]
+                group["hooks"] = [subhook]
+                migrated.append(group)
                 changed = True
-        if not hooks_config.get("PreToolUse"):
+            if migrated != groups:
+                hooks_config[event] = migrated
+        if "PreToolUse" not in hooks_config:
             hooks_config["PreToolUse"] = []
             changed = True
 
@@ -375,20 +475,32 @@ def enable_claude_hooks():
         )
         return EXIT_CORRUPT
 
+    normalized = _normalize_owned_pretool_hooks(pre_tool)
+    if normalized is None:
+        print(
+            "Error: Sadskill has conflicting owned Claude hook commands or "
+            "execution options. Refusing to rewrite settings.json; resolve "
+            "the registrations manually, then retry.",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+    changed = normalized or changed
+
     already = any(
         _group_has_our_command(item)
         for item in pre_tool if isinstance(item, dict)
     )
     if already:
         print(f"   [INFO] {HOOK_BASENAME} is already registered in {settings_file}", file=sys.stderr)
-        return EXIT_OK
-
-    nested_entry = {
-        "matcher": "Bash",
-        "hooks": [{"type": "command", "command": str(hook_file)}],
-    }
-    pre_tool.append(nested_entry)
-    changed = True
+        if not changed:
+            return EXIT_OK
+    else:
+        nested_entry = {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": str(hook_file)}],
+        }
+        pre_tool.append(nested_entry)
+        changed = True
 
     if not changed:
         return EXIT_OK
