@@ -248,8 +248,12 @@ def resolve_retest_argv(data: dict, project_root: Path):
     containment alone is not an execution sandbox, so there is no custom-script
     bypass.
     """
-    check_id = data.get("check_id") or data.get("recipe_id")
-    if check_id:
+    check_id = data.get("check_id")
+    if check_id is None:
+        check_id = data.get("recipe_id")
+    if check_id is not None:
+        if not isinstance(check_id, str) or not check_id.strip():
+            return False, [], "Invalid check_id/recipe_id; expected a non-empty string"
         if check_id in TRUSTED_RECIPES:
             return True, list(TRUSTED_RECIPES[check_id]), f"Trusted recipe: {check_id}"
         return False, [], f"Unknown check_id/recipe_id: {check_id}"

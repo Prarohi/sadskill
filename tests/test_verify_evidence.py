@@ -212,6 +212,17 @@ class EvidenceVerifierTests(unittest.TestCase):
                 )
                 self.assertFalse(ok, (argv, reason))
 
+    def test_malformed_recipe_id_is_reported_without_exception(self):
+        for recipe_id in (["python-pytest"], {"name": "python-pytest"}, ""):
+            with self.subTest(recipe_id=recipe_id):
+                ok, argv, reason = VERIFIER.resolve_retest_argv(
+                    {"recipe_id": recipe_id, "command": "python3 -m pytest"},
+                    self.root,
+                )
+                self.assertFalse(ok)
+                self.assertEqual(argv, [])
+                self.assertIn("expected a non-empty string", reason)
+
     def test_raw_retest_commands_match_only_fixed_recipe_arguments(self):
         commands = (
             "python3 scripts/verify.py",
