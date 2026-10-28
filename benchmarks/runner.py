@@ -5,7 +5,7 @@ Evaluates specification contracts, architectural requirements, and policy invari
 defined in benchmarks/tasks.json.
 
 Note: This suite performs deterministic contract and policy verification.
-For end-to-end multi-agent performance evaluations, see benchmarks/fixtures/.
+This local runner does not execute agents. Track C1 agent runs remain NOT_EXECUTED.
 """
 
 import argparse

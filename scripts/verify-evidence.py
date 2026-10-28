@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -41,8 +42,96 @@ def project_identity(project_root: Path) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _hash_git_diff(digest, project_root):
+    command = [
+        "git", "diff", "--binary", "HEAD", "--", ".",
+        ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
+    ]
+    try:
+        proc = subprocess.Popen(
+            command, cwd=str(project_root), stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        with proc.stdout:
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return proc.wait() == 0
+    except OSError:
+        return False
+
+
+def _untracked_paths(project_root):
+    result = subprocess.run(
+        [
+            "git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+            ".", ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
+        ], cwd=str(project_root), capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return [path for path in result.stdout.split(b"\0") if path]
+
+
+def worktree_snapshot(project_root: Path):
+    """Return a digest of tracked and untracked dirt outside evidence records."""
+    status = subprocess.run(
+        [
+            "git", "status", "--porcelain", "-z", "--untracked-files=all", "--",
+            ".", ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
+        ], cwd=str(project_root), capture_output=True, check=False,
+    )
+    paths = _untracked_paths(project_root)
+    if status.returncode != 0 or paths is None:
+        return None
+
+    digest = hashlib.sha256()
+    digest.update(b"status\0")
+    digest.update(status.stdout)
+    digest.update(b"diff\0")
+    if not _hash_git_diff(digest, project_root):
+        return None
+
+    for relative in sorted(paths):
+        if relative == b".sad/evidence" or relative.startswith(b".sad/evidence/"):
+            continue
+        path = project_root / os.fsdecode(relative)
+        try:
+            before = path.lstat()
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            digest.update(stat.S_IFMT(before.st_mode).to_bytes(4, "big"))
+            digest.update(stat.S_IMODE(before.st_mode).to_bytes(4, "big"))
+            if stat.S_ISREG(before.st_mode):
+                with path.open("rb") as stream:
+                    while True:
+                        chunk = stream.read(65536)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+            elif stat.S_ISLNK(before.st_mode):
+                digest.update(os.fsencode(os.readlink(path)))
+            else:
+                return None
+            after = path.lstat()
+            if (before.st_dev, before.st_ino, before.st_mode, before.st_size,
+                    before.st_mtime_ns) != (
+                    after.st_dev, after.st_ino, after.st_mode, after.st_size,
+                    after.st_mtime_ns):
+                return None
+        except OSError:
+            return None
+
+    return {
+        "worktree_dirty": bool(status.stdout),
+        "worktree_digest": digest.hexdigest(),
+    }
+
+
 def git_context(project_root: Path):
-    """Return commit and dirty state, excluding evidence records themselves."""
+    """Return HEAD plus a content-bound dirty snapshot, excluding evidence."""
     try:
         head = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=str(project_root),
@@ -50,22 +139,10 @@ def git_context(project_root: Path):
         )
         if head.returncode != 0:
             return None
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
-            cwd=str(project_root), capture_output=True, text=True, check=False,
-        )
-        if status.returncode != 0:
+        snapshot = worktree_snapshot(project_root)
+        if snapshot is None:
             return None
-        dirty = False
-        for entry in status.stdout.split("\0"):
-            if not entry:
-                continue
-            path = entry[3:] if len(entry) >= 3 else ""
-            if path == ".sad/evidence" or path.startswith(".sad/evidence/"):
-                continue
-            dirty = True
-            break
-        return {"commit_sha": head.stdout.strip(), "worktree_dirty": dirty}
+        return {"commit_sha": head.stdout.strip(), **snapshot}
     except OSError:
         return None
 
@@ -197,28 +274,32 @@ def resolve_retest_argv(data: dict, project_root: Path):
         if arg in DISALLOWED_INLINE_FLAGS:
             return False, [], f"Inline code evaluation flag '{arg}' prohibited in safe retest recipe"
 
-    # Match raw commands against known trusted recipes
+    # Match raw commands only when they exactly select a fixed recipe. Any
+    # caller-supplied selector, path, manifest, or test-name argument could
+    # redirect an otherwise trusted runner outside the checkout.
     exe = Path(argv[0]).name
     if exe in ("python", "python3"):
-        if len(argv) >= 2 and argv[1] == "scripts/verify.py":
-            return True, [sys.executable, "scripts/verify.py"] + argv[2:], "Matched repo-verify recipe"
-        if len(argv) >= 2 and argv[1] == "benchmarks/runner.py":
-            return True, [sys.executable, "benchmarks/runner.py"] + argv[2:], "Matched repo-benchmarks recipe"
-        if len(argv) >= 3 and argv[1] == "-m" and argv[2] in ("unittest", "pytest"):
-            return True, [sys.executable] + argv[1:], f"Matched python {argv[2]} recipe"
-        if len(argv) >= 2 and "benchmarks/fixtures/tenant-isolation/grader.py" in argv[1]:
+        if argv[1:] == ["scripts/verify.py"]:
+            return True, list(TRUSTED_RECIPES["repo-verify"]), "Matched repo-verify recipe"
+        if argv[1:] == ["benchmarks/runner.py"]:
+            return True, list(TRUSTED_RECIPES["repo-benchmarks"]), "Matched repo-benchmarks recipe"
+        if argv[1:] == ["-m", "pytest"]:
+            return True, list(TRUSTED_RECIPES["python-pytest"]), "Matched python pytest recipe"
+        if argv[1:] == ["-m", "unittest", "discover"]:
+            return True, list(TRUSTED_RECIPES["python-unittest"]), "Matched python unittest recipe"
+        if argv[1:] == ["benchmarks/fixtures/tenant-isolation/grader.py"]:
             return True, [sys.executable, "benchmarks/fixtures/tenant-isolation/grader.py"], "Matched tenant isolation grader"
-        if len(argv) >= 2 and "benchmarks/fixtures/real-rls/grader.py" in argv[1]:
+        if argv[1:] == ["benchmarks/fixtures/real-rls/grader.py"]:
             return True, [sys.executable, "benchmarks/fixtures/real-rls/grader.py"], "Matched real RLS grader"
 
-    if exe == "pytest":
-        return True, [sys.executable, "-m", "pytest"] + argv[1:], "Matched pytest recipe"
+    if exe == "pytest" and len(argv) == 1:
+        return True, list(TRUSTED_RECIPES["python-pytest"]), "Matched pytest recipe"
 
-    if exe == "cargo" and len(argv) >= 2 and argv[1] == "test":
-        return True, ["cargo", "test"] + argv[2:], "Matched cargo-test recipe"
+    if exe == "cargo" and argv[1:] == ["test"]:
+        return True, list(TRUSTED_RECIPES["cargo-test"]), "Matched cargo-test recipe"
 
-    if exe == "go" and len(argv) >= 2 and argv[1] == "test":
-        return True, ["go", "test"] + argv[2:], "Matched go-test recipe"
+    if exe == "go" and argv[1:] == ["test", "./..."]:
+        return True, list(TRUSTED_RECIPES["go-test"]), "Matched go-test recipe"
 
     return (
         False,
@@ -261,9 +342,22 @@ def execute_safe_argv(project_root: Path, argv: list, timeout_seconds=30):
     except subprocess.TimeoutExpired:
         if proc:
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except Exception:
+                # start_new_session=True makes the child PID its process-group
+                # ID. Keep using it even if the parent exited while a child
+                # still holds the captured output pipes open.
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
                 proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None:
+                        pipe.close()
+                proc.wait()
         return False, f"Execution timed out after {timeout_seconds}s"
     except Exception as e:
         return False, f"Execution error: {e}"
@@ -329,6 +423,7 @@ def verify_evidence(
     required_keys = [
         "timestamp", "task_slug", "command", "exit_code", "summary",
         "files_touched", "project_id", "commit_sha", "worktree_dirty",
+        "worktree_digest",
     ]
 
     # Check current git commit for freshness binding
@@ -505,6 +600,13 @@ def verify_evidence(
             errors += 1
             records.append({"file": ef.name, "status": "FAILED", "reason": "invalid worktree_dirty"})
             continue
+        if not isinstance(data.get("worktree_digest"), str) or not re.fullmatch(
+            r"[0-9a-f]{64}", data["worktree_digest"]
+        ):
+            log("   [FAIL] worktree_digest must be a SHA-256 hex digest.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "invalid worktree_digest"})
+            continue
 
         if current_context is None:
             log("   [NOT_VERIFIABLE] Project is not in a readable Git worktree.")
@@ -525,6 +627,11 @@ def verify_evidence(
             log("   [DIRTY_WORKTREE] Evidence dirty-state does not match current checkout.")
             errors += 1
             records.append({"file": ef.name, "status": "DIRTY_WORKTREE", "reason": "dirty-state mismatch"})
+            continue
+        if data["worktree_digest"] != current_context["worktree_digest"]:
+            log("   [WORKTREE_CHANGED] Non-evidence checkout contents changed after capture.")
+            errors += 1
+            records.append({"file": ef.name, "status": "WORKTREE_CHANGED", "reason": "worktree digest mismatch"})
             continue
 
         if not is_valid_iso_timestamp(data.get("timestamp")):
@@ -595,6 +702,7 @@ def verify_evidence(
             "task_slug": data.get("task_slug"),
             "commit_sha": data.get("commit_sha"),
             "worktree_dirty": data.get("worktree_dirty"),
+            "worktree_digest": data.get("worktree_digest"),
         })
 
     log("\n--------------------------------------------------")
@@ -610,7 +718,7 @@ def main():
     parser.add_argument("--project-root", help="Explicit project root directory")
     parser.add_argument("--evidence-dir", help="Explicit evidence directory")
     parser.add_argument("--retest", action="store_true", help="Safely re-execute authorized test commands via recipe registry")
-    parser.add_argument("--print-context", action="store_true", help="Print project_id, commit_sha, and worktree_dirty for a new evidence record")
+    parser.add_argument("--print-context", action="store_true", help="Print project_id, commit_sha, worktree_dirty, and worktree_digest for a new evidence record")
     parser.add_argument(
         "--require-evidence", action="store_true", help="Fail if zero evidence records are present"
     )

@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -130,6 +131,22 @@ class EvidenceVerifierTests(unittest.TestCase):
         self.assertEqual(records[0]["status"], "DIRTY_WORKTREE")
         self.assertIn("dirty-state does not match", output)
 
+    def test_dirty_worktree_content_change_invalidates_bound_record(self):
+        readme = self.root / "README.md"
+        readme.write_text("# dirty state one\n", encoding="utf-8")
+        captured = VERIFIER.git_context(self.root)
+        self.assertTrue(captured["worktree_dirty"])
+        self.write_record(**captured)
+
+        readme.write_text("# dirty state two\n", encoding="utf-8")
+        current = VERIFIER.git_context(self.root)
+        self.assertTrue(current["worktree_dirty"])
+        self.assertNotEqual(captured["worktree_digest"], current["worktree_digest"])
+        (exit_code, records), output = self.verify()
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(records[0]["status"], "WORKTREE_CHANGED")
+        self.assertIn("contents changed after capture", output)
+
     def test_invalid_calendar_timestamp_fails(self):
         self.write_record(timestamp="2026-02-31T04:00:00Z")
         (exit_code, records), output = self.verify()
@@ -179,6 +196,55 @@ class EvidenceVerifierTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("unrecognized arguments", result.stderr)
+
+    def test_runner_arguments_cannot_select_paths_outside_checkout(self):
+        commands = (
+            "python3 -m pytest /tmp/evil.py",
+            "python3 -m unittest discover -s /tmp/evil",
+            "cargo test --manifest-path /tmp/evil/Cargo.toml",
+            "go test /tmp/evil",
+            "pytest /tmp/evil.py",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                ok, argv, reason = VERIFIER.resolve_retest_argv(
+                    {"command": command}, self.root
+                )
+                self.assertFalse(ok, (argv, reason))
+
+    def test_raw_retest_commands_match_only_fixed_recipe_arguments(self):
+        commands = (
+            "python3 scripts/verify.py",
+            "python3 benchmarks/runner.py",
+            "python3 -m pytest",
+            "python3 -m unittest discover",
+            "cargo test",
+            "go test ./...",
+            "pytest",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                ok, _argv, reason = VERIFIER.resolve_retest_argv(
+                    {"command": command}, self.root
+                )
+                self.assertTrue(ok, reason)
+
+    def test_timeout_kills_child_process_after_parent_exits(self):
+        marker = Path(self.temp.name) / "child-survived-timeout"
+        child_code = (
+            "import time; time.sleep(1.0); "
+            f"open({str(marker)!r}, 'w').write('alive')"
+        )
+        parent_code = (
+            "import subprocess,sys; "
+            f"subprocess.Popen([sys.executable, '-c', {child_code!r}])"
+        )
+        ok, message = VERIFIER.execute_safe_argv(
+            self.root, [sys.executable, "-c", parent_code], timeout_seconds=0.1
+        )
+        self.assertFalse(ok, message)
+        time.sleep(1.2)
+        self.assertFalse(marker.exists(), "timed-out child process was left running")
 
 
 if __name__ == "__main__":

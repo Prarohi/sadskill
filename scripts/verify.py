@@ -9,7 +9,6 @@ database RLS behavioral fixtures, transactional installer recovery, and strict p
 """
 
 import json
-import hashlib
 import os
 import re
 import subprocess
@@ -45,15 +44,12 @@ def prepare_evidence_fixture(project_dir):
          "--allow-empty", "-m", "fixture baseline"],
         check=True,
     )
-    head = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
+    context = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "verify-evidence.py"),
+         "--project-root", str(root), "--print-context"],
         capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    return {
-        "project_id": hashlib.sha256(str(root).encode("utf-8")).hexdigest(),
-        "commit_sha": head,
-        "worktree_dirty": False,
-    }
+    )
+    return json.loads(context.stdout)
 
 
 class VerificationSuite:

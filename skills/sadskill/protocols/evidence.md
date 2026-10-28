@@ -42,7 +42,7 @@ Evidence records distinguish between self-reported logs and independently verifi
 ### 2. Capture Structured Evidence
 Record the verification event in `.sad/evidence/<YYYYMMDD-HHMMSS>-<slug>.json`:
 
-Before creating a record, run `python3 scripts/verify-evidence.py --print-context`. Copy its `project_id`, exact `commit_sha`, and `worktree_dirty` fields into the record. The project identity is a SHA-256 digest of the canonical local checkout path; records are bound to that checkout. The verifier excludes `.sad/evidence/` itself when comparing dirty state.
+Before creating a record, run `python3 scripts/verify-evidence.py --print-context`. Copy its `project_id`, exact `commit_sha`, `worktree_dirty`, and `worktree_digest` fields into the record. The project identity is a SHA-256 digest of the canonical local checkout path; records are bound to that checkout and its tracked/untracked content outside `.sad/evidence/`. The verifier excludes `.sad/evidence/` itself when comparing dirty state.
 
 ```json
 {
@@ -50,6 +50,7 @@ Before creating a record, run `python3 scripts/verify-evidence.py --print-contex
   "project_id": "<copy project_id from --print-context>",
   "commit_sha": "<copy commit_sha from --print-context>",
   "worktree_dirty": false,
+  "worktree_digest": "<copy worktree_digest from --print-context>",
   "task_slug": "feature-or-fix-slug",
   "command": "npm test -- tests/target.test.ts",
   "exit_code": 0,
@@ -65,7 +66,7 @@ Before creating a record, run `python3 scripts/verify-evidence.py --print-contex
 - All entries in `files_touched` must be relative to the project root.
 - Absolute paths (e.g. `/etc/...`, `/tmp/...`) and path traversal segments (`..`) are strictly prohibited and will be rejected by `scripts/verify-evidence.py`.
 
-Evidence retests can select only registered recipes. There is no `--allow-custom-retest` escape hatch because checking that a script is inside the repository is not a sandbox for executing it.
+Evidence retests can select only registered recipes. Raw command strings must exactly match a fixed recipe; caller-supplied paths, selectors, manifests, and test names are rejected. There is no `--allow-custom-retest` escape hatch because checking that a script is inside the repository is not a sandbox for executing it.
 
 ### 3. Output 3-Line Terminal Execution Proof in Chat
 Every mode completion must conclude with this dense, scanable proof block:
