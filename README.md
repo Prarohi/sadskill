@@ -118,9 +118,12 @@ Tasks conclude with demonstrable terminal verification and machine-readable evid
 
 #### Verification Provenance States:
 - `REPORTED`: Agent claims execution in conversation.
-- `SCHEMA_VALID`: Valid JSON format and strictly contained project paths verified by `scripts/verify-evidence.py`.
+- `SCHEMA_VALID`: The record schema, checkout identity, exact commit, worktree digest, timestamp, and contained paths match the current checkout; this still does not prove the claimed command ran.
 - `RETESTED`: Independently executed by authorized verifier via trusted recipe registry.
-- `CI_ATTESTED`: Linked to immutable GitHub Actions CI run SHA/URL.
+- `CI_CLAIMED`: Evidence contains self-reported CI metadata; no external verification was performed.
+- `CI_ATTESTED`: Use only when an independent trusted GitHub check verifies repository, run, workflow, and exact head SHA. The local verifier does not emit this state.
+
+Run `python3 scripts/verify-evidence.py --print-context` to obtain the local `project_id`, `commit_sha`, `worktree_dirty`, and content-bound `worktree_digest` values for a new evidence record. The digest covers tracked and untracked checkout content plus relevant ignored test sources, configs, and fixtures outside `.sad/evidence/`; initialized submodule worktrees are included recursively. Standard generated dependency/build directories are excluded unless nested below an explicit test or fixture directory. The verifier refuses a complete snapshot when a configured submodule is uninitialized or unsafe to inspect. It rejects mismatched or unbound records and accepts only registered retest recipes with fixed arguments.
 
 ### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
 Safety operates through layered boundaries:

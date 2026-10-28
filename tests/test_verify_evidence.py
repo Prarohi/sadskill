@@ -147,6 +147,60 @@ class EvidenceVerifierTests(unittest.TestCase):
         self.assertEqual(records[0]["status"], "WORKTREE_CHANGED")
         self.assertIn("contents changed after capture", output)
 
+    def test_ignored_pytest_input_changes_bound_snapshot(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text("test_local.py\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", ".gitignore"],
+                       check=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Sadskill Tests",
+             "-c", "user.email=tests@example.invalid", "commit", "-q",
+             "-m", "ignore local test input"],
+            check=True,
+        )
+        captured = VERIFIER.git_context(self.root)
+        self.assertFalse(captured["worktree_dirty"])
+
+        ignored_test = self.root / "test_local.py"
+        ignored_test.write_text(
+            "def test_local_input():\n    assert True\n", encoding="utf-8"
+        )
+        current = VERIFIER.git_context(self.root)
+        self.assertTrue(current["worktree_dirty"])
+        self.assertNotEqual(
+            captured["worktree_digest"], current["worktree_digest"]
+        )
+        self.write_record(**captured)
+
+        (exit_code, records), output = self.verify()
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(records[0]["status"], "DIRTY_WORKTREE")
+        self.assertIn("dirty-state does not match", output)
+
+    def test_ignored_cargo_manifest_changes_bound_snapshot(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text("Cargo.toml\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", ".gitignore"],
+                       check=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Sadskill Tests",
+             "-c", "user.email=tests@example.invalid", "commit", "-q",
+             "-m", "ignore local Cargo manifest"],
+            check=True,
+        )
+        captured = VERIFIER.git_context(self.root)
+        self.assertFalse(captured["worktree_dirty"])
+
+        (self.root / "Cargo.toml").write_text(
+            '[package]\nname = "fixture"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        current = VERIFIER.git_context(self.root)
+        self.assertTrue(current["worktree_dirty"])
+        self.assertNotEqual(
+            captured["worktree_digest"], current["worktree_digest"]
+        )
+
     def test_invalid_calendar_timestamp_fails(self):
         self.write_record(timestamp="2026-02-31T04:00:00Z")
         (exit_code, records), output = self.verify()
