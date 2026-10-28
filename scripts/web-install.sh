@@ -101,6 +101,9 @@ with tarfile.open(archive, mode="r:gz") as tar:
                 shutil.copyfileobj(payload, output, length=65536)
             if target.stat().st_size != member.size:
                 raise SystemExit("ERROR: truncated archive payload")
+            # Preserve only the owner executable bit for shipped helper scripts.
+            # Default private umask keeps verified source inaccessible to others.
+            target.chmod(0o700 if member.mode & 0o111 else 0o600)
 if not (dest_root / "install.sh").is_file() or not (dest_root / "VERSION").is_file():
     raise SystemExit("ERROR: verified archive has no installer or VERSION")
 print("Archive digest and safe extraction verified")
