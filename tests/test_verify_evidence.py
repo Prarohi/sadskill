@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -299,6 +300,57 @@ class EvidenceVerifierTests(unittest.TestCase):
         gitmodules.write_bytes(original_config)
         self.assertIsNotNone(VERIFIER.git_context(self.root))
         gitmodules.write_text("", encoding="utf-8")
+        self.assertIsNone(VERIFIER.git_context(self.root))
+
+    def test_conflicted_gitlink_index_is_unavailable(self):
+        test_file = self._add_test_submodule()
+        submodule_sha = subprocess.run(
+            ["git", "-C", str(test_file.parent), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        blob_sha = subprocess.run(
+            ["git", "-C", str(self.root), "hash-object", "-w", "--stdin"],
+            check=True, capture_output=True, text=True,
+            input="regular file at a conflicting path\n",
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "-C", str(self.root), "update-index", "--force-remove",
+             "test-submodule"], check=True,
+        )
+        conflict_entries = (
+            f"160000 {submodule_sha} 1\ttest-submodule\0"
+            f"100644 {blob_sha} 2\ttest-submodule\0"
+        ).encode("ascii")
+        subprocess.run(
+            ["git", "-C", str(self.root), "update-index", "-z",
+             "--index-info"], input=conflict_entries, check=True,
+        )
+        self.assertIsNone(VERIFIER.git_context(self.root))
+
+    def test_conflicted_regular_index_is_unavailable(self):
+        blob_shas = []
+        for content in ("stage one content\n", "stage two content\n"):
+            blob_shas.append(subprocess.run(
+                ["git", "-C", str(self.root), "hash-object", "-w", "--stdin"],
+                check=True, capture_output=True, text=True, input=content,
+            ).stdout.strip())
+        subprocess.run(
+            ["git", "-C", str(self.root), "update-index", "--force-remove",
+             "README.md"], check=True,
+        )
+        conflict_entries = (
+            f"100644 {blob_shas[0]} 1\tREADME.md\0"
+            f"100644 {blob_shas[1]} 2\tREADME.md\0"
+        ).encode("ascii")
+        subprocess.run(
+            ["git", "-C", str(self.root), "update-index", "-z",
+             "--index-info"], input=conflict_entries, check=True,
+        )
+        self.assertIsNone(VERIFIER.git_context(self.root))
+
+    def test_uninitialized_submodule_makes_snapshot_unavailable(self):
+        self._add_test_submodule()
+        shutil.rmtree(self.root / "test-submodule")
         self.assertIsNone(VERIFIER.git_context(self.root))
 
     def test_dangling_gitmodules_symlink_makes_snapshot_unavailable(self):
