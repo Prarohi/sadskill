@@ -27,6 +27,14 @@ class ClaudeSettingsTests(SandboxCase):
                 ]
             },
         }
+        # The defect-9 scenario is an install performed ON TOP of
+        # pre-existing user settings: place the guardrail hook (install
+        # never touches settings.json), keep user settings in place.
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump(self.user_settings, fh)
+        inst = self.run_install("-a", "claude")
+        self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.home, GUARDRAIL)))
 
     def _enable(self):
         return self.run_doctor("--enable-hooks", "--json")
