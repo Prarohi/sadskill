@@ -277,9 +277,18 @@ class VerificationSuite:
         print("\n--- Testing Reproducible Benchmark Suite ---")
         runner = REPO_ROOT / "benchmarks" / "runner.py"
         res = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True)
-        self.assert_true(res.returncode == 0, f"Reproducible benchmarks passed 100% (exit code {res.returncode})")
+        self.assert_true(
+            res.returncode == 0,
+            "Deterministic benchmark checks passed; Track C validates catalog "
+            "metadata only and C1 real-agent runs are NOT_EXECUTED "
+            f"(runner exit code {res.returncode})",
+        )
         suite_24 = REPO_ROOT / "benchmarks" / "tasks" / "suite_24.json"
-        self.assert_true(suite_24.exists(), "24-task benchmark evaluation suite exists at benchmarks/tasks/suite_24.json")
+        self.assert_true(
+            suite_24.exists(),
+            "24-task benchmark catalog exists at benchmarks/tasks/suite_24.json; "
+            "catalog validation is not an agent execution",
+        )
 
     def test_version_consistency(self):
         print("\n--- Testing Version Consistency Across Files ---")
@@ -506,12 +515,18 @@ class VerificationSuite:
             res = subprocess.run([sys.executable, str(fixture_grader)], capture_output=True, text=True)
             self.assert_true(res.returncode == 0, f"Tenant isolation behavioral tests passed cleanly (exit {res.returncode})")
 
-        # 2. Real database RLS fixture
+        # 2. SQLite authorizer RLS-simulation fixture (not PostgreSQL RLS)
         rls_grader = REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"
-        self.assert_true(rls_grader.exists(), "Real database RLS fixture grader exists")
+        self.assert_true(
+            rls_grader.exists(), "SQLite RLS-simulation fixture grader exists"
+        )
         if rls_grader.exists():
             res_rls = subprocess.run([sys.executable, str(rls_grader)], capture_output=True, text=True)
-            self.assert_true(res_rls.returncode == 0, f"Real database RLS behavioral tests passed cleanly (exit {res_rls.returncode})")
+            self.assert_true(
+                res_rls.returncode == 0,
+                "SQLite authorizer RLS-simulation checks passed "
+                f"(exit {res_rls.returncode}); PostgreSQL-native RLS is NOT_RUN",
+            )
 
     def test_markdown_relative_links(self):
         print("\n--- Testing All Markdown Relative Links ---")
