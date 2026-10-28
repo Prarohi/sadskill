@@ -232,7 +232,7 @@ class EvidenceVerifierTests(unittest.TestCase):
                     captured["worktree_digest"], current["worktree_digest"]
                 )
 
-    def test_dirty_submodule_worktree_changes_bound_snapshot(self):
+    def _add_test_submodule(self):
         submodule_source = Path(self.temp.name) / "submodule-source"
         submodule_source.mkdir()
         (submodule_source / "test_local.py").write_text(
@@ -262,11 +262,13 @@ class EvidenceVerifierTests(unittest.TestCase):
              "-m", "add test submodule"],
             check=True,
         )
+        return self.root / "test-submodule" / "test_local.py"
 
+    def test_dirty_submodule_worktree_changes_bound_snapshot(self):
+        test_file = self._add_test_submodule()
         captured = VERIFIER.git_context(self.root)
         self.assertIsNotNone(captured)
         self.assertFalse(captured["worktree_dirty"])
-        test_file = self.root / "test-submodule" / "test_local.py"
         test_file.write_text(
             "def test_submodule_input():\n    assert False\n", encoding="utf-8"
         )
@@ -282,6 +284,22 @@ class EvidenceVerifierTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(records[0]["status"], "DIRTY_WORKTREE")
         self.assertIn("dirty-state does not match", output)
+
+    def test_missing_or_edited_gitmodules_cannot_hide_gitlinks(self):
+        test_file = self._add_test_submodule()
+        gitmodules = self.root / ".gitmodules"
+        original_config = gitmodules.read_bytes()
+        test_file.write_text(
+            "def test_submodule_input():\n    assert False\n", encoding="utf-8"
+        )
+
+        gitmodules.unlink()
+        self.assertIsNone(VERIFIER.git_context(self.root))
+
+        gitmodules.write_bytes(original_config)
+        self.assertIsNotNone(VERIFIER.git_context(self.root))
+        gitmodules.write_text("", encoding="utf-8")
+        self.assertIsNone(VERIFIER.git_context(self.root))
 
     def test_dangling_gitmodules_symlink_makes_snapshot_unavailable(self):
         (self.root / ".gitmodules").symlink_to(
