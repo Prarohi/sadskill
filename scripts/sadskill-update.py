@@ -592,6 +592,10 @@ def stage_archive(tar_bytes, write=True):
 # ---------------------------------------------------------------------------
 
 _SKILL_AGENTS = ("claude", "codex", "gemini", "antigravity", "cursor_skill")
+_HOME_ROOT_AGENTS = frozenset({
+    "claude", "claude_command", "claude_hook", "codex", "codex_prompt",
+    "gemini", "antigravity",
+})
 
 _AGENT_DIRS = {
     "claude": Path.home() / ".claude" / "skills" / "sadskill",
@@ -1051,7 +1055,9 @@ def _cmd_apply_locked(args):
                     "agent": agent,
                     "entry_destination": entry["destination"],
                     "target_root": entry.get(
-                        "target_root", str(Path.home().resolve())
+                        "target_root", str(_default_target_root(
+                            entry.get("agent"), Path(entry["destination"])
+                        ))
                     ),
                 }
         invalid_targets = validate_file_targets(actions)
@@ -1070,6 +1076,15 @@ def _cmd_apply_locked(args):
                 "hint": "user modifications detected; pass --force after "
                         "reviewing (your modifications will be backed up)",
             }, EXIT_CONFLICT
+
+        # Reject special file modes before creating a transaction journal.
+        # _backup_dest repeats this check so a chmod racing the preflight is
+        # still caught before any installed file is replaced.
+        for target in list(destinations) + [
+            str(MANIFEST_FILE), str(INSTALL_STATE_FILE)
+        ]:
+            _assert_no_symlink_components(target)
+            _validated_regular_file_mode(target)
 
         _assert_no_symlink_components(STATE_DIR)
         backups_root = STATE_DIR / "backups"
@@ -1112,9 +1127,11 @@ def _cmd_apply_locked(args):
                     dest = _validate_owned_destination(dest, entry)
                     staged = stage / action["source"]
                     mutation_index += 1
+                    backup_record = journal.data["backup_map"].get(str(dest))
+                    _assert_matches_backup_snapshot(dest, backup_record)
                     old_hash = (
-                        core.compute_sha256(dest)
-                        if dest.exists() else None
+                        backup_record["sha256"]
+                        if backup_record["existed"] else None
                     )
                     new_hash = core.compute_sha256(staged)
                     journal.step("mutation_intent", {
@@ -1125,7 +1142,9 @@ def _cmd_apply_locked(args):
                         "old_sha256": old_hash,
                         "new_sha256": new_hash,
                     })
-                    written = _atomic_install_file(staged, Path(dest))
+                    written = _atomic_install_file(
+                        staged, Path(dest), expected_snapshot=backup_record
+                    )
                     applied[str(dest)] = core.compute_sha256(written)
                     journal.step("mutation_applied", {
                         "category": "destination",
@@ -1148,7 +1167,17 @@ def _cmd_apply_locked(args):
                 dest for dest, record in destinations.items()
                 if record["agent"] not in _SKILL_AGENTS
             }
+            manifest_backup = journal.data["metadata_backup_map"].get(
+                str(MANIFEST_FILE)
+            )
+            _assert_matches_backup_snapshot(MANIFEST_FILE, manifest_backup)
             manifest = core.load_manifest_data(MANIFEST_FILE)
+            for entry in manifest["entries"]:
+                if (not entry.get("target_root")
+                        and entry.get("agent") in _HOME_ROOT_AGENTS):
+                    entry["target_root"] = str(_default_target_root(
+                        entry["agent"], Path(entry["destination"])
+                    ))
             for entry in manifest["entries"]:
                 entry_dest = entry["destination"]
                 if entry.get("agent") in _SKILL_AGENTS and entry_dest in updated_skill_roots:
@@ -1162,7 +1191,9 @@ def _cmd_apply_locked(args):
                 entry["backup_hash"] = entry.get("content_hash", "")
                 entry["content_hash"] = new_hash
                 entry["content_hash_type"] = new_hash_type
-                entry.setdefault("target_root", str(Path.home().resolve()))
+                entry.setdefault("target_root", str(_default_target_root(
+                    entry.get("agent"), Path(entry["destination"])
+                )))
                 entry["installed_at"] = time.strftime(
                     "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
                 )
@@ -1175,8 +1206,7 @@ def _cmd_apply_locked(args):
                 manifest_text.encode("utf-8")
             )
             manifest_old_hash = (
-                core.compute_sha256(MANIFEST_FILE)
-                if MANIFEST_FILE.exists() else None
+                manifest_backup["sha256"] if manifest_backup["existed"] else None
             )
             journal.step("mutation_intent", {
                 "category": "metadata", "destination": str(MANIFEST_FILE),
@@ -1184,7 +1214,9 @@ def _cmd_apply_locked(args):
                 "old_sha256": manifest_old_hash,
                 "new_sha256": manifest_new_hash,
             })
-            core.atomic_write_text(MANIFEST_FILE, manifest_text)
+            _atomic_install_text(
+                MANIFEST_FILE, manifest_text, expected_snapshot=manifest_backup
+            )
             journal.step("mutation_applied", {
                 "category": "metadata", "destination": str(MANIFEST_FILE),
                 "sha256": manifest_new_hash,
@@ -1197,9 +1229,12 @@ def _cmd_apply_locked(args):
                 "channel": channel,
             }, indent=2) + "\n"
             state_new_hash = core.compute_sha256_of_bytes(state_text.encode("utf-8"))
+            state_backup = journal.data["metadata_backup_map"].get(
+                str(INSTALL_STATE_FILE)
+            )
+            _assert_matches_backup_snapshot(INSTALL_STATE_FILE, state_backup)
             state_old_hash = (
-                core.compute_sha256(INSTALL_STATE_FILE)
-                if INSTALL_STATE_FILE.exists() else None
+                state_backup["sha256"] if state_backup["existed"] else None
             )
             journal.step("mutation_intent", {
                 "category": "metadata", "destination": str(INSTALL_STATE_FILE),
@@ -1207,7 +1242,9 @@ def _cmd_apply_locked(args):
                 "old_sha256": state_old_hash,
                 "new_sha256": state_new_hash,
             })
-            core.atomic_write_text(INSTALL_STATE_FILE, state_text)
+            _atomic_install_text(
+                INSTALL_STATE_FILE, state_text, expected_snapshot=state_backup
+            )
             journal.step("mutation_applied", {
                 "category": "metadata", "destination": str(INSTALL_STATE_FILE),
                 "sha256": state_new_hash,
@@ -1285,6 +1322,27 @@ def _has_path_marker(path, marker):
                for index in range(max(0, len(parts) - width + 1)))
 
 
+def _default_target_root(agent, destination):
+    """Infer a legacy manifest's only safe updater root for this agent."""
+    home = Path.home().resolve()
+    fixed_roots = {
+        "claude": home / ".claude",
+        "claude_command": home / ".claude",
+        "claude_hook": home / ".claude",
+        "codex": home / ".codex",
+        "codex_prompt": home / ".codex",
+        "gemini": home / ".gemini",
+        "antigravity": home / ".gemini",
+    }
+    if agent in fixed_roots:
+        return fixed_roots[agent]
+    destination = Path(destination)
+    if agent == "cursor_skill" and tuple(destination.parts[-3:]) == (
+            ".cursor", "skills", "sadskill"):
+        return destination.parents[2]
+    return home
+
+
 def _assert_no_symlink_components(path):
     path = Path(path)
     current = Path(path.anchor)
@@ -1337,7 +1395,49 @@ def _validate_owned_destination(dest, entry):
             )
     elif dest != root:
         raise core.IntegrityError("non-skill update target differs from its manifest path")
-    target_root = Path(entry.get("target_root") or Path.home())
+
+    # A manifest's target_root is ownership metadata, not authority to send an
+    # updater write anywhere on disk. HOME-hosted agents must use their fixed
+    # HOME roots. Cursor is workspace-scoped, so its root must be exactly the
+    # parent of the workspace's canonical .cursor installation path.
+    home = Path.home().resolve()
+    fixed_skill_roots = {
+        "claude": home / ".claude" / "skills" / "sadskill",
+        "codex": home / ".codex" / "skills" / "sadskill",
+        "gemini": home / ".gemini" / "skills" / "sadskill",
+        "antigravity": home / ".gemini" / "antigravity" / "skills" / "sadskill",
+    }
+    target_root = Path(
+        entry.get("target_root") or _default_target_root(agent, root)
+    )
+    if not target_root.is_absolute() or ".." in target_root.parts:
+        raise core.IntegrityError(
+            f"target root is not a canonical absolute path: {target_root}"
+        )
+    _assert_no_symlink_components(target_root)
+    _assert_no_symlink_components(root)
+    _assert_no_symlink_components(dest)
+    if agent == "cursor_skill":
+        expected_cursor_root = target_root / ".cursor" / "skills" / "sadskill"
+        if root.resolve(strict=False) != expected_cursor_root.resolve(strict=False):
+            raise core.IntegrityError(
+                "Cursor target root does not match its workspace skill destination"
+            )
+    elif agent in _HOME_ROOT_AGENTS:
+        expected_root = _default_target_root(agent, root)
+        if target_root.resolve(strict=False) != expected_root:
+            raise core.IntegrityError(
+                f"target root for {agent} must be its canonical HOME root "
+                f"{expected_root}"
+            )
+    elif agent != "cursor_skill":
+        raise core.IntegrityError(f"unsupported update installation type: {agent}")
+    if agent in fixed_skill_roots and root.resolve(strict=False) != fixed_skill_roots[agent]:
+        raise core.IntegrityError(
+            f"skill destination for {agent} must be its canonical HOME path "
+            f"{fixed_skill_roots[agent]}"
+        )
+
     try:
         dest.resolve(strict=False).relative_to(target_root.resolve(strict=False))
     except ValueError as exc:
@@ -1351,8 +1451,6 @@ def _validate_owned_destination(dest, entry):
             raise core.IntegrityError(
                 f"legacy manifest destination outside HOME is untrusted: {dest}"
             ) from exc
-    _assert_no_symlink_components(root)
-    _assert_no_symlink_components(dest)
     return dest
 
 
@@ -1364,12 +1462,82 @@ def _sync_file(path):
         os.close(fd)
 
 
+def _sync_directory(path):
+    """Durably sync a directory or fail before relying on its entries."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(str(path), flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _ensure_private_directory(path, *, parents=False, exist_ok=True):
     path = Path(path)
     _assert_no_symlink_components(path)
-    path.mkdir(parents=parents, exist_ok=exist_ok, mode=0o700)
+    if parents:
+        if path.exists() and not exist_ok:
+            raise FileExistsError(str(path))
+        missing = []
+        current = path
+        while not current.exists():
+            missing.append(current)
+            if current.parent == current:
+                raise FileNotFoundError(str(current))
+            current = current.parent
+        for directory in reversed(missing):
+            try:
+                directory.mkdir(mode=0o700)
+            except FileExistsError:
+                if not directory.is_dir():
+                    raise
+            else:
+                # Persist each new directory entry through its parent before
+                # any backup or destination replacement can depend on it.
+                _sync_directory(directory.parent)
+    else:
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            if not exist_ok:
+                raise
+            if not path.is_dir():
+                raise
+        else:
+            _sync_directory(path.parent)
     os.chmod(path, 0o700)
+    _sync_directory(path)
     return path
+
+
+def _validated_regular_file_mode(path):
+    path = Path(path)
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise core.IntegrityError(f"backup target is not a regular file: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & ~0o777:
+        raise core.IntegrityError(
+            f"unsupported special permission bits on updater target: {path}"
+        )
+    return mode
+
+
+def _assert_matches_backup_snapshot(dest, record):
+    """Refuse to replace a target changed since its verified backup was taken."""
+    dest = Path(dest)
+    _assert_no_symlink_components(dest)
+    current_mode = _validated_regular_file_mode(dest)
+    current_hash = core.compute_sha256(dest) if current_mode is not None else None
+    if not isinstance(record, dict) or not isinstance(record.get("existed"), bool):
+        raise core.IntegrityError(f"backup snapshot is malformed for {dest}")
+    expected_hash = record.get("sha256") if record["existed"] else None
+    expected_mode = record.get("mode") if record["existed"] else None
+    if current_hash != expected_hash or current_mode != expected_mode:
+        raise core.IntegrityError(
+            f"update target changed after its backup snapshot: {dest}"
+        )
 
 
 def _backup_dest(dest, backups_dir, backup_id):
@@ -1378,25 +1546,30 @@ def _backup_dest(dest, backups_dir, backup_id):
     if not dest.exists():
         return {"existed": False, "backup_path": None, "sha256": None,
                 "kind": None, "mode": None}
-    if not dest.is_file():
-        raise core.IntegrityError(f"backup target is not a regular file: {dest}")
-    mode = stat.S_IMODE(dest.stat().st_mode)
+    mode = _validated_regular_file_mode(dest)
+    before = dest.stat()
     target_dir = Path(backups_dir) / "destinations"
     _ensure_private_directory(target_dir, parents=True, exist_ok=True)
     target = target_dir / f"{backup_id}.backup"
     shutil.copy2(dest, target)
     os.chmod(target, 0o600)
     _sync_file(target)
-    core.fsync_dir(target_dir)
+    _sync_directory(target_dir)
     original_hash = core.compute_sha256(dest)
     backup_hash = core.compute_sha256(target)
     if not original_hash or original_hash != backup_hash:
         raise core.IntegrityError(f"backup verification failed for {dest}")
+    after = dest.stat()
+    if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+         stat.S_IMODE(before.st_mode)) !=
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns,
+             stat.S_IMODE(after.st_mode))):
+        raise core.IntegrityError(f"backup target changed while being snapshotted: {dest}")
     return {"existed": True, "backup_path": str(target),
             "sha256": original_hash, "kind": "file", "mode": mode}
 
 
-def _atomic_install_file(staged, dest):
+def _atomic_install_file(staged, dest, *, expected_snapshot=None):
     """Copy a staged file to dest atomically; returns written path."""
     dest = Path(dest)
     _assert_no_symlink_components(dest)
@@ -1413,8 +1586,35 @@ def _atomic_install_file(staged, dest):
             mode = 0o755 if staged.name == "git-guardrail.sh" else 0o644
         os.chmod(tmp, mode)
         _sync_file(tmp)
+        if expected_snapshot is not None:
+            _assert_matches_backup_snapshot(dest, expected_snapshot)
         os.replace(tmp, str(dest))
-        core.fsync_dir(dest.parent)
+        _sync_directory(dest.parent)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return dest
+
+
+def _atomic_install_text(dest, text, *, expected_snapshot=None):
+    """Atomically write updater metadata after verifying its backup snapshot."""
+    dest = Path(dest)
+    _assert_no_symlink_components(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".update-tmp.", dir=str(dest.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(tmp, 0o644)
+        if expected_snapshot is not None:
+            _assert_matches_backup_snapshot(dest, expected_snapshot)
+        os.replace(tmp, str(dest))
+        _sync_directory(dest.parent)
     except Exception:
         try:
             os.unlink(tmp)
@@ -1519,7 +1719,7 @@ def _restore_rollback_file(dest, record, backup):
             dest.unlink()
         except FileNotFoundError:
             pass
-        core.fsync_dir(dest.parent)
+        _sync_directory(dest.parent)
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".rollback-tmp.", dir=str(dest.parent))
@@ -1530,7 +1730,7 @@ def _restore_rollback_file(dest, record, backup):
         os.chmod(tmp, restore_mode)
         _sync_file(tmp)
         os.replace(tmp, str(dest))
-        core.fsync_dir(dest.parent)
+        _sync_directory(dest.parent)
     except Exception:
         try:
             os.unlink(tmp)

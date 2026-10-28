@@ -1,11 +1,15 @@
 """Updater apply/rollback transaction tests."""
 
+import importlib.util
 import json
 import os
+import shutil
 import stat
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
@@ -13,6 +17,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 from scripts import sadskill_core as core  # noqa: E402
 from helpers import SandboxCase  # noqa: E402
 from tests.updater.stub import GitHubStub, build_tarball  # noqa: E402
+
+_updater_spec = importlib.util.spec_from_file_location(
+    "sadskill_update_test_module",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "scripts", "sadskill-update.py"),
+)
+UPDATER = importlib.util.module_from_spec(_updater_spec)
+_updater_spec.loader.exec_module(UPDATER)
 
 MARKER = "UPDATER_V031_MARKER"
 UNRELATED = "UNRELATED_USER_FILE_KEEPS"
@@ -88,6 +100,80 @@ class ApplyRollbackTests(SandboxCase):
         # Unrelated user data untouched.
         self.assertTrue(
             self.content_exists_under_home(UNRELATED))
+
+    def test_apply_rejects_target_root_outside_canonical_home_agent(self):
+        manifest_path = Path(self.manifest_path())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = next(item for item in manifest["entries"]
+                     if item.get("agent") == "claude")
+        external_workspace = Path(self.home).parent / "external-workspace"
+        external_root = external_workspace / ".claude" / "skills" / "sadskill"
+        external_root.mkdir(parents=True)
+        marker = external_root / "SKILL.md"
+        marker.write_text(
+            "---\nversion: 0.3.0\n---\npreserve external path\n",
+            encoding="utf-8",
+        )
+        shutil.rmtree(Path(self.home) / ".claude" / "skills" / "sadskill")
+        entry["destination"] = str(external_root)
+        entry["target_root"] = str(external_workspace)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n",
+                                 encoding="utf-8")
+
+        applied = self.run_update("apply", "--json", "--force")
+        self.assertEqual(applied.returncode, 4, applied.stdout + applied.stderr)
+        self.assertIn("canonical HOME root", applied.stdout)
+        self.assertEqual(marker.read_text(encoding="utf-8"),
+                         "---\nversion: 0.3.0\n---\npreserve external path\n")
+        self.assertFalse(Path(self.skill_md()).exists())
+        self.assertFalse(
+            (Path(self.home) / ".sadskill" / "update-journal.json").exists()
+        )
+
+    def test_apply_rejects_unsupported_special_permission_bits(self):
+        target = Path(self.skill_md())
+        original = target.read_bytes()
+        os.chmod(target, 0o4755)
+
+        applied = self.run_update("apply", "--json", "--force")
+        self.assertEqual(applied.returncode, 4, applied.stdout + applied.stderr)
+        self.assertIn("unsupported special permission bits", applied.stdout)
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o4755)
+        self.assertFalse(
+            (Path(self.home) / ".sadskill" / "update-journal.json").exists()
+        )
+
+    def test_legacy_home_manifest_gets_canonical_target_roots(self):
+        manifest_path = Path(self.manifest_path())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for entry in manifest["entries"]:
+            entry.pop("target_root", None)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n",
+                                 encoding="utf-8")
+
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        upgraded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertTrue(upgraded["entries"])
+        self.assertTrue(all(
+            entry.get("target_root") == str(Path(self.home) / ".claude")
+            for entry in upgraded["entries"]
+        ), upgraded["entries"])
+
+    def test_cursor_workspace_root_remains_supported(self):
+        installed = self.run_install(
+            "--agent", "cursor", "--target", self.project
+        )
+        self.assertEqual(installed.returncode, 0,
+                         installed.stdout + installed.stderr)
+
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        cursor_skill = (
+            Path(self.project) / ".cursor" / "skills" / "sadskill" / "SKILL.md"
+        )
+        self.assertIn(MARKER, cursor_skill.read_text(encoding="utf-8"))
 
     def test_reapply_is_noop(self):
         self.run_update("apply", "--json")
@@ -388,6 +474,81 @@ class ApplyRollbackTests(SandboxCase):
         actions = [r["action"] for r in data["records"]]
         self.assertIn("update", actions)
         self.assertIn("rollback", actions)
+
+
+class UpdaterBackupPrimitiveTests(unittest.TestCase):
+    def test_snapshot_guard_rejects_content_mode_and_create_races(self):
+        with tempfile.TemporaryDirectory(prefix="sadskill-updater-primitive-") as tmp:
+            root = Path(tmp)
+            target = root / "managed.txt"
+            target.write_bytes(b"original\n")
+            backup_dir = root / ".sadskill" / "backups" / "update-test"
+            snapshot = UPDATER._backup_dest(target, backup_dir, "content")
+
+            target.write_bytes(b"concurrent user edit\n")
+            with self.assertRaisesRegex(
+                    UPDATER.core.IntegrityError,
+                    "changed after its backup snapshot"):
+                UPDATER._assert_matches_backup_snapshot(target, snapshot)
+            self.assertEqual(target.read_bytes(), b"concurrent user edit\n")
+            staged = root / "staged.txt"
+            staged.write_bytes(b"release update\n")
+            with self.assertRaisesRegex(
+                    UPDATER.core.IntegrityError,
+                    "changed after its backup snapshot"):
+                UPDATER._atomic_install_file(
+                    staged, target, expected_snapshot=snapshot
+                )
+            self.assertEqual(target.read_bytes(), b"concurrent user edit\n")
+
+            metadata = root / "manifest.json"
+            metadata.write_bytes(b'{"version":"before"}\n')
+            metadata_snapshot = UPDATER._backup_dest(
+                metadata, backup_dir, "metadata"
+            )
+            metadata.write_bytes(b'{"version":"concurrent"}\n')
+            with self.assertRaisesRegex(
+                    UPDATER.core.IntegrityError,
+                    "changed after its backup snapshot"):
+                UPDATER._atomic_install_text(
+                    metadata, '{"version":"update"}\n',
+                    expected_snapshot=metadata_snapshot,
+                )
+            self.assertEqual(metadata.read_bytes(), b'{"version":"concurrent"}\n')
+
+            target.write_bytes(b"original\n")
+            os.chmod(target, 0o600)
+            with self.assertRaisesRegex(
+                    UPDATER.core.IntegrityError,
+                    "changed after its backup snapshot"):
+                UPDATER._assert_matches_backup_snapshot(target, snapshot)
+            self.assertEqual(target.read_bytes(), b"original\n")
+
+            absent = root / "new-file.txt"
+            absent_snapshot = UPDATER._backup_dest(
+                absent, backup_dir, "absent"
+            )
+            absent.write_bytes(b"created concurrently\n")
+            with self.assertRaisesRegex(
+                    UPDATER.core.IntegrityError,
+                    "changed after its backup snapshot"):
+                UPDATER._assert_matches_backup_snapshot(absent, absent_snapshot)
+            self.assertEqual(absent.read_bytes(), b"created concurrently\n")
+
+    def test_private_directory_creation_syncs_each_parent_entry(self):
+        with tempfile.TemporaryDirectory(prefix="sadskill-fsync-primitive-") as tmp:
+            root = Path(tmp)
+            target = root / "backups" / "update" / "destinations"
+            synced = []
+            with mock.patch.object(
+                    UPDATER, "_sync_directory",
+                    side_effect=lambda path: synced.append(Path(path))):
+                UPDATER._ensure_private_directory(
+                    target, parents=True, exist_ok=False
+                )
+            self.assertTrue({
+                root, root / "backups", root / "backups" / "update", target,
+            }.issubset(set(synced)))
 
 
 if __name__ == "__main__":
