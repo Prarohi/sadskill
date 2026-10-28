@@ -1,0 +1,195 @@
+"""Artifact validation, lock contention, and policy tests."""
+
+import json
+import io
+import os
+import stat
+import sys
+import tarfile
+import time
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from helpers import SandboxCase  # noqa: E402
+from tests.updater.stub import GitHubStub, build_tarball  # noqa: E402
+
+
+def _tar_with(members):
+    """members: list of (name, kind, payload). kind: 'file'|'dir'|'symlink'"""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, kind, payload in members:
+            if kind == "file":
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                tar.addfile(info, io.BytesIO(payload))
+            elif kind == "dir":
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                tar.addfile(info)
+            elif kind == "symlink":
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.SYMTYPE
+                info.linkname = payload
+                tar.addfile(info)
+    return buf.getvalue()
+
+
+class ArtifactTests(SandboxCase):
+    def setUp(self):
+        super().setUp()
+        self.run_install("-a", "claude")
+        self.stub = GitHubStub()
+        self.base = self.stub.start()
+        self.addCleanup(self.stub.stop)
+        self.env["SADSKILL_UPDATE_API_BASE"] = self.base
+        self.skill_dir = os.path.join(self.home, ".claude", "skills", "sadskill")
+
+    def serve_bad(self, tar_bytes, sums=None):
+        self.stub.serve_release("v9.9.9", tar_bytes, sums_bytes=sums)
+
+    def _apply_and_expect_rc4(self, tag_suffix=""):
+        p = self.run_update("apply", "--json")
+        self.assertEqual(p.returncode, 4, p.stdout + p.stderr)
+        # Nothing was extracted into the installation.
+        self.assertFalse(
+            os.path.exists(os.path.join(self.skill_dir, "evil.txt")),
+            "malicious artifact content reached the installation",
+        )
+
+    def test_rejects_path_traversal(self):
+        self.serve_bad(_tar_with([
+            ("skills/sadskill/SKILL.md", "file", b"ok"),
+            ("skills/sadskill/../../evil.txt", "file", b"bad"),
+        ]))
+        self._apply_and_expect_rc4()
+
+    def test_rejects_absolute_path(self):
+        self.serve_bad(_tar_with([
+            ("skills/sadskill/SKILL.md", "file", b"ok"),
+            ("/tmp/evil.txt", "file", b"abs"),
+        ]))
+        self._apply_and_expect_rc4()
+
+    def test_rejects_symlink_member(self):
+        self.serve_bad(_tar_with([
+            ("skills/sadskill/SKILL.md", "file", b"ok"),
+            ("skills/sadskill/link", "symlink", "/etc/passwd"),
+        ]))
+        self._apply_and_expect_rc4()
+
+    def test_rejects_duplicate_members(self):
+        self.serve_bad(_tar_with([
+            ("skills/sadskill/SKILL.md", "file", b"one"),
+            ("skills/sadskill/SKILL.md", "file", b"two"),
+        ]))
+        self._apply_and_expect_rc4()
+
+    def test_rejects_flat_multi_top_layout(self):
+        self.serve_bad(_tar_with([
+            ("skills/sadskill/SKILL.md", "file", b"a"),
+            ("other/random.md", "file", b"b"),
+        ]))
+        self._apply_and_expect_rc4()
+
+    def test_sha256_mismatch_rejected(self):
+        tar, _ = build_tarball(top_dir="sadskill-0.3.1")
+        bad_sums = ("deadbeef" * 8 + "  v9.9.9.tar.gz\n").encode()
+        self.serve_bad(tar, sums=bad_sums)
+        p = self.run_update("apply", "--json")
+        self.assertEqual(p.returncode, 4, p.stdout + p.stderr)
+
+    def test_downloaded_code_never_executed(self):
+        # A staged python script that would create a proof file if executed.
+        proof = "/tmp/opencode/sadskill-never-executed-proof"
+        if os.path.exists(proof):
+            os.unlink(proof)
+        payload = f"import os; open({proof!r}, 'w').write('EXECUTED')".encode()
+        tar, _ = build_tarball(top_dir="sadskill-0.3.1")
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=io.BytesIO(tar), mode="r:gz") as src, \
+                tarfile.open(fileobj=buf, mode="w:gz") as dst:
+            for member in src:
+                dst.addfile(member, src.extractfile(member))
+            info = tarfile.TarInfo("sadskill-0.3.1/skills/sadskill/runme.py")
+            info.size = len(payload)
+            info.mode = 0o755
+            dst.addfile(info, io.BytesIO(payload))
+        self.serve_bad(buf.getvalue())
+        p = self.run_update("apply", "--json")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertFalse(
+            os.path.exists(proof),
+            "downloaded code was executed — CRITICAL violation",
+        )
+
+
+class LockTests(SandboxCase):
+    def test_lock_contention_returns_rc6(self):
+        self.run_install("-a", "claude")
+        stub = GitHubStub()
+        tar, _ = build_tarball(top_dir="sadskill-0.3.1")
+        stub.serve_release("v0.3.1", tar)
+        base = stub.start()
+        self.addCleanup(stub.stop)
+        self.env["SADSKILL_UPDATE_API_BASE"] = base
+        # Hold the manifest lock in a foreign process.
+        lock_path = os.path.join(self.home, ".sadskill",
+                                 ".install-manifest.json.lock")
+        holder = subprocess_hold = os.fork if False else None
+        import subprocess as sp
+        hold = sp.Popen(
+            [sys.executable, "-c",
+             "import fcntl,os,sys,time\n"
+             "f=os.open(sys.argv[1], os.O_CREAT|os.O_WRONLY, 0o600)\n"
+             "fcntl.flock(f, fcntl.LOCK_EX)\n"
+             "print('HELD', flush=True)\n"
+             "time.sleep(30)\n",
+             lock_path],
+            stdout=sp.PIPE, stderr=sp.PIPE, text=True)
+        self.addCleanup(hold.kill)
+        try:
+            line = hold.stdout.readline().strip()
+        finally:
+            pass
+        self.assertEqual(line, "HELD")
+        p = self.run_update("apply", "--json")
+        self.assertEqual(p.returncode, 6, p.stdout + p.stderr)
+
+
+class PolicyTests(SandboxCase):
+    def setUp(self):
+        super().setUp()
+        self.run_install("-a", "claude")
+        self.stub = GitHubStub()
+        tar, _ = build_tarball(top_dir="sadskill-0.3.1")
+        self.stub.serve_release("v0.3.1", tar)
+        self.base = self.stub.start()
+        self.addCleanup(self.stub.stop)
+        self.env["SADSKILL_UPDATE_API_BASE"] = self.base
+
+    def test_pinned_channel_never_auto_updates(self):
+        p = self.run_update("check", "--json", "--channel", "pinned")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        data = json.loads(p.stdout)
+        self.assertIn("pinned", data["message"])
+        # apply on pinned without --version → usage error
+        p = self.run_update("apply", "--json", "--channel", "pinned")
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+
+    def test_external_manager_refused_then_adopt(self):
+        # Simulate npx skills managing the install.
+        self.write_file(self.home, ".skills-lock.json",
+                        json.dumps({"sadskill": {"version": "0.3.0"}}))
+        p = self.run_update("apply", "--json")
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        data = json.loads(p.stdout)
+        self.assertTrue(data["refused"])
+        self.assertIn("external-manager", data["reasons"][0])
+        # --adopt takes explicit ownership and proceeds.
+        p = self.run_update("apply", "--json", "--adopt")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

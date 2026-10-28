@@ -19,6 +19,8 @@ UNINSTALL_SH = os.path.join(REPO_ROOT, "uninstall.sh")
 MANIFEST_CLI = os.path.join(REPO_ROOT, "scripts", "manifest.py")
 DOCTOR_PY = os.path.join(REPO_ROOT, "scripts", "doctor.py")
 
+UPDATE_CLI = os.path.join(REPO_ROOT, "scripts", "sadskill-update.py")
+
 CLAUDE_SETTINGS = ".claude/settings.json"
 
 
@@ -67,6 +69,10 @@ class SandboxCase(unittest.TestCase):
 
     def run_doctor(self, *args):
         return self._run([sys.executable, DOCTOR_PY, *args])
+
+    def run_update(self, *args, global_flags=()):
+        """Run sadskill-update.py with optional global flags and arguments."""
+        return self._run([sys.executable, UPDATE_CLI, *global_flags, *args])
 
     def spawn_manifest(self, *args):
         return subprocess.Popen(
