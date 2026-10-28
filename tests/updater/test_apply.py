@@ -2,6 +2,7 @@
 
 import json
 import os
+import stat
 import sys
 import unittest
 from pathlib import Path
@@ -68,6 +69,22 @@ class ApplyRollbackTests(SandboxCase):
         self.assertEqual(journal["state"], "done")
         self.assertTrue(
             any(s["name"] == "backed_up" for s in journal["steps"]))
+        backups_dir = Path(journal["backups_dir"])
+        self.assertEqual(stat.S_IMODE(backups_dir.stat().st_mode), 0o700)
+        self.assertEqual(
+            stat.S_IMODE((Path(self.home) / ".sadskill" / "backups").stat().st_mode),
+            0o700,
+        )
+        destinations_dir = backups_dir / "destinations"
+        self.assertEqual(stat.S_IMODE(destinations_dir.stat().st_mode), 0o700)
+        for record in (list(journal["backup_map"].values())
+                       + list(journal["metadata_backup_map"].values())):
+            if not record["existed"]:
+                continue
+            self.assertEqual(
+                stat.S_IMODE(Path(record["backup_path"]).stat().st_mode),
+                0o600,
+            )
         # Unrelated user data untouched.
         self.assertTrue(
             self.content_exists_under_home(UNRELATED))
@@ -110,10 +127,99 @@ class ApplyRollbackTests(SandboxCase):
                     backup_text += fh.read()
         self.assertIn("USER_LOCAL_EDIT", backup_text)
 
+    def test_force_refuses_directory_file_target_before_journaling(self):
+        skill_path = Path(self.skill_md())
+        hook_path = skill_path.parent / "hooks" / "git-guardrail.sh"
+        original_skill = skill_path.read_bytes()
+        hook_path.unlink()
+        hook_path.mkdir()
+        sentinel = hook_path / "owned-content.txt"
+        sentinel.write_text("preserve this directory\n", encoding="utf-8")
+        before = self.home_snapshot()
+
+        planned = self.run_update("plan", "--json")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        plan_data = json.loads(planned.stdout)
+        self.assertTrue(any(
+            item["destination"] == str(hook_path)
+            and item["reason"] == "target is not a regular file"
+            for item in plan_data["conflicts"]
+        ))
+
+        applied = self.run_update("apply", "--json", "--force")
+        self.assertEqual(applied.returncode, 4, applied.stdout + applied.stderr)
+        self.assertIn("target is not a regular file", applied.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        self.assertEqual(skill_path.read_bytes(), original_skill)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"),
+                         "preserve this directory\n")
+        self.assertFalse(Path(self.home, ".sadskill", "update-journal.json").exists())
+
+    def test_rollback_rejects_journal_target_outside_owned_install(self):
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        journal_path = Path(self.home) / ".sadskill" / "update-journal.json"
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        victim = Path(self.home) / "unrelated.txt"
+        backups_dir = Path(journal["backups_dir"])
+        forged_backup = backups_dir / "destinations" / "forged-rollback.backup"
+        forged_backup.write_bytes(b"forged journal data must not be restored\n")
+        entry_destination = str(Path(self.home) / ".claude" / "skills" / "sadskill")
+        journal["backup_map"][str(victim)] = {
+            "existed": True,
+            "backup_path": str(forged_backup),
+            "sha256": core.compute_sha256(forged_backup),
+            "kind": "file",
+            "mode": 0o600,
+        }
+        journal["steps"].append({
+            "name": "mutation_intent",
+            "payload": {
+                "category": "destination",
+                "destination": str(victim),
+                "entry_destination": entry_destination,
+                "agent": "claude",
+                "old_sha256": core.compute_sha256(forged_backup),
+                "new_sha256": core.compute_sha256(victim),
+            },
+        })
+        journal_path.write_text(json.dumps(journal), encoding="utf-8")
+        before = self.home_snapshot()
+        victim_before = victim.read_bytes()
+        skill_before = Path(self.skill_md()).read_bytes()
+
+        rollback = self.run_update("rollback", "--json")
+        self.assertEqual(rollback.returncode, 4, rollback.stdout + rollback.stderr)
+        self.assertIn("outside its owned root", rollback.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        self.assertEqual(victim.read_bytes(), victim_before)
+        self.assertEqual(Path(self.skill_md()).read_bytes(), skill_before)
+
+    def test_malformed_claude_hook_entry_cannot_target_settings(self):
+        settings = Path(self.home) / ".claude" / "settings.json"
+        settings.write_text('{"permissions":{"deny":[]}}\n', encoding="utf-8")
+        manifest_path = Path(self.manifest_path())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        hook = next(entry for entry in manifest["entries"]
+                    if entry.get("agent") == "claude_hook")
+        hook["destination"] = str(settings)
+        hook["target_root"] = str(settings.parent)
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n",
+                                 encoding="utf-8")
+        before = self.home_snapshot()
+        settings_before = settings.read_bytes()
+
+        applied = self.run_update("apply", "--json", "--force")
+        self.assertEqual(applied.returncode, 4, applied.stdout + applied.stderr)
+        self.assertIn("canonical guardrail path", applied.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        self.assertEqual(settings.read_bytes(), settings_before)
+
     def test_rollback_restores_preapply_and_keeps_unrelated(self):
         manifest_before = Path(self.manifest_path()).read_bytes()
         state_path = Path(self.home) / ".sadskill" / "install-state.json"
         state_before = state_path.read_bytes() if state_path.exists() else None
+        original_mode = stat.S_IMODE(Path(self.skill_md()).stat().st_mode)
         self.run_update("apply", "--json")
         p = self.run_update("rollback", "--json")
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
@@ -121,6 +227,8 @@ class ApplyRollbackTests(SandboxCase):
             content = fh.read()
         self.assertNotIn(MARKER, content)
         self.assertIn("sadskill", content)
+        self.assertEqual(stat.S_IMODE(Path(self.skill_md()).stat().st_mode),
+                         original_mode)
         self.assertEqual(Path(self.manifest_path()).read_bytes(), manifest_before)
         self.assertEqual(
             state_path.read_bytes() if state_path.exists() else None,

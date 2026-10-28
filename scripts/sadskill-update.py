@@ -33,9 +33,12 @@ Exit codes: 0 ok / 1 error / 2 usage / 3 network-or-corrupt / 4 integrity /
 """
 
 import argparse
+import bz2
 import contextlib
+import gzip
 import io
 import json
+import lzma
 import os
 import re
 import shutil
@@ -76,6 +79,12 @@ MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 4096
 MAX_ARCHIVE_DEPTH = 32
 MAX_EXPANSION_RATIO = 1000
+# Includes allowed file payloads plus a bounded allowance for tar headers.
+# Tarfile parses PAX/GNU extension payloads internally before yielding a member,
+# so member-only limits cannot bound those allocations.
+MAX_ARCHIVE_STREAM_BYTES = (
+    MAX_UNCOMPRESSED_BYTES + MAX_ARCHIVE_MEMBERS * 1024
+)
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 GITHUB_CONTENT_HOSTS = {
@@ -409,6 +418,43 @@ def release_digest(release, tarball_url):
 # Archive validation + staging (never executes content)
 # ---------------------------------------------------------------------------
 
+class _BoundedReader:
+    """Limit bytes delivered from a decompressed tar stream to tarfile."""
+
+    def __init__(self, source, limit):
+        self.source = source
+        self.limit = limit
+        self.bytes_read = 0
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = self.limit - self.bytes_read + 1
+        remaining = self.limit - self.bytes_read
+        data = self.source.read(min(size, remaining + 1))
+        self.bytes_read += len(data)
+        if self.bytes_read > self.limit:
+            raise core.IntegrityError(
+                "archive exceeds decompressed stream size limit"
+            )
+        return data
+
+    def close(self):
+        self.source.close()
+
+
+def _bounded_tar_reader(tar_bytes):
+    """Open supported tar compression behind a decompressed-byte cap."""
+    raw = io.BytesIO(tar_bytes)
+    if tar_bytes.startswith(b"\x1f\x8b"):
+        source = gzip.GzipFile(fileobj=raw, mode="rb")
+    elif tar_bytes.startswith(b"BZh"):
+        source = bz2.BZ2File(raw, mode="rb")
+    elif tar_bytes.startswith(b"\xfd7zXZ\x00"):
+        source = lzma.LZMAFile(raw, mode="rb")
+    else:
+        source = raw
+    return _BoundedReader(source, MAX_ARCHIVE_STREAM_BYTES)
+
 def _member_ok(member, seen_names):
     name = member.name
     if not name or name.startswith("/") or "\\" in name or "\x00" in name:
@@ -429,6 +475,10 @@ def _member_ok(member, seen_names):
         raise core.IntegrityError(f"archive member is device/fifo: {name!r}")
     if member.size < 0 or member.size > MAX_TARBALL_BYTES:
         raise core.IntegrityError(f"archive member too large: {name!r}")
+    if member.isdir() and member.size != 0:
+        raise core.IntegrityError(
+            f"archive directory member contains data: {name!r}"
+        )
     if len(parts) > MAX_ARCHIVE_DEPTH:
         raise core.IntegrityError(f"archive member is nested too deeply: {name!r}")
     seen_names.add(collision_key)
@@ -449,18 +499,18 @@ def stage_archive(tar_bytes, write=True):
     top_dirs = set()
     members = []
     total_size = 0
+    stream_reader = _bounded_tar_reader(tar_bytes)
     try:
-        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
+        with tarfile.open(fileobj=stream_reader, mode="r|") as tar:
             for member in tar:
                 if len(members) >= MAX_ARCHIVE_MEMBERS:
                     raise core.IntegrityError("archive has too many members")
                 parts, norm = _member_ok(member, seen)
-                if member.isfile():
-                    total_size += member.size
-                    if total_size > MAX_UNCOMPRESSED_BYTES:
-                        raise core.IntegrityError(
-                            "archive exceeds total uncompressed size limit"
-                        )
+                total_size += member.size
+                if total_size > MAX_UNCOMPRESSED_BYTES:
+                    raise core.IntegrityError(
+                        "archive exceeds total uncompressed size limit"
+                    )
                 if member.isdir():
                     top_dirs.add(parts[0])
                 elif not member.isfile():
@@ -470,7 +520,7 @@ def stage_archive(tar_bytes, write=True):
                 members.append((member, parts, norm))
     except (tarfile.TarError, EOFError, OSError) as exc:
         raise core.IntegrityError(f"archive unreadable: {exc}") from exc
-    if total_size and total_size / max(1, len(tar_bytes)) > MAX_EXPANSION_RATIO:
+    if stream_reader.bytes_read / max(1, len(tar_bytes)) > MAX_EXPANSION_RATIO:
         raise core.IntegrityError("archive expansion ratio exceeds limit")
 
     rel_files = []
@@ -512,7 +562,7 @@ def stage_archive(tar_bytes, write=True):
 
     stage = Path(tempfile.mkdtemp(prefix="sadskill-stage.", dir=str(STATE_DIR)))
     try:
-        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
+        with tarfile.open(fileobj=_bounded_tar_reader(tar_bytes), mode="r|") as tar:
             for member in tar:
                 norm = "/".join(
                     unicodedata.normalize("NFC", part)
@@ -697,6 +747,24 @@ def conflicts_for(actions):
     seen_entries = set()
     for action in actions:
         for dest, entry, agent in action["targets"]:
+            dest = Path(dest)
+            try:
+                _assert_no_symlink_components(dest)
+            except core.IntegrityError:
+                conflicts.append({"destination": str(dest),
+                                  "reason": "unsafe path component"})
+                continue
+            if dest.exists() and not dest.is_file():
+                conflicts.append({"destination": str(dest),
+                                  "reason": "target is not a regular file"})
+                continue
+            bad_parent = next((parent for parent in dest.parents
+                               if parent.exists() and not parent.is_dir()), None)
+            if bad_parent is not None:
+                conflicts.append({"destination": str(dest),
+                                  "reason": f"parent is not a directory: {bad_parent}"})
+                continue
+
             entry_id = id(entry)
             # For skill directory entries, the manifest entry destination is a directory
             # and content_hash is the hash of the entire directory. Avoid checking
@@ -718,6 +786,34 @@ def conflicts_for(actions):
                 conflicts.append({"destination": str(manifest_dest),
                                   "reason": "user modification"})
     return conflicts
+
+
+def validate_file_targets(actions):
+    """Fail before journaling if any update target cannot be atomically replaced."""
+    issues = []
+    seen = set()
+    for action in actions:
+        for dest, _entry, _agent in action["targets"]:
+            dest = Path(dest)
+            if str(dest) in seen:
+                continue
+            seen.add(str(dest))
+            try:
+                _assert_no_symlink_components(dest)
+            except core.IntegrityError:
+                issues.append({"destination": str(dest),
+                               "reason": "unsafe path component"})
+                continue
+            if dest.exists() and not dest.is_file():
+                issues.append({"destination": str(dest),
+                               "reason": "target is not a regular file"})
+                continue
+            bad_parent = next((parent for parent in dest.parents
+                               if parent.exists() and not parent.is_dir()), None)
+            if bad_parent is not None:
+                issues.append({"destination": str(dest),
+                               "reason": f"parent is not a directory: {bad_parent}"})
+    return issues
 
 
 # ---------------------------------------------------------------------------
@@ -958,6 +1054,15 @@ def _cmd_apply_locked(args):
                         "target_root", str(Path.home().resolve())
                     ),
                 }
+        invalid_targets = validate_file_targets(actions)
+        if invalid_targets:
+            raise core.IntegrityError(
+                "unsafe update file target(s): "
+                + "; ".join(
+                    f"{item['destination']} ({item['reason']})"
+                    for item in invalid_targets
+                )
+            )
         conflicts = conflicts_for(actions)
         if conflicts and not args.force:
             return {
@@ -967,6 +1072,8 @@ def _cmd_apply_locked(args):
             }, EXIT_CONFLICT
 
         _assert_no_symlink_components(STATE_DIR)
+        backups_root = STATE_DIR / "backups"
+        _ensure_private_directory(backups_root, parents=True, exist_ok=True)
         backups_dir = STATE_DIR / "backups" / f"update-{to_version}-{time.time_ns()}"
         journal = Journal_path()
         journal.begin(current, to_version, str(stage), REPO, channel)
@@ -976,7 +1083,7 @@ def _cmd_apply_locked(args):
         journal._flush()
         try:
             journal.step("staged", {"files": len(rel_files)})
-            backups_dir.mkdir(parents=True, exist_ok=False)
+            _ensure_private_directory(backups_dir, exist_ok=False)
             journal.step("backing_up", {"backups_dir": str(backups_dir)})
 
             # Exact destination->backup mapping is durable before any replacement.
@@ -1220,6 +1327,14 @@ def _validate_owned_destination(dest, entry):
     if agent in _SKILL_AGENTS:
         if root.name != "sadskill" or (dest != root and root not in dest.parents):
             raise core.IntegrityError("skill update target is outside its owned root")
+    elif agent == "claude_hook":
+        expected_hook = (
+            Path.home() / ".claude" / "hooks" / "git-guardrail.sh"
+        ).resolve(strict=False)
+        if root.resolve(strict=False) != expected_hook:
+            raise core.IntegrityError(
+                "Claude hook manifest destination is not the canonical guardrail path"
+            )
     elif dest != root:
         raise core.IntegrityError("non-skill update target differs from its manifest path")
     target_root = Path(entry.get("target_root") or Path.home())
@@ -1249,16 +1364,12 @@ def _sync_file(path):
         os.close(fd)
 
 
-def _sync_tree(path):
+def _ensure_private_directory(path, *, parents=False, exist_ok=True):
     path = Path(path)
-    if path.is_file():
-        _sync_file(path)
-        core.fsync_dir(path.parent)
-        return
-    for root, dirs, files in os.walk(path, topdown=False, followlinks=False):
-        for name in files:
-            _sync_file(Path(root) / name)
-        core.fsync_dir(root)
+    _assert_no_symlink_components(path)
+    path.mkdir(parents=parents, exist_ok=exist_ok, mode=0o700)
+    os.chmod(path, 0o700)
+    return path
 
 
 def _backup_dest(dest, backups_dir, backup_id):
@@ -1266,25 +1377,23 @@ def _backup_dest(dest, backups_dir, backup_id):
     _assert_no_symlink_components(dest)
     if not dest.exists():
         return {"existed": False, "backup_path": None, "sha256": None,
-                "kind": None}
-    _assert_no_symlinks_below(dest)
-    if not dest.is_file() and not dest.is_dir():
-        raise core.IntegrityError(f"unsupported destination type: {dest}")
-    kind = "tree" if dest.is_dir() else "file"
+                "kind": None, "mode": None}
+    if not dest.is_file():
+        raise core.IntegrityError(f"backup target is not a regular file: {dest}")
+    mode = stat.S_IMODE(dest.stat().st_mode)
     target_dir = Path(backups_dir) / "destinations"
-    target_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_private_directory(target_dir, parents=True, exist_ok=True)
     target = target_dir / f"{backup_id}.backup"
-    if dest.is_dir():
-        shutil.copytree(dest, target, symlinks=False)
-    else:
-        shutil.copy2(dest, target)
-    _sync_tree(target)
+    shutil.copy2(dest, target)
+    os.chmod(target, 0o600)
+    _sync_file(target)
+    core.fsync_dir(target_dir)
     original_hash = core.compute_sha256(dest)
     backup_hash = core.compute_sha256(target)
     if not original_hash or original_hash != backup_hash:
         raise core.IntegrityError(f"backup verification failed for {dest}")
     return {"existed": True, "backup_path": str(target),
-            "sha256": original_hash, "kind": kind}
+            "sha256": original_hash, "kind": "file", "mode": mode}
 
 
 def _atomic_install_file(staged, dest):
@@ -1340,6 +1449,11 @@ def _rollback_backup_record(record, backups_dir):
         raise core.IntegrityError("rollback backup escapes the journal backup directory") from exc
     if record.get("kind") != "file" or not backup.is_file():
         raise core.IntegrityError("rollback backup is not a regular file")
+    if "mode" in record and (
+        type(record["mode"]) is not int or record["mode"] < 0
+        or record["mode"] & ~0o777
+    ):
+        raise core.IntegrityError("rollback backup mode is malformed")
     expected = record.get("sha256")
     actual = core.compute_sha256(backup)
     if not isinstance(expected, str) or actual != expected:
@@ -1357,6 +1471,46 @@ def _rollback_current_hash(dest):
     return core.compute_sha256(dest)
 
 
+def _validate_rollback_destination(intent, manifest_data):
+    """Authorize journal targets against current owned installs before writes."""
+    category = intent.get("category")
+    destination = intent.get("destination")
+    if not isinstance(destination, str):
+        raise core.IntegrityError("journal rollback destination is malformed")
+    dest = Path(destination)
+    if not dest.is_absolute() or ".." in dest.parts or str(dest) != destination:
+        raise core.IntegrityError("journal rollback destination is not canonical")
+
+    metadata_targets = {str(MANIFEST_FILE), str(INSTALL_STATE_FILE)}
+    if category == "metadata":
+        if destination not in metadata_targets:
+            raise core.IntegrityError(
+                "journal metadata destination is not an updater metadata file"
+            )
+        return
+    if category != "destination" or destination in metadata_targets:
+        raise core.IntegrityError("journal rollback category is invalid")
+
+    agent = intent.get("agent")
+    entry_destination = intent.get("entry_destination")
+    if not isinstance(agent, str) or not isinstance(entry_destination, str):
+        raise core.IntegrityError("journal rollback ownership metadata is missing")
+    matches = [
+        entry for entry in manifest_data["entries"]
+        if entry.get("agent") == agent
+        and entry.get("destination") == entry_destination
+    ]
+    if len(matches) != 1:
+        raise core.IntegrityError(
+            f"journal rollback target has no exact manifest owner: {destination}"
+        )
+    if agent in _SKILL_AGENTS and dest == Path(entry_destination):
+        raise core.IntegrityError(
+            "journal rollback target cannot be an installation directory"
+        )
+    _validate_owned_destination(dest, matches[0])
+
+
 def _restore_rollback_file(dest, record, backup):
     dest = Path(dest)
     _assert_no_symlink_components(dest)
@@ -1372,7 +1526,8 @@ def _restore_rollback_file(dest, record, backup):
     try:
         os.close(fd)
         shutil.copyfile(backup, tmp)
-        os.chmod(tmp, stat.S_IMODE(backup.stat().st_mode))
+        restore_mode = record.get("mode", stat.S_IMODE(backup.stat().st_mode))
+        os.chmod(tmp, restore_mode)
         _sync_file(tmp)
         os.replace(tmp, str(dest))
         core.fsync_dir(dest.parent)
@@ -1423,8 +1578,13 @@ def _cmd_rollback_locked(args):
             "reason": "journal has no usable backups directory",
         }, EXIT_ERROR
 
+    manifest_data = core.load_manifest_data(MANIFEST_FILE)
+
+    steps = journal_data.get("steps")
+    if not isinstance(steps, list):
+        raise core.IntegrityError("journal steps must be a list")
     intent_by_target = {}
-    for step in journal_data.get("steps", []):
+    for step in steps:
         if not isinstance(step, dict) or step.get("name") != "mutation_intent":
             continue
         payload = step.get("payload")
@@ -1437,6 +1597,7 @@ def _cmd_rollback_locked(args):
         dest = Path(dest_str)
         if not dest.is_absolute() or ".." in dest.parts:
             raise core.IntegrityError("journal mutation target is not an absolute safe path")
+        _validate_rollback_destination(payload, manifest_data)
         old_hash = payload.get("old_sha256")
         new_hash = payload.get("new_sha256")
         if old_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", str(old_hash)):
@@ -1445,7 +1606,9 @@ def _cmd_rollback_locked(args):
             raise core.IntegrityError("journal new hash is malformed")
         key = (category, dest_str)
         intent = {"category": category, "destination": dest_str,
-                  "old_sha256": old_hash, "new_sha256": new_hash}
+                  "old_sha256": old_hash, "new_sha256": new_hash,
+                  "agent": payload.get("agent"),
+                  "entry_destination": payload.get("entry_destination")}
         prior = intent_by_target.get(key)
         if prior is not None and prior != intent:
             raise core.IntegrityError("journal has inconsistent mutation intents")
@@ -1493,7 +1656,7 @@ def _cmd_rollback_locked(args):
         # before restoring any destination or metadata file.
         pending = {}
         conflict_dir = backups / "rollback-conflicts"
-        conflict_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_private_directory(conflict_dir, parents=True, exist_ok=True)
         for index, item in enumerate(rollback_targets, 1):
             if item["destination"] not in conflicts:
                 continue

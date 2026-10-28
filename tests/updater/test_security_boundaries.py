@@ -1,6 +1,7 @@
 """Regression tests for updater trust boundaries and resource limits."""
 
 import http.server
+import importlib.util
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import sys
 import tarfile
 import threading
 import unittest
+from unittest.mock import patch
 
 TESTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_ROOT = os.path.dirname(TESTS_DIR)
@@ -17,6 +19,13 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 
 from helpers import SandboxCase  # noqa: E402
 from tests.updater.stub import GitHubStub, build_tarball  # noqa: E402
+
+_UPDATER_PATH = os.path.join(REPO_ROOT, "scripts", "sadskill-update.py")
+_UPDATER_SPEC = importlib.util.spec_from_file_location(
+    "sadskill_update_test_module", _UPDATER_PATH
+)
+_UPDATER = importlib.util.module_from_spec(_UPDATER_SPEC)
+_UPDATER_SPEC.loader.exec_module(_UPDATER)
 
 
 def _handler(callback):
@@ -171,6 +180,71 @@ class ArchiveResourceLimitTests(SandboxCase):
         result = self.run_update("apply", "--json")
         self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
         self.assertEqual(self.home_snapshot(), before)
+
+    def test_directory_payload_cannot_bypass_decompression_limits(self):
+        buf = io.BytesIO()
+        payload = b"Z" * (4 * 1024 * 1024)
+        with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+            for index in range(17):
+                directory = tarfile.TarInfo(f"project/dir-{index}/")
+                directory.type = tarfile.DIRTYPE
+                directory.size = len(payload)
+                archive.addfile(directory, io.BytesIO(payload))
+            skill = tarfile.TarInfo("project/skills/sadskill/SKILL.md")
+            skill.size = len(b"version: 0.3.1\n")
+            archive.addfile(skill, io.BytesIO(b"version: 0.3.1\n"))
+        compressed = buf.getvalue()
+        self.assertLess(len(compressed), 1024 * 1024)
+
+        with self.assertRaisesRegex(
+            _UPDATER.core.IntegrityError, "directory member contains data"
+        ):
+            _UPDATER.stage_archive(compressed, write=False)
+
+    def test_pax_extension_payload_is_bounded_before_tarfile_parses_it(self):
+        value = b"X" * (2 * 1024 * 1024)
+        length = len(value) + 32
+        while True:
+            record = str(length).encode() + b" comment=" + value + b"\n"
+            if len(record) == length:
+                break
+            length = len(record)
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+            pax = tarfile.TarInfo("PaxHeader")
+            pax.type = tarfile.XHDTYPE
+            pax.size = len(record)
+            archive.addfile(pax, io.BytesIO(record))
+            skill_bytes = b"version: 0.3.1\n"
+            skill = tarfile.TarInfo("project/skills/sadskill/SKILL.md")
+            skill.size = len(skill_bytes)
+            archive.addfile(skill, io.BytesIO(skill_bytes))
+        compressed = buf.getvalue()
+        self.assertLess(len(compressed), 64 * 1024)
+
+        with patch.object(_UPDATER, "MAX_ARCHIVE_STREAM_BYTES", 1024 * 1024):
+            with self.assertRaisesRegex(
+                _UPDATER.core.IntegrityError,
+                "decompressed stream size limit",
+            ):
+                _UPDATER.stage_archive(compressed, write=False)
+
+    def test_symlinked_backups_parent_is_rejected_before_any_write(self):
+        self.stub.serve_release("v0.3.1", build_tarball()[0])
+        backups_root = os.path.join(self.home, ".sadskill", "backups")
+        outside = os.path.join(os.path.dirname(self.home), "outside-backups")
+        os.mkdir(outside)
+        os.symlink(outside, backups_root)
+        before = self.home_snapshot()
+
+        result = self.run_update("apply", "--json")
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertIn("symlink path component", result.stdout)
+        self.assertEqual(self.home_snapshot(), before)
+        self.assertEqual(os.listdir(outside), [])
+        self.assertFalse(
+            os.path.exists(os.path.join(self.home, ".sadskill", "update-journal.json"))
+        )
 
 
 class ChecksumTrustTests(SandboxCase):
