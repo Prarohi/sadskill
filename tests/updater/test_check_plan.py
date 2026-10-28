@@ -4,9 +4,11 @@ import json
 import os
 import sys
 import unittest
+from pathlib import Path
+from scripts.sadskill_core import compute_sha256
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from helpers import SandboxCase  # noqa: E402
+from tests.updater.fixtures import UpdaterSandboxCase as SandboxCase  # noqa: E402
 from tests.updater.stub import GitHubStub, build_tarball, REPO  # noqa: E402
 
 
@@ -73,6 +75,36 @@ class CheckPlanTests(SandboxCase):
         data = json.loads(p.stdout)
         self.assertEqual(data["latest"], "0.3.1-rc.1")
         self.assertFalse(data["up_to_date"])
+
+    def test_stable_release_is_newer_than_installed_prerelease(self):
+        self.set_installed_version("0.3.0-rc.1")
+        state = os.path.join(self.home, ".sadskill", "install-state.json")
+        with open(state, "w") as stream:
+            json.dump({"version": "0.3.0-rc.1"}, stream)
+        p = self.run_update("check", "--json")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertFalse(json.loads(p.stdout)["up_to_date"])
+
+    def test_mixed_host_versions_are_reported_and_update_refused_without_writes(self):
+        self.assertEqual(self.run_install("codex").returncode, 0)
+        skill = Path(self.home) / ".codex/skills/sadskill/SKILL.md"
+        skill.write_text(skill.read_text().replace("version: 0.3.0", "version: 0.4.0", 1))
+        manifest = self.load_manifest()
+        entry = next(e for e in manifest["entries"] if e["agent"] == "codex")
+        entry["content_hash"] = compute_sha256(skill.parent)
+        Path(self.manifest_path()).write_text(json.dumps(manifest))
+        tar, _ = build_tarball(top_dir="sadskill-0.4.0")
+        self.stub.serve_release("v0.4.0", tar)
+        before = self.home_snapshot()
+        check = self.run_update("check", "--json")
+        self.assertEqual(check.returncode, 0, check.stderr)
+        checked = json.loads(check.stdout)
+        self.assertTrue(checked["mixed_versions"])
+        self.assertFalse(checked["up_to_date"])
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 5, applied.stdout + applied.stderr)
+        self.assertIn("mixed", applied.stdout.lower())
+        self.assertEqual(self.home_snapshot(), before)
 
     def test_repo_identity_verified(self):
         # A stub whose release payload lacks our repo identity must be refused.

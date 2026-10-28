@@ -174,6 +174,17 @@ class GitHubStub:
         self._thread.start()
         return base
 
+    def refresh_release(self):
+        """Expose modified synthetic assets without making a network request."""
+        _Handler.routes.update(self._routes)
+        release = self._release
+        for path, value in (
+            (f"/repos/{REPO}/releases/latest", release),
+            (f"/repos/{REPO}/releases", [release]),
+            (f"/repos/{REPO}/releases/tags/{release['tag_name']}", release),
+        ):
+            _Handler.routes[path] = (200, json.dumps(value).encode())
+
     @property
     def api_base(self):
         return f"http://127.0.0.1:{self._port}"

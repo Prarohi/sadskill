@@ -7,12 +7,24 @@ This page records paths written by Sadskill's installer and what its local docto
 | Integration target | Paths written by `install.sh` | Local evidence |
 |---|---|---|
 | Claude Code | `~/.claude/skills/sadskill`, `~/.claude/commands/`, `~/.claude/hooks/git-guardrail.sh` | Doctor checks files and `settings.json`; a benign local hook run is `LOCAL_TEST_PASSED`, not proof Claude Code loaded it. |
-| OpenAI Codex | `~/.codex/skills/sadskill`, `~/.codex/prompts/` | Doctor checks for the skill directory and prompt files. This does not verify host discovery. |
-| Cursor | `<target>/.cursor/skills/sadskill`, `<target>/.cursor/rules/sadskill.mdc` | Doctor checks both paths for the selected workspace. This does not verify Cursor loaded the rule. |
-| Google Antigravity | `~/.gemini/antigravity/skills/sadskill` | Doctor checks for an installation path. This does not verify host discovery. |
-| Gemini CLI | `~/.gemini/skills/sadskill` | Doctor checks for an installation path. This does not verify host discovery. |
+| OpenAI Codex | `~/.codex/skills/sadskill`, `~/.codex/prompts/` | Doctor requires a nonempty `SKILL.md` and all five command files. This does not verify host discovery or instruction validity. |
+| Cursor | `<target>/.cursor/skills/sadskill`, `<target>/.cursor/rules/sadskill.mdc` | Doctor requires a nonempty skill file and rule for the selected workspace. This does not verify Cursor loaded the rule. |
+| Google Antigravity | `~/.gemini/antigravity/skills/sadskill` | Doctor checks for a nonempty `SKILL.md`. This does not verify host discovery. |
+| Gemini CLI | `~/.gemini/skills/sadskill` | Doctor checks for a nonempty `SKILL.md`. This does not verify host discovery. |
 
 Windsurf, Roo Code, Cline, web chat, and other environments are not installed or host-tested by this repository's current installer. Do not describe them as supported based only on prompt compatibility.
+
+## Portable evidence helper
+
+The complete skill folder includes `tools/verify-evidence.py`, both when distributed as a skill folder and when copied by the companion installer. Resolve its location relative to the `SKILL.md` loaded by the host; for example, a Codex companion installation places it at `~/.codex/skills/sadskill/tools/verify-evidence.py`. Skill-manager installations may use a different directory.
+
+Invoke the helper with Python and explicitly select the consumer checkout, even if the current directory is elsewhere:
+
+```bash
+python3 "$HOME/.codex/skills/sadskill/tools/verify-evidence.py" --project-root "/absolute/path/to/consumer-project" --print-context
+```
+
+Replace the example checkout and helper path with their discovered locations. The consumer project needs no Sadskill `scripts/` directory. Python, Git and a readable Git checkout are required for context capture; an unavailable helper or checkout snapshot must be reported as unavailable. Prompt-only hosts can relay these steps but cannot claim execution or verified evidence. See the [evidence protocol](../skills/sadskill/protocols/evidence.md) for recording and retest boundaries.
 
 ## Capability boundaries
 
@@ -32,7 +44,7 @@ Windsurf, Roo Code, Cline, web chat, and other environments are not installed or
 - `AVAILABLE`: the hook script exists but is not registered in settings.
 - `REGISTERED`: settings reference the hook, but its benign local simulation did not pass or the installed script is missing.
 - `LOCAL_TEST_PASSED`: the registered script passed a benign local simulation. This does not show that a host has loaded it.
-- `HOST_VERIFIED_ACTIVE`: an operator explicitly confirmed activity in the host using `--confirm-active`; the doctor did not observe host events itself.
+- `HOST_VERIFIED_ACTIVE`: the local simulation passed and an operator explicitly confirmed activity in the host using `--confirm-active`; the doctor did not observe host events itself. Confirmation cannot override a missing or failing hook.
 - `UNKNOWN`: settings could not be parsed safely.
 
 Use `--enable-hooks` and `--disable-hooks` for opt-in registration and ownership-aware removal. Check the host's own hook view or debug log to verify that it loaded the configuration. The Claude Code documentation describes the hook lifecycle and its debug log behavior in the [hooks reference](https://code.claude.com/docs/en/hooks).

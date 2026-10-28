@@ -593,15 +593,27 @@ def disable_claude_hooks():
     return EXIT_OK
 
 
+def _has_file_content(path):
+    """Require an actual, nonempty local artifact rather than its directory."""
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 def check_codex():
     home = Path.home()
     skill_dir = home / ".codex" / "skills" / "sadskill"
     prompts_dir = home / ".codex" / "prompts"
 
-    if skill_dir.exists() and (prompts_dir / "sad-plan.md").exists():
+    artifacts = [skill_dir / "SKILL.md"] + [
+        prompts_dir / f"sad-{mode}.md"
+        for mode in ("plan", "design", "backend", "sec", "analyze")
+    ]
+    if all(_has_file_content(path) for path in artifacts):
         return "INSTALLED", f"Skill installed at {skill_dir} with prompts at {prompts_dir}."
-    elif skill_dir.exists():
-        return "PARTIAL", f"Skill installed at {skill_dir}, prompts missing."
+    elif skill_dir.exists() or any(path.exists() for path in artifacts):
+        return "PARTIAL", f"Codex skill or command files are missing or empty under {skill_dir} and {prompts_dir}."
     return "NOT_INSTALLED", "No Codex skill or prompt directory found."
 
 
@@ -610,10 +622,10 @@ def check_cursor(target_dir=None):
     rule_file = base / ".cursor" / "rules" / "sadskill.mdc"
     skill_dir = base / ".cursor" / "skills" / "sadskill"
 
-    if rule_file.exists() and skill_dir.exists():
+    if _has_file_content(rule_file) and _has_file_content(skill_dir / "SKILL.md"):
         return "INSTALLED", f"Cursor rule and skill files are present in workspace: {base}. Their host activation is not verified."
-    elif rule_file.exists():
-        return "PARTIAL", f"Cursor rule present at {rule_file}, workspace skill directory missing."
+    elif rule_file.exists() or skill_dir.exists():
+        return "PARTIAL", f"Cursor rule or SKILL.md is missing or empty in workspace: {base}."
     return "NOT_INSTALLED", f"No Cursor configuration found in workspace: {base}."
 
 
@@ -624,8 +636,10 @@ def check_antigravity():
     agents_skill = home / ".agents" / "skills" / "sadskill"
 
     for loc in (agy_skill, gemini_skill, agents_skill):
-        if loc.exists():
+        if _has_file_content(loc / "SKILL.md"):
             return "INSTALLED", f"Skill discovered at {loc}."
+    if any(loc.exists() for loc in (agy_skill, gemini_skill, agents_skill)):
+        return "PARTIAL", "Antigravity or Gemini CLI skill directory exists, but SKILL.md is missing or empty."
     return "NOT_INSTALLED", "No Antigravity or Gemini CLI skill installation found."
 
 
@@ -633,7 +647,7 @@ def run_doctor(target_dir=None, json_output=False, confirm_active=False):
     results = {}
 
     status_claude, msg_claude = check_claude_hook()
-    if confirm_active and status_claude in ("REGISTERED", "LOCAL_TEST_PASSED"):
+    if confirm_active and status_claude == "LOCAL_TEST_PASSED":
         status_claude = "HOST_VERIFIED_ACTIVE"
         msg_claude = (
             "User explicitly confirmed (via --confirm-active) that the "

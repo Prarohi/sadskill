@@ -1,20 +1,10 @@
 # sad-backend
 
-Execute the `backend` workflow of `sadskill` on target schema or API: $ARGUMENTS
+Execute the `backend` workflow of `sadskill` on the requested scope: $ARGUMENTS
 
 ## Instructions
-1. **Locate sadskill Configuration**:
-   - Check local workspace: `./skills/sadskill/SKILL.md` (or global `~/.claude/skills/sadskill/SKILL.md`).
-   - Check `.sad/decisions.md` (ADRs) and `.sad/history.md`.
-   - Check local profile `~/.sadskill/profile.md` if present.
-2. **Schema-First Design & Reversible Migrations**:
-   - Primary Keys: Use `bigint GENERATED ALWAYS AS IDENTITY` or UUIDv7.
-   - Timestamps: Always `timestamptz`. Never naive timestamps.
-   - Text & Decimals: Use `text` with check constraints; integer cents or `numeric(10,2)` for money.
-   - Reversible Migrations: Always write paired `up.sql` and `down.sql`. Use expand/contract pattern for non-null additions.
-3. **Row Level Security & Safe Query Analysis**:
-   - Zero-Trust RLS: `ENABLE ROW LEVEL SECURITY;` + `FORCE ROW LEVEL SECURITY;`. Write granular `SELECT`, `INSERT`, `UPDATE`, `DELETE` policies.
-   - Safe Performance Inspection: Run `EXPLAIN (ANALYZE, BUFFERS)` for `SELECT` queries. For write queries, use `EXPLAIN (BUFFERS)` or wrap in `BEGIN; ... ROLLBACK;` to prevent unintended mutations.
-4. **Validation & Verification Evidence**:
-   - Validate API payloads with runtime schemas (Zod, Pydantic).
-   - Execute integration tests, record proof in `.sad/evidence/<timestamp>-backend.json`, and output 3-line terminal execution proof in chat.
+
+1. Locate the `SKILL.md` loaded for this task. Check the project-vendored `./skills/sadskill/SKILL.md`, the companion path `~/.claude/skills/sadskill/SKILL.md`, or the host's configured skill directory (which may be `~/.agents/skills/sadskill`).
+2. Read that `SKILL.md`, then load `modes/backend.md` relative to its containing skill directory. Resolve linked protocols, references, templates and tools against that same installed directory. The canonical mode supplies the workflow; this adapter does not replace it.
+3. Follow current user instructions, scope and execution permissions. Load only the relevant linked guidance and project memory; report unavailable tools or checks without claiming they ran.
+4. Discover the actual database engine, migration workflow and authorization contract before choosing engine-specific operations. Apply the canonical data-preservation and real-role verification requirements.

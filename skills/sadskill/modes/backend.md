@@ -63,7 +63,7 @@ Backend mode enforces schema-first engineering, engine-aware migrations, zero-tr
    - `down.sql`: Reversal logic (reverse constraint drops, reverse foreign keys, drop created views/tables).
 2. **Safe Schema Evolution (Expand / Contract)**:
    - **Step 1 (Expand)**: Add new column as nullable or with safe default.
-   - **Step 2 (Migrate)**: Dual-write or backfill data in bounded batches (`WHERE id BETWEEN X AND Y LIMIT 1000`).
+   - **Step 2 (Migrate)**: Dual-write or backfill in bounded key batches. For PostgreSQL, select a limited batch of keys in a CTE, then update those keys; do not append unsupported `LIMIT` syntax directly to `UPDATE`.
    - **Step 3 (Contract)**: Add `NOT NULL` constraint and drop obsolete columns after verification.
 
 ### Phase 5: Query Performance & Indexing Strategy
@@ -72,13 +72,15 @@ Backend mode enforces schema-first engineering, engine-aware migrations, zero-tr
    - Composite indexes: Equality columns first (`tenant_id`, `status`), then range/sort columns (`created_at DESC`).
    - Partial indexes: Use `WHERE deleted_at IS NULL` to keep indexes small and hot in cache.
 2. **Safe Query Performance Analysis**:
-   - For read queries (`SELECT`): Run `EXPLAIN (ANALYZE, BUFFERS)` to verify index scans and inspect buffer hit rates.
-   - For write queries (`INSERT`, `UPDATE`, `DELETE`): In production, use `EXPLAIN (BUFFERS)` without `ANALYZE`, or test inside staging transactions with explicit rollback:
+   - Start with plan-only `EXPLAIN` (for PostgreSQL, `EXPLAIN (COSTS, VERBOSE) ...`) when execution is not authorized. Check syntax against the detected engine/version.
+   - `ANALYZE` executes the statement, including functions invoked by a `SELECT`. Measure runtime/buffers only in an authorized disposable database with controlled side effects. Transaction rollback does not undo every sequence change or external trigger/function effect.
+   - In that disposable database, a transactional write measurement can use:
      ```sql
      BEGIN;
      EXPLAIN (ANALYZE, BUFFERS) DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '90 days';
      ROLLBACK;
      ```
+   - Consult the official [PostgreSQL EXPLAIN documentation](https://www.postgresql.org/docs/15/sql-explain.html) for the actual engine version; do not treat a rollback wrapper as permission to execute production writes.
 
 ### Phase 6: API Contracts, Idempotency & Observability
 1. Validate incoming payloads using runtime schemas (Zod, Pydantic, TypeBox).

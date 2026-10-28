@@ -56,11 +56,34 @@ def project_identity(project_root: Path) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _snapshot_git_command(project_root, *arguments):
+    """Disable configured execution helpers for one local Git metadata read."""
+    prefix = ["git", "-c", "core.fsmonitor=false"]
+    configured = subprocess.run(
+        [*prefix, "config", "--null", "--name-only", "--get-regexp",
+         r"^filter\..*\.(clean|smudge|process|required)$"],
+        cwd=str(project_root), capture_output=True, check=False,
+    )
+    if configured.returncode not in (0, 1):
+        raise OSError("cannot inspect Git content-filter configuration")
+    drivers = {
+        os.fsdecode(key).rsplit(".", 1)[0]
+        for key in configured.stdout.split(b"\0") if key
+    }
+    for driver in sorted(drivers):
+        for conversion in ("clean", "smudge", "process"):
+            prefix.extend(["-c", f"{driver}.{conversion}="])
+        prefix.extend(["-c", f"{driver}.required=false"])
+    return [*prefix, *arguments]
+
+
 def _hash_git_diff(digest, project_root):
-    command = [
-        "git", "diff", "--binary", "HEAD", "--", ".",
+    command = _snapshot_git_command(
+        project_root, "diff", "--no-textconv", "--no-ext-diff", "--binary",
+        "--ignore-submodules=dirty",
+        "HEAD", "--", ".",
         ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
-    ]
+    )
     try:
         proc = subprocess.Popen(
             command, cwd=str(project_root), stdout=subprocess.PIPE,
@@ -79,14 +102,31 @@ def _hash_git_diff(digest, project_root):
 
 def _untracked_paths(project_root):
     result = subprocess.run(
-        [
-            "git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+        _snapshot_git_command(
+            project_root, "ls-files", "--others", "--exclude-standard", "-z", "--",
             ".", ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
-        ], cwd=str(project_root), capture_output=True, check=False,
+        ), cwd=str(project_root), capture_output=True, check=False,
     )
     if result.returncode != 0:
         return None
     return [path for path in result.stdout.split(b"\0") if path]
+
+
+def _tracked_paths(project_root):
+    """List HEAD and index paths without trusting worktree cache hints."""
+    paths = set()
+    for arguments in (
+        ["ls-files", "--cached", "-z"],
+        ["ls-tree", "-rz", "--name-only", "--full-tree", "HEAD"],
+    ):
+        result = subprocess.run(
+            _snapshot_git_command(project_root, *arguments),
+            cwd=str(project_root), capture_output=True, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        paths.update(path for path in result.stdout.split(b"\0") if path)
+    return paths
 
 
 def _is_relevant_ignored_test_input(relative):
@@ -123,11 +163,11 @@ def _is_relevant_ignored_test_input(relative):
 def _ignored_test_paths(project_root):
     """List ignored test inputs that Git status would otherwise omit."""
     result = subprocess.run(
-        [
-            "git", "ls-files", "--others", "--ignored", "--exclude-standard",
+        _snapshot_git_command(
+            project_root, "ls-files", "--others", "--ignored", "--exclude-standard",
             "-z", "--", ".", ":(exclude).sad/evidence",
             ":(exclude).sad/evidence/**",
-        ], cwd=str(project_root), capture_output=True, check=False,
+        ), cwd=str(project_root), capture_output=True, check=False,
     )
     if result.returncode != 0:
         return None
@@ -145,8 +185,10 @@ def _configured_submodule_paths(project_root):
     if not config.exists():
         return []
     result = subprocess.run(
-        ["git", "config", "--null", "--file", str(config), "--get-regexp",
-         r"^submodule\..*\.path$"],
+        _snapshot_git_command(
+            project_root, "config", "--null", "--file", str(config),
+            "--get-regexp", r"^submodule\..*\.path$",
+        ),
         cwd=str(project_root), capture_output=True, check=False,
     )
     if result.returncode == 1 and not result.stdout:
@@ -173,11 +215,12 @@ def _configured_submodule_paths(project_root):
 def _gitlink_paths(project_root, *, index):
     """Return Gitlink paths from HEAD or the index, or None when untrusted."""
     if index:
-        command = ["git", "ls-files", "--stage", "-z"]
+        arguments = ["ls-files", "--stage", "-z"]
     else:
-        command = ["git", "ls-tree", "-rz", "--full-tree", "HEAD"]
+        arguments = ["ls-tree", "-rz", "--full-tree", "HEAD"]
     result = subprocess.run(
-        command, cwd=str(project_root), capture_output=True, check=False,
+        _snapshot_git_command(project_root, *arguments),
+        cwd=str(project_root), capture_output=True, check=False,
     )
     if result.returncode != 0:
         return None
@@ -206,23 +249,48 @@ def _gitlink_paths(project_root, *, index):
     return paths
 
 
+def _regular_file_digest(path, before):
+    """Hash one regular file, refusing replacement or mutation during the read."""
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+
+    expected = identity(before)
+    content = hashlib.sha256()
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as stream:
+        if identity(os.fstat(stream.fileno())) != expected:
+            return None
+        for chunk in iter(lambda: stream.read(65536), b""):
+            content.update(chunk)
+        if identity(os.fstat(stream.fileno())) != expected:
+            return None
+    if identity(path.lstat()) != expected:
+        return None
+    return content.digest()
+
+
 def worktree_snapshot(project_root: Path, _submodule_depth=0):
     """Digest tracked, untracked, and relevant ignored test inputs."""
     if _submodule_depth > MAX_SUBMODULE_DEPTH:
         return None
     status = subprocess.run(
-        [
-            "git", "status", "--porcelain", "-z", "--untracked-files=all",
-            "--ignore-submodules=none", "--",
+        _snapshot_git_command(
+            project_root, "status", "--porcelain", "-z", "--untracked-files=all",
+            # Nested worktrees are read below with their own safe overrides.
+            # Implicit Git traversal could execute a submodule-only filter.
+            "--ignore-submodules=dirty", "--",
             ".", ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
-        ], cwd=str(project_root), capture_output=True, check=False,
+        ), cwd=str(project_root), capture_output=True, check=False,
     )
     paths = _untracked_paths(project_root)
+    tracked_paths = _tracked_paths(project_root)
     ignored_paths = _ignored_test_paths(project_root)
     submodule_paths = _configured_submodule_paths(project_root)
     head_gitlinks = _gitlink_paths(project_root, index=False)
     index_gitlinks = _gitlink_paths(project_root, index=True)
-    if (status.returncode != 0 or paths is None or ignored_paths is None
+    if (status.returncode != 0 or paths is None or tracked_paths is None
+            or ignored_paths is None
             or submodule_paths is None or head_gitlinks is None
             or index_gitlinks is None):
         return None
@@ -237,49 +305,96 @@ def worktree_snapshot(project_root: Path, _submodule_depth=0):
 
     digest = hashlib.sha256()
     digest.update(b"status\0")
+    digest.update(len(status.stdout).to_bytes(8, "big"))
     digest.update(status.stdout)
     digest.update(b"diff\0")
-    if not _hash_git_diff(digest, project_root):
+    diff_digest = hashlib.sha256()
+    if not _hash_git_diff(diff_digest, project_root):
         return None
+    digest.update(diff_digest.digest())
 
     digest.update(b"ignored-test-inputs\0")
+    digest.update(len(ignored_paths).to_bytes(8, "big"))
     for relative in sorted(ignored_paths):
         digest.update(len(relative).to_bytes(8, "big"))
         digest.update(relative)
 
-    for relative in sorted(set(paths) | set(ignored_paths)):
-        if relative == b".sad/evidence" or relative.startswith(b".sad/evidence/"):
-            continue
+    gitlink_paths = {os.fsencode(path) for path in expected_gitlinks}
+    file_paths = {
+        relative for relative in tracked_paths | set(paths) | set(ignored_paths)
+        if relative not in gitlink_paths and relative != b".sad/evidence"
+        and not relative.startswith(b".sad/evidence/")
+    }
+    digest.update(b"files\0")
+    digest.update(len(file_paths).to_bytes(8, "big"))
+    for relative in sorted(file_paths):
         path = project_root / os.fsdecode(relative)
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        before = None
         try:
+            # A tracked directory replaced with a symlink must not redirect
+            # content reads outside the checkout (or hide a missing file).
+            cursor = project_root
+            for part in Path(os.fsdecode(relative)).parts[:-1]:
+                cursor = cursor / part
+                if cursor.is_symlink():
+                    return None
             before = path.lstat()
-            digest.update(len(relative).to_bytes(8, "big"))
-            digest.update(relative)
+            digest.update(b"present\0")
             digest.update(stat.S_IFMT(before.st_mode).to_bytes(4, "big"))
             digest.update(stat.S_IMODE(before.st_mode).to_bytes(4, "big"))
+            content = hashlib.sha256()
             if stat.S_ISREG(before.st_mode):
-                with path.open("rb") as stream:
-                    while True:
-                        chunk = stream.read(65536)
-                        if not chunk:
-                            break
-                        digest.update(chunk)
+                payload = _regular_file_digest(path, before)
+                if payload is None:
+                    return None
             elif stat.S_ISLNK(before.st_mode):
                 if relative in ignored_paths:
-                    # A test symlink could read external bytes that are outside
-                    # this checkout's content-bound snapshot.
                     return None
-                digest.update(os.fsencode(os.readlink(path)))
+                link = os.fsencode(os.readlink(path))
+                target = path.resolve(strict=True)
+                root = project_root.resolve(strict=True)
+                if not is_within(target, root):
+                    return None
+                target_relative = target.relative_to(root)
+                if (target_relative == Path(".sad/evidence")
+                        or Path(".sad/evidence") in target_relative.parents):
+                    # Evidence must not become its own test-input dependency.
+                    return None
+                target_before = target.lstat()
+                if not stat.S_ISREG(target_before.st_mode):
+                    return None
+                target_digest = _regular_file_digest(target, target_before)
+                if target_digest is None:
+                    return None
+                target_name = os.fsencode(target_relative.as_posix())
+                content.update(len(link).to_bytes(8, "big"))
+                content.update(link)
+                content.update(len(target_name).to_bytes(8, "big"))
+                content.update(target_name)
+                content.update(stat.S_IMODE(target_before.st_mode).to_bytes(4, "big"))
+                content.update(target_digest)
+                payload = content.digest()
             else:
                 return None
+            digest.update(payload)
             after = path.lstat()
             if (before.st_dev, before.st_ino, before.st_mode, before.st_size,
                     before.st_mtime_ns) != (
                     after.st_dev, after.st_ino, after.st_mode, after.st_size,
                     after.st_mtime_ns):
                 return None
+        except (FileNotFoundError, NotADirectoryError):
+            if before is not None or relative not in tracked_paths:
+                return None
+            # Deletions, including sparse/skip-worktree paths, are valid
+            # snapshot states. Bind absence rather than silently omitting it.
+            digest.update(b"missing\0")
         except OSError:
             return None
+        except RuntimeError:
+            return None  # An unresolved symlink cycle cannot bind test inputs.
 
     submodule_dirty = False
     for relative in sorted(expected_gitlinks):
@@ -298,11 +413,12 @@ def worktree_snapshot(project_root: Path, _submodule_depth=0):
         if not is_within(resolved, project_root):
             return None
         top = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], cwd=str(resolved),
+            _snapshot_git_command(resolved, "rev-parse", "--show-toplevel"),
+            cwd=str(resolved),
             capture_output=True, text=True, check=False,
         )
         head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(resolved),
+            _snapshot_git_command(resolved, "rev-parse", "HEAD"), cwd=str(resolved),
             capture_output=True, text=True, check=False,
         )
         if (top.returncode != 0 or head.returncode != 0
@@ -329,7 +445,7 @@ def git_context(project_root: Path):
     """Return HEAD plus a content-bound dirty snapshot, excluding evidence."""
     try:
         head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(project_root),
+            _snapshot_git_command(project_root, "rev-parse", "HEAD"), cwd=str(project_root),
             capture_output=True, text=True, check=False,
         )
         if head.returncode != 0:
@@ -346,7 +462,8 @@ def github_repository_slug(project_root: Path):
     """Read only the owner/repo portion of an origin URL; never expose creds."""
     try:
         result = subprocess.run(
-            ["git", "remote", "get-url", "origin"], cwd=str(project_root),
+            _snapshot_git_command(project_root, "remote", "get-url", "origin"),
+            cwd=str(project_root),
             capture_output=True, text=True, check=False,
         )
         if result.returncode != 0:
@@ -370,7 +487,7 @@ def detect_project_root(explicit_root=None):
     # Try git root from current working directory
     try:
         res = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            _snapshot_git_command(Path.cwd(), "rev-parse", "--show-toplevel"),
             capture_output=True,
             text=True,
             check=False,

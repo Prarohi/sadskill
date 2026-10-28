@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SADSKILL_VERSION="$(<"${SCRIPT_DIR}/VERSION")"
 TARGET_DIR="${PWD}"
 PURGE="false"
 CLEAN_BACKUPS="false"
@@ -69,7 +70,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "=== Uninstalling sadskill (v0.3.0) ==="
+echo "=== Uninstalling sadskill (v${SADSKILL_VERSION}) ==="
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "   [DRY-RUN MODE] No files will be removed or modified."

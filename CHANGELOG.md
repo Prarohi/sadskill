@@ -5,6 +5,27 @@ All notable changes to the `sadskill` project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - Unreleased
+
+### Fixed
+- Refuse missing ownership hashes, noncanonical artifacts and unrelated backup paths before destructive operations; inventory orphan recovery without claiming installed ownership.
+- Verify current backup bytes before cleanup/restoration and preserve the original backup identity across updates.
+- Replace ambiguous directory hashing with framed tree digests. Preserve unverifiable legacy content; see the [upgrade guide](docs/upgrade-0.4.0.md).
+- Validate manifests and hold one advisory lock across installer file changes and ledger writes. Reject unsafe updater history paths before apply/rollback writes.
+- Correct stable/prerelease ordering; bind evidence snapshots to actual tracked bytes despite Git index hints.
+- Preserve quoted Git arguments, allow ordinary push refspecs, and reject force/deletion forms. Doctor requires real nonempty artifacts and cannot confirm a missing/failed hook active.
+- Ship the evidence helper in skill-only distributions and route slash adapters through canonical modes to avoid stale approval, scan and database instructions.
+
+### Added
+- Conditional Supabase, Vercel and Bklit references; installed-reference and helper coverage for supported distributions.
+- Native PostgreSQL policy tests and deliberately failing negative controls, separate from SQLite fixtures and C1 agent evaluation.
+- Contributor task/PR templates, explicit public-source/service-access boundaries, and evidence limits in the README/audit ledger.
+- Release version consistency independent of manifest schema version and fixed updater test-fixture versions.
+
+### Validation limits
+- C1 real-agent trials, actual workflow execution in every host, and Windows/macOS verification remain unexecuted. No comparative agent-performance claim is made.
+- Main integration still requires eligible independent GitHub approval and all required CI; this candidate does not publish itself.
+
 ## [0.3.0] - 2026-10-28
 
 ### Security & Safety (P0 / P1 Repairs)

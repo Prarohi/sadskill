@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from helpers import SandboxCase  # noqa: E402
+from tests.updater.fixtures import UpdaterSandboxCase as SandboxCase  # noqa: E402
 
 
 class OfflineTests(SandboxCase):

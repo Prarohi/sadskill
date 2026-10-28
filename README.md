@@ -2,7 +2,7 @@
 
 > **One engineering workflow. Any coding agent.**  
 > *A portable engineering workflow for coding agents that plans proportionally, remembers decisions, verifies outcomes, and reports uncertainty.*  
-> Version: `v0.3.0` · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity, Gemini CLI)
+> Version: `v0.4.0` (release candidate) · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity, Gemini CLI)
 
 > *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
@@ -17,6 +17,8 @@
 ## ⚡ Quickstart (Universal via `skills.sh`)
 
 Install `sadskill` into any supported agent using the universal standard:
+
+The current upstream `skills` CLI requires Node.js 22.20 or newer. The companion installer below uses Bash/Python instead.
 
 ```bash
 npx skills add Prarohi/sadskill
@@ -61,7 +63,7 @@ Current deterministic checks and prebuilt fixtures are documented in the [benchm
 |---|---|---|
 | `/sad-plan` | **Adaptive Spec & Planning** | **Tier 1 (Surgical)**: <= 2 files/bugfix/CSS; single-turn lean diff table.<br>**Tier 2 (Architectural)**: Contract-First AST signatures, Mermaid data flows, and failure modes in `.sad/plans/`. |
 | `/sad-design` | **UI/UX & Visual Polish** | Guidance for distinctive, accessible UI: Zero-Lift hover defaults, `scale(0.97)` micro-compression, 20 UI polish tips, and `.sad/design-memory.md`. |
-| `/sad-backend` | **Schema, RLS & Safe APIs** | Schema-first DDL, reversible UP/DOWN migrations, zero-trust Row Level Security policies, and safe query performance analysis (`EXPLAIN (BUFFERS)`). |
+| `/sad-backend` | **Schema, RLS & Safe APIs** | Schema-first DDL, migration/recovery planning, tenant policies, and plan-only `EXPLAIN`; runtime measurements use an authorized disposable database. |
 | `/sad-sec` | **Security & Compliance Audit** | Strictly read-only audit guidance: OWASP web/API risks, secrets exposure, dependency scanning and a 15-point launch compliance checklist in `.sad/reports/`. |
 | `/sad-analyze` | **Architecture & Code Health** | Scoped (`/sad-analyze <path>`) or whole-codebase scan: coverage accounting, John Ousterhout deep module analysis, coupling, and dead code detection. |
 
@@ -127,7 +129,7 @@ Tasks conclude with demonstrable terminal verification and machine-readable evid
 - `CI_CLAIMED`: Evidence contains self-reported CI metadata; no external verification was performed.
 - `CI_ATTESTED`: Use only when an independent trusted GitHub check verifies repository, run, workflow, and exact head SHA. The local verifier does not emit this state.
 
-Run `python3 scripts/verify-evidence.py --print-context` to obtain the local `project_id`, `commit_sha`, `worktree_dirty`, and content-bound `worktree_digest` values for a new evidence record. The digest covers tracked and untracked checkout content plus relevant ignored test sources, configs (including Rust toolchain pins), and fixtures outside `.sad/evidence/`; initialized submodule worktrees are included recursively. Standard generated dependency/build directories are excluded unless nested below an explicit test or fixture directory. Gitlinks from both `HEAD` and the index must match `.gitmodules`; snapshots fail closed for mismatches, unmerged index entries, uninitialized submodules, or unsafe paths. It rejects mismatched or unbound records, including edits made after capture while the checkout remains dirty. It does not accept `--allow-custom-retest`; evidence can select only registered recipes with fixed arguments.
+Use the [portable installed helper](skills/sadskill/protocols/evidence.md) with an explicit consumer `--project-root` (or, from the Sadskill source checkout, `python3 scripts/verify-evidence.py --project-root /path/to/consumer --print-context`) to obtain the local `project_id`, `commit_sha`, `worktree_dirty`, and content-bound `worktree_digest` values for a new evidence record. The digest covers tracked and untracked checkout content plus relevant ignored test sources, configs (including Rust toolchain pins), and fixtures outside `.sad/evidence/`; initialized submodule worktrees are included recursively. Standard generated dependency/build directories are excluded unless nested below an explicit test or fixture directory. Gitlinks from both `HEAD` and the index must match `.gitmodules`; snapshots fail closed for mismatches, unmerged index entries, uninitialized submodules, or unsafe paths. It rejects mismatched or unbound records, including edits made after capture while the checkout remains dirty. It does not accept `--allow-custom-retest`; evidence can select only registered recipes with fixed arguments.
 
 ### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
 Safety operates through layered boundaries:
@@ -158,6 +160,8 @@ cp skills/sadskill/templates/profile.template.md ~/.sadskill/profile.md
 ## 🧪 Verification & Benchmarks
 
 ### 1. Independent Evidence Verifier
+The following commands run from a Sadskill source checkout. Skill-only installations use the bundled helper described in the [evidence protocol](skills/sadskill/protocols/evidence.md), with the consumer checkout passed as `--project-root`.
+
 Validate `.sad/evidence/*.json` records for syntax, strict path containment, and authorized execution:
 ```bash
 python3 scripts/verify-evidence.py

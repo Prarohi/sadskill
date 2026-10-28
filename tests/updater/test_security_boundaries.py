@@ -17,7 +17,7 @@ REPO_ROOT = os.path.dirname(TESTS_DIR)
 sys.path.insert(0, TESTS_DIR)
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
 
-from helpers import SandboxCase  # noqa: E402
+from tests.updater.fixtures import UpdaterSandboxCase as SandboxCase  # noqa: E402
 from tests.updater.stub import GitHubStub, build_tarball  # noqa: E402
 
 _UPDATER_PATH = os.path.join(REPO_ROOT, "scripts", "sadskill-update.py")

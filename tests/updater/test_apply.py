@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 from scripts import sadskill_core as core  # noqa: E402
-from helpers import SandboxCase  # noqa: E402
+from tests.updater.fixtures import UpdaterSandboxCase as SandboxCase  # noqa: E402
 from tests.updater.stub import GitHubStub, build_tarball  # noqa: E402
 
 _updater_spec = importlib.util.spec_from_file_location(
@@ -47,6 +47,36 @@ class ApplyRollbackTests(SandboxCase):
 
     def skill_md(self):
         return os.path.join(self.home, ".claude", "skills", "sadskill", "SKILL.md")
+
+    def test_history_symlink_is_rejected_before_any_installation_write(self):
+        target = Path(self.home) / "user-history.json"
+        target.write_text("USER_CONFIG\n")
+        history = Path(self.home) / ".sadskill/history.jsonl"
+        history.symlink_to(target)
+        original = Path(self.skill_md()).read_bytes()
+        result = self.run_update("apply", "--json")
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertEqual(target.read_text(), "USER_CONFIG\n")
+        self.assertEqual(Path(self.skill_md()).read_bytes(), original)
+        self.assertFalse((history.parent / "update-journal.json").exists())
+
+    def test_update_keeps_original_user_backup_hash(self):
+        self.assertEqual(self.run_uninstall().returncode, 0)
+        hook = Path(self.home) / ".claude/hooks/git-guardrail.sh"
+        hook.write_text("USER_ORIGINAL_HOOK\n")
+        result = self.run_install("claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = self.load_manifest()
+        original_hashes = {e["destination"]: (e.get("backup"), e.get("backup_hash"))
+                           for e in before["entries"]}
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        for entry in self.load_manifest()["entries"]:
+            self.assertEqual((entry.get("backup"), entry.get("backup_hash")),
+                             original_hashes[entry["destination"]])
+        original_backup = next(e["backup"] for e in before["entries"] if e["agent"] == "claude_hook")
+        self.assertEqual(self.run_uninstall("--clean-backups").returncode, 0)
+        self.assertEqual(Path(original_backup).read_text(), "USER_ORIGINAL_HOOK\n")
 
     def test_apply_transaction_full_lifecycle(self):
         p = self.run_update("apply", "--json")
