@@ -26,8 +26,8 @@ FORBIDDEN_ARG_TOKENS = {";", "&&", "||", "|", "`", "$(", ">", "<", "\n", "\r"}
 DISALLOWED_INLINE_FLAGS = {"-c", "-e", "--eval"}
 MAX_EVIDENCE_FILE_BYTES = 1024 * 1024
 _IGNORED_TEST_CONFIGS = {
-    "conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini",
-    "Cargo.toml", "Cargo.lock", "build.rs", "go.mod", "go.sum", "go.work",
+    "cargo.toml", "cargo.lock", "build.rs", "conftest.py", "pytest.ini",
+    "pyproject.toml", "setup.cfg", "tox.ini", "go.mod", "go.sum", "go.work",
     "go.work.sum",
 }
 _IGNORED_TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__", "fixtures"}
