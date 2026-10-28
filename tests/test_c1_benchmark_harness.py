@@ -23,15 +23,17 @@ class C1BenchmarkHarnessTests(unittest.TestCase):
 
     def test_mock_sadskill_run_c1_01_success(self):
         res = run_benchmark_run("C1-01", "sadskill", "mock", 1)
-        self.assertEqual(res["status"], "COMPLETED")
+        self.assertEqual(res["status"], "SIMULATED")
         self.assertTrue(res["success"])
         self.assertEqual(res["regressions"], 0)
-        self.assertTrue(res["evidence_produced"])
+        self.assertTrue(res["synthetic"])
+        self.assertIsNone(res["input_tokens"])
+        self.assertFalse(res["evidence_produced"])
 
     def test_mock_plain_run_c1_06_fails_rls_invariant(self):
         res = run_benchmark_run("C1-06", "plain", "mock", 1)
-        self.assertEqual(res["status"], "COMPLETED")
-        self.assertFalse(res["success"], "Plain condition should not satisfy forced RLS invariants")
+        self.assertEqual(res["status"], "SIMULATED")
+        self.assertFalse(res["success"], "Plain mock fixture should not satisfy forced RLS invariants")
 
     def test_unauthenticated_codex_provider_reports_truthful_unauth(self):
         res = run_benchmark_run("C1-01", "sadskill", "codex", 1)

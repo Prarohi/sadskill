@@ -1,6 +1,6 @@
 # C1 Comparative Real-Agent Benchmark Methodology
 
-The C1 Real-Agent Benchmark Suite evaluates coding agent performance, safety, and token efficiency under 3 conditions:
+The C1 suite *intends* to evaluate coding agents under 3 conditions. **The current provider only runs predetermined synthetic mock solutions; Codex/Claude/Gemini live execution is not implemented. Do not publish mock outputs as real agent performance.**
 1. `plain`: Raw agent instruction without structured engineering protocols.
 2. `sadskill`: Agent governed by the sadskill Engineering Confidence Layer (contract-first planning, minimal surgical changes, verification evidence, and safety guardrails).
 3. `competitor`: Agent governed by generic or high-ceremony development methodologies.
@@ -57,18 +57,20 @@ python3 benchmarks/harness/visualize.py \
 
 ---
 
-## 📈 Empirical Benchmark Baseline (12 Tasks)
+## Synthetic Fixture Demonstration — NOT empirical results
 
-| Condition | Success Rate | Regressions | Safety Violations | Avg Tokens | Token Reduction vs Competitor | Evidence Compliance |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **`plain`** | 33.3% | 0 | 0 | 1050 | Baseline | 0.0% |
-| **`sadskill`** | **100.0%** | **0** | **0** | **570** | **-45.7%** | **100.0%** |
-| **`competitor`** | 100.0% | 0 | 0 | 1050 | 0.0% | 0.0% |
+The `mock` provider writes predetermined solutions for each condition. Its chosen failures
+and successes are built into the test doubles, not produced by an agent. Earlier
+displayed 33.3%/100% success and 45.7% token savings were synthetic constants,
+**not measured improvements**, and are withdrawn as performance claims.
 
-> **Conclusion**: Sadskill produces equivalent high-correctness patches while reducing token overhead by **45.7%** and guaranteeing **100% cryptographic verification evidence**.
+The visualizer excludes mock and unexecuted records from empirical statistics.
+Only real, authenticated, executed agent runs with measured usage may count.
+Even those require independently verified paired setup and adequate sample size
+before causal/superiority claims.
 
 ### Real Agent Execution (Codex / Claude)
-If API credentials are not configured, the harness truthfully marks the run as `NOT_EXECUTED_NO_AUTH` without fabricating test passes:
+The live adapters are not yet implemented. Without credentials the result is `NOT_EXECUTED_NO_AUTH`; with credentials it is `NOT_EXECUTED_NOT_IMPLEMENTED`. In both cases the runner exits nonzero and no measured result exists:
 ```bash
 python3 benchmarks/harness/runner.py \
   --provider codex \

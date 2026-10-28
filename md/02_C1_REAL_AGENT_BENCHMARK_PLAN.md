@@ -1,6 +1,6 @@
 # C1 Real-Agent Benchmark Execution & Validation Plan
 
-This document details the exact execution plan for running the 108-run comparative benchmark across real coding agents, analyzing empirical metrics, and publishing definitive proof of Sadskill's superiority.
+This is a proposed experimental protocol, not evidence of model superiority. The current real-agent execution adapters are stubs, so the commands below do NOT perform live model work. Implement an authorized live adapter and obtain a passing canary before scheduling a paired trial.
 
 ---
 
@@ -44,7 +44,7 @@ For every single run, the harness records:
 
 ## 🛠️ Step-by-Step Live Execution Protocol
 
-### Step 1: Automated Model Configuration
+### Step 1: Implement and authorize the real-agent adapter
 Set up execution harness credentials in an isolated benchmarking runner environment:
 ```bash
 export OPENAI_API_KEY="sk-..."
@@ -93,7 +93,7 @@ Aggregate the JSONL outputs into statistical distributions (mean, median, p95, s
 ```bash
 python3 benchmarks/harness/visualize.py \
   --inputs .sad/benchmarks/results-*.jsonl \
-  --output-dir docs/benchmarks/
+  --output-markdown docs/benchmarks/c1-summary.md
 ```
 
 ### Step 5: Evidence Attestation & Publication

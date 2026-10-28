@@ -57,14 +57,14 @@ def run_benchmark_run(
 
         run_result = provider.execute(task, condition, workspace)
 
-        if run_result.get("status") == "NOT_EXECUTED_NO_AUTH":
+        if run_result.get("status", "").startswith("NOT_EXECUTED"):
             return {
                 "task_id": task_id,
                 "task_name": task["name"],
                 "condition": condition,
                 "provider": provider_name,
                 "repetition": repetition,
-                "status": "NOT_EXECUTED_NO_AUTH",
+                "status": run_result["status"],
                 "success": False,
                 "regressions": 0,
                 "safety_violations": 0,
@@ -81,7 +81,8 @@ def run_benchmark_run(
             "condition": condition,
             "provider": provider_name,
             "repetition": repetition,
-            "status": "COMPLETED",
+            "status": run_result.get("status", "COMPLETED"),
+            "synthetic": provider_name == "mock",
             "success": passed,
             "regressions": regressions,
             "safety_violations": safety_violations,
@@ -99,12 +100,14 @@ def run_benchmark_run(
 def main():
     parser = argparse.ArgumentParser(description="sadskill C1 Real-Agent Benchmark Runner")
     parser.add_argument("--provider", default="mock", choices=["mock", "codex", "claude", "gemini"], help="Execution provider")
-    parser.add_argument("--condition", default="sadskill", choices=["plain", "sadskill", "competitor"], help="Experimental condition")
+    parser.add_argument("--condition", default="sadskill", choices=["plain", "sadskill", "competitor", "all"], help="Experimental condition")
     parser.add_argument("--task", default="C1-01", help="Task ID (e.g. C1-01) or 'all'")
     parser.add_argument("--repetitions", type=int, default=1, help="Repetitions per task")
     parser.add_argument("--output", default=None, help="JSONL output path")
 
     args = parser.parse_args()
+    if args.repetitions < 1:
+        parser.error("--repetitions must be at least 1")
 
     task_ids = list(C1_TASKS.keys()) if args.task.lower() == "all" else [args.task]
     for tid in task_ids:
@@ -127,22 +130,29 @@ def main():
     total_runs = 0
     passed_runs = 0
 
+    conditions = ("plain", "sadskill", "competitor") if args.condition == "all" else (args.condition,)
     for tid in task_ids:
-        for rep in range(1, args.repetitions + 1):
-            total_runs += 1
-            res = run_benchmark_run(tid, args.condition, args.provider, rep)
-            results.append(res)
+        for condition in conditions:
+            for rep in range(1, args.repetitions + 1):
+                total_runs += 1
+                res = run_benchmark_run(tid, condition, args.provider, rep)
+                results.append(res)
 
-            status_mark = "✓ PASS" if res.get("success") else ("⚠️ UNAUTH" if res.get("status") == "NOT_EXECUTED_NO_AUTH" else "❌ FAIL")
-            if res.get("success"):
-                passed_runs += 1
+                if res["status"].startswith("NOT_EXECUTED"):
+                    status_mark = "⚠️ NOT EXECUTED"
+                elif res.get("synthetic"):
+                    status_mark = "🧪 MOCK PASS" if res.get("success") else "🧪 MOCK FAIL"
+                else:
+                    status_mark = "✓ PASS" if res.get("success") else "❌ FAIL"
+                if res.get("success"):
+                    passed_runs += 1
 
-            note = res.get("notes") or res.get("reason", "")
-            print(f"[{status_mark}] {tid} (rep {rep}) - {res['task_name']} | {note}")
+                note = res.get("notes") or res.get("reason", "")
+                print(f"[{status_mark}] {tid} ({condition}, rep {rep}) - {res['task_name']} | {note}")
 
-            if output_file:
-                with open(output_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(res) + "\n")
+                if output_file:
+                    with open(output_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(res) + "\n")
 
     print(f"\n--------------------------------------------------")
     print(f"Benchmark Summary: Total Runs: {total_runs} | Passed: {passed_runs} | Provider: {args.provider}")
@@ -150,9 +160,14 @@ def main():
         print(f"Results written to: {output_file}")
     print(f"--------------------------------------------------")
 
-    # If all completed runs passed or were cleanly reported unauth
-    all_clean = all(r.get("success") or r.get("status") == "NOT_EXECUTED_NO_AUTH" for r in results)
-    sys.exit(0 if all_clean else 1)
+    # A missing live adapter is not a passing benchmark. Mock fixture tests can
+    # pass their own harness-health check, but must never be reported as model runs.
+    not_executed = any(r["status"].startswith("NOT_EXECUTED") for r in results)
+    if args.provider == "mock":
+        print("SIMULATED FIXTURE CHECK ONLY: no AI model invoked; no token/cost/quality advantage measured.")
+    if not_executed:
+        print("NOT EXECUTED: live agent adapter unavailable; this is not a successful benchmark.", file=sys.stderr)
+    sys.exit(2 if not_executed else (0 if all(r.get("success") for r in results) else 1))
 
 
 if __name__ == "__main__":

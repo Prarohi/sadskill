@@ -11,6 +11,16 @@ import sys
 
 
 def synthesize_metrics(records: list) -> dict:
+    # Exclude all synthetic/demo and unexecuted records from empirical statistics.
+    # Mixing them would manufacture comparative performance numbers.
+    records = [
+        r for r in records
+        if r.get("provider") != "mock"
+        and not r.get("synthetic")
+        and r.get("status") == "COMPLETED"
+        and isinstance(r.get("input_tokens"), int)
+        and isinstance(r.get("output_tokens"), int)
+    ]
     conditions = {}
     for r in records:
         cond = r.get("condition", "unknown")
@@ -55,9 +65,17 @@ def synthesize_metrics(records: list) -> dict:
 
 
 def generate_markdown_report(summary: dict) -> str:
+    if not summary:
+        return (
+            "# C1 Comparative Benchmark Results\n\n"
+            "**NOT_EXECUTED: No measured live-agent trials are available.**\n\n"
+            "Mock runs are synthetic fixture demonstrations, not empirical model results. "
+            "They cannot establish success rates, token savings, competitor performance, "
+            "latency, or authenticated verification evidence.\n"
+        )
     md = [
         "# C1 Comparative Benchmark Results\n",
-        "Empirical performance evaluation across the 12 C1 benchmark tasks.\n",
+        "Measured live-agent trials only; compare conditions only when the model, task, environment and budget match.\n",
         "| Condition | Success Rate | Regressions | Safety Violations | Avg Tokens | Avg Latency | Evidence Rate |",
         "|---|:---:|:---:|:---:|:---:|:---:|:---:|",
     ]
@@ -73,7 +91,7 @@ def generate_markdown_report(summary: dict) -> str:
     comp_tokens = summary.get("competitor", {}).get("avg_total_tokens", 1)
     if comp_tokens > sad_tokens:
         savings = round(((comp_tokens - sad_tokens) / comp_tokens) * 100, 1)
-        md.append(f"> **Token Efficiency**: `sadskill` achieves **{savings}% token reduction** compared to competitor workflows through contract-first planning and surgical file diffs.\n")
+        md.append(f"> **Observed token difference**: {savings}% in this input dataset. This is descriptive, not proof of causal improvement; validate paired model/task/budget equivalence before any public claim.\n")
 
     md.append("\n```mermaid\nxychart-beta\n  title \"Task Success Rate vs Token Consumption\"\n  x-axis [\"plain\", \"sadskill\", \"competitor\"]\n  y-axis \"Success Rate (%)\" 0 --> 100\n  bar ["
               + f"{summary.get('plain', {}).get('success_rate', 0)}, "

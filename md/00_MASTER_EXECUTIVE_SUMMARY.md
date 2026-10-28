@@ -1,18 +1,18 @@
 # Sadskill 10/10 World-Class Master Plan: Executive Summary
 
-> **Current State Score**: **8.9 / 10** (Up from 6.4 in `main` and 7.8 in PR #4)
-> **Target Milestone**: **10.0 / 10** (Defensible Global Category Leader)
+> **Readiness Assessment**: Ratings below are subjective design targets, not verified product performance.
+> **Target Milestone**: Evidence-backed reliability, compatibility, adoption, and paired live-agent trials.
 > **Core Value Thesis**: *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
 ---
 
 ## 🎯 Executive Verdict
 
-With the landing of the **0.5.0 World-Class Upgrade** on branch `upgrade/worldclass-0.5.0` (PR #9), `sadskill` has crossed from an experimental collection of developer prompts into a deterministic, hardened **Engineering Confidence Layer**.
+PR #9 is an **unmerged 0.5.0 candidate**, not a released product. It proposes a larger Engineering Confidence Layer, but its hardening and execution claims must be validated by exact-head CI, independent review, and realistic tests.
 
-All 193 unit tests and 154 verification checks pass with zero failures. The canonical AST guardrail parser blocks execution wrapper evasion, Evidence v2 enforces cryptographic SHA-256 hash chaining, project memory supports concurrency-safe multi-agent writers, and the 12-task C1 benchmark harness is fully operational.
+The branch adds deterministic tests, guardrails, memory helpers and a C1 fixture harness. Current CI outcomes must be checked at the exact head; passing static/fixture checks cannot prove host integration or runtime sandbox security. The C1 mock generates predetermined solutions; **live-agent execution is not implemented and no model performance comparison exists**.
 
-To reach a definitive **10/10 score** that convincingly outclasses Superpowers and all existing agent skill packages, Sadskill must bridge the final gap between deterministic infrastructure and **battle-tested ecosystem ubiquity**:
+Before making any claim of superiority to Superpowers or another tool, Sadskill must close real safety and usability gaps and conduct fair, published live-agent comparisons:
 1. Run live LLM executions across all 108 paired C1 benchmark runs with published empirical statistical proof.
 2. Publish official integrations into the `skills.sh` registry, Cursor Marketplace, and OpenAI Agent Plugin catalog.
 3. Add local zero-dependency semantic search over project memory (`.sad/`).
@@ -20,7 +20,7 @@ To reach a definitive **10/10 score** that convincingly outclasses Superpowers a
 
 ---
 
-## 📊 Scorecard Across Core Dimensions (Out of 10)
+## 📊 Subjective Roadmap Scores (Not experimental results)
 
 | Dimension | Current Score (0.5.0) | 10/10 Target Delta | Key Gap to Reach 10/10 |
 |---|:---:|:---:|---|
@@ -34,7 +34,7 @@ To reach a definitive **10/10 score** that convincingly outclasses Superpowers a
 | **8. Installer, Updater & Recovery** | **8.8 / 10** | +1.2 | One-liner signed curl installer + standalone wheel/binary |
 | **9. Developer Experience (DX) & Ergonomics**| **8.5 / 10** | +1.5 | Unified `sad` terminal CLI with colored progress HUD |
 | **10. Documentation, Release & Governance** | **8.8 / 10** | +1.2 | Interactive documentation portal (Starlight) with live playground |
-| **OVERALL COMPOSITE SCORE** | **8.9 / 10** | **+1.1** | **Global Category Leader Target: 10.0 / 10** |
+| **OVERALL COMPOSITE SCORE** | **Not established** | **Not measured** | **Evidence-backed release readiness and user adoption** |
 
 ---
 

@@ -105,7 +105,7 @@ def cmd_bench(args, extra_args) -> int:
         str(output_file),
     ] + extra_args
 
-    print(f"{BADGE_INFO} Running C1 benchmark harness (condition: {args.condition}, task: {args.task})...")
+    print(f"{BADGE_INFO} Running C1 fixture harness (provider defaults to MOCK; not a live-agent benchmark)...")
     ret = subprocess.run(cmd).returncode
 
     if ret == 0 and output_file.exists():

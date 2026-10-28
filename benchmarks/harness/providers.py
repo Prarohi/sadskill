@@ -30,14 +30,15 @@ class MockProvider(BaseProvider):
             "task_id": task_id,
             "condition": condition,
             "provider": "mock",
-            "status": "COMPLETED",
-            "input_tokens": 450 if condition == "sadskill" else 750,
-            "output_tokens": 120 if condition == "sadskill" else 300,
-            "turns": 1 if condition == "sadskill" else 2,
-            "tool_calls": 3 if condition == "sadskill" else 5,
+            "status": "SIMULATED",
+            "synthetic": True,
+            "input_tokens": None,
+            "output_tokens": None,
+            "turns": None,
+            "tool_calls": None,
             "clarifications_needed": 0,
             "wall_clock_seconds": round(time.time() - t_start + 0.12, 3),
-            "evidence_produced": condition == "sadskill",
+            "evidence_produced": False,
             "notes": f"Mock simulated run under condition={condition}",
         }
 
@@ -154,10 +155,10 @@ pre {
             (sad_dir / ".lock").write_text("", encoding="utf-8")
 
         # Produce evidence record in sadskill mode
-        ev_dir = workspace / ".sad" / "evidence"
+        ev_dir = workspace / ".sad" / "mock-artifacts"
         ev_dir.mkdir(parents=True, exist_ok=True)
         (ev_dir / f"mock-evidence-{task_id}.json").write_text(
-            f'{{"task_slug": "{task_id}", "status": "VERIFIED"}}\n',
+            f'{{"task_slug": "{task_id}", "status": "SIMULATED_NOT_EVIDENCE"}}\n',
             encoding="utf-8"
         )
 
@@ -206,7 +207,7 @@ class RealAgentProvider(BaseProvider):
             "task_id": task["id"],
             "condition": condition,
             "provider": self.name,
-            "status": "NOT_EXECUTED_NO_AUTH",
-            "reason": "Live execution endpoint requires explicit user authorization flag.",
+            "status": "NOT_EXECUTED_NOT_IMPLEMENTED",
+            "reason": "No real model execution adapter has been implemented; credentials alone do not run an agent.",
             "wall_clock_seconds": 0.0,
         }
