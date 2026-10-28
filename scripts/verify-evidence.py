@@ -169,6 +169,38 @@ def _configured_submodule_paths(project_root):
     return paths
 
 
+def _gitlink_paths(project_root, *, index):
+    """Return Gitlink paths from HEAD or the index, or None when untrusted."""
+    if index:
+        command = ["git", "ls-files", "--stage", "-z"]
+    else:
+        command = ["git", "ls-tree", "-rz", "--full-tree", "HEAD"]
+    result = subprocess.run(
+        command, cwd=str(project_root), capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    paths = []
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            return None
+        if fields[0] != b"160000":
+            continue
+        path = Path(os.fsdecode(raw_path))
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            return None
+        paths.append(path)
+    normalized = [path.as_posix() for path in paths]
+    if len(set(normalized)) != len(normalized):
+        # Conflicted Gitlinks do not identify one unambiguous worktree.
+        return None
+    return paths
+
+
 def worktree_snapshot(project_root: Path, _submodule_depth=0):
     """Digest tracked, untracked, and relevant ignored test inputs."""
     if _submodule_depth > MAX_SUBMODULE_DEPTH:
@@ -183,8 +215,19 @@ def worktree_snapshot(project_root: Path, _submodule_depth=0):
     paths = _untracked_paths(project_root)
     ignored_paths = _ignored_test_paths(project_root)
     submodule_paths = _configured_submodule_paths(project_root)
+    head_gitlinks = _gitlink_paths(project_root, index=False)
+    index_gitlinks = _gitlink_paths(project_root, index=True)
     if (status.returncode != 0 or paths is None or ignored_paths is None
-            or submodule_paths is None):
+            or submodule_paths is None or head_gitlinks is None
+            or index_gitlinks is None):
+        return None
+    expected_gitlinks = {
+        path.as_posix() for path in head_gitlinks + index_gitlinks
+    }
+    configured_paths = {path.as_posix() for path in submodule_paths}
+    if configured_paths != expected_gitlinks:
+        # A missing or edited .gitmodules file must not make a Gitlink vanish
+        # from the content-bound test-input snapshot.
         return None
 
     digest = hashlib.sha256()
@@ -234,7 +277,8 @@ def worktree_snapshot(project_root: Path, _submodule_depth=0):
             return None
 
     submodule_dirty = False
-    for relative in sorted(submodule_paths, key=lambda item: item.as_posix()):
+    for relative in sorted(expected_gitlinks):
+        relative = Path(relative)
         submodule = project_root / relative
         cursor = project_root
         for part in relative.parts:
