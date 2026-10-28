@@ -10,6 +10,31 @@ permissions:
   contents: read
 
 jobs:
+  postgres-rls:
+    name: Native PostgreSQL RLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Cache pinned PostgreSQL fixture image
+        run: docker pull postgres@sha256:dfbbb0ad8cab91d41e99123664e37a9b25d0413426d4fb3154e4d668e5d35246
+
+      - name: Verify native PostgreSQL policies
+        run: python3 benchmarks/fixtures/postgres-rls/test_rls.py
+
+      - name: Verify disabled-RLS negative control
+        run: |
+          set +e
+          python3 benchmarks/fixtures/postgres-rls/test_rls.py --disable-rls > negative-control.log 2>&1
+          status=$?
+          set -e
+          cat negative-control.log
+          test "$status" -ne 0
+          grep -q 'FAIL: test_' negative-control.log
+          ! grep -q '^ERROR:' negative-control.log
+
   verify:
     name: Verify sadskill (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest

@@ -21,6 +21,8 @@ The runner reports A, B, and C0 independently. It records C1 as `NOT_EXECUTED` w
 
 The fixture at `benchmarks/fixtures/real-rls/` uses SQLite authorizer hooks to simulate database-level isolation. It is **not PostgreSQL RLS** and provides no evidence about PostgreSQL roles or policies.
 
+The opt-in [native PostgreSQL fixture](../benchmarks/fixtures/postgres-rls/README.md) separately exercises actual PostgreSQL 15 roles, policies, grants, writes, and invoker views in a disposable container. Its explicit CI job also requires a failing negative control with RLS disabled. It remains Track B fixture evidence; it does not validate a hosted service or count as a C1 agent run. The default runner above does not silently add Docker requirements.
+
 ## C1 requirements before reporting agent outcomes
 
 Each runnable task must have an immutable seed snapshot with a known failing baseline, independent grader, reset procedure, expected permissions, and explicit safety scope. The runner must keep the agent worktree away from grader files, inspect the diff for unauthorized changes, and record repository/grader/skill/model IDs, environment, budget, time, and available token/cost telemetry. Unavailable telemetry is `N/A`; failed or incomplete runs remain visible.
