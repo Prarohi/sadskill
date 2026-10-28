@@ -206,7 +206,8 @@ class EvidenceVerifierTests(unittest.TestCase):
         gitignore = self.root / ".gitignore"
         gitignore.write_text(
             ".cargo/config.toml\ntestdata/case.json\n"
-            "tests/build/test_local.py\n",
+            "tests/build/test_local.py\nrust-toolchain\n"
+            "rust-toolchain.toml\n",
             encoding="utf-8",
         )
         subprocess.run(["git", "-C", str(self.root), "add", ".gitignore"],
@@ -221,7 +222,9 @@ class EvidenceVerifierTests(unittest.TestCase):
         for relative, content in (
                 (".cargo/config.toml", "[build]\njobs = 1\n"),
                 ("testdata/case.json", '{"case":1}\n'),
-                ("tests/build/test_local.py", "def test_nested_build_path(): pass\n")):
+                ("tests/build/test_local.py", "def test_nested_build_path(): pass\n"),
+                ("rust-toolchain", "1.85.0\n"),
+                ("rust-toolchain.toml", "[toolchain]\nchannel = \"stable\"\n")):
             with self.subTest(path=relative):
                 path = self.root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
