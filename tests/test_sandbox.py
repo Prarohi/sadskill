@@ -107,6 +107,13 @@ class SandboxWritableRootTests(unittest.TestCase):
                 self.assertIn("refusing", result.stderr)
                 self.assertFalse(self.capture.exists())
 
+    def test_user_home_is_not_a_workspace(self):
+        self.env["HOME"] = str(self.root)
+        result = self.sandbox(self.root)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("entire HOME", result.stderr)
+        self.assertFalse(self.capture.exists())
+
     def test_symlink_to_root_is_refused(self):
         alias = self.root / "root-link"
         alias.symlink_to("/", target_is_directory=True)
