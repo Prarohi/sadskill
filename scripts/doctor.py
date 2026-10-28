@@ -70,6 +70,15 @@ def _is_our_command(cmd):
             return False
 
         def resolves_to_hook(token):
+            # Support the portable command shape documented for settings.json
+            # without expanding arbitrary shell variables or evaluating input.
+            if token in {"$HOME", "${HOME}"}:
+                token = str(Path.home())
+            else:
+                for prefix in ("$HOME/", "${HOME}/"):
+                    if token.startswith(prefix):
+                        token = str(Path.home() / token[len(prefix):])
+                        break
             return Path(token).expanduser().resolve(strict=False) == expected
 
         # A hook is owned only when the command invokes that exact path as

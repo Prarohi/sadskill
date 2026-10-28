@@ -2,7 +2,7 @@
 
 - **Audited Baseline Commit**: `b1701a7576c559df0c9294614ad02886d6f5c6b0` (v0.3.0)
 - **Environment**: Linux x86_64, Python 3.10+, Bash 5.2
-- **Test Suite Status**: 142 / 142 verification checks passing (`scripts/verify.py`), 3-Track Benchmark Suite 100% passing (`benchmarks/runner.py`: 6/6 Track A contracts, 2/2 Track B fixtures, 1/1 Track C 24-task suite validation)
+- **Test Suite Status**: 142 / 142 verification checks passing (`scripts/verify.py`). Deterministic benchmark validation: Track A 6/6 contracts, Track B 2/2 fixtures, Track C0 catalog 24/24. Track C1 real-agent runs: **0, NOT_EXECUTED**; these checks do not establish real-agent task performance.
 
 ---
 
@@ -60,7 +60,7 @@
 3. **Adaptive Advice (`skills/sadskill/protocols/advice.md`)**: Non-intrusive, impact-ranked suggestions; suppressible upon user request.
 4. **Autonomous Continuation (`skills/sadskill/protocols/autonomy.md`)**: Bounded continuation loops and clarification budgets across four execution modes (`REVIEW_ONLY`, `PLAN_ONLY`, `IMPLEMENT`, `CONTINUE_UNTIL_DONE`).
 5. **Approved Web Research (`skills/sadskill/protocols/research.md`)**: User-authorized external documentation research with provenance tracking; protects against untrusted web prompt injection.
-6. **Real Database RLS Behavioral Fixture (`benchmarks/fixtures/real-rls/`)**: Behavioral tests verifying database driver-level tenant isolation using SQLite authorizers.
+6. **SQLite RLS-Simulation Behavioral Fixture (`benchmarks/fixtures/real-rls/`)**: Behavioral tests exercise a SQLite authorizer simulation of tenant isolation. This is not a native PostgreSQL RLS integration test.
 
 ---
 
@@ -117,7 +117,7 @@
 | S47 | P2 | Concurrent memory writers handling | `skills/sadskill/protocols/memory.md` | Atomic append and superseding decision tracking | **FIXED** |
 | S48 | P2 | Proportional planning overhead | `skills/sadskill/modes/plan.md` | Tiny tasks vs Tier 1 vs Tier 2 plans | **FIXED** |
 | S49 | P2 | Adaptive frontend design requirements | `skills/sadskill/modes/design.md` | WCAG 2.2 SC 2.5.8 nuance & Zero-Lift style rule | **FIXED** |
-| S50 | P1 | Real database RLS tests | `benchmarks/fixtures/real-rls/` | SQLite authorizer driver-level tenant tests | **FIXED** |
+| S50 | P1 | SQLite RLS-simulation tests | `benchmarks/fixtures/real-rls/` | Fixture is labeled SQLite simulation; native PostgreSQL RLS is not claimed | **FIXED** |
 | S51 | P2 | Migration/backfill safety rules | `skills/sadskill/modes/backend.md` | Irreversible migrations and backup requirements | **FIXED** |
 | S52 | P2 | Update OWASP Top 10 to 2025 | `vendor/owasp/owasp-top-10.ref.md` | Updated to official OWASP Top 10:2025 standard | **FIXED** |
 | S53 | P2 | Vendor provenance + license audit | `skills/sadskill/vendor/manifest.json` | 40 references tracked with licenses and hashes | **FIXED** |

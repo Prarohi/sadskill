@@ -637,6 +637,44 @@ class ClaudeSettingsTests(SandboxCase):
         self.assertEqual(json.loads(ordinary.stdout)["claude_hook"]["status"], "LOCAL_TEST_PASSED")
         self.assertEqual(json.loads(confirmed.stdout)["claude_hook"]["status"], "HOST_VERIFIED_ACTIVE")
 
+    def test_documented_home_variable_command_is_owned_idempotently(self):
+        portable_command = '"$HOME"/.claude/hooks/git-guardrail.sh'
+        with open(self.settings_path, "w", encoding="utf-8") as fh:
+            json.dump({"hooks": {"PreToolUse": [{
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": portable_command}],
+            }]}}, fh)
+
+        before = self.run_doctor("--json")
+        self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+        self.assertEqual(
+            json.loads(before.stdout)["claude_hook"]["status"], "LOCAL_TEST_PASSED"
+        )
+
+        enabled = self._enable()
+        self.assertEqual(enabled.returncode, 0, enabled.stdout + enabled.stderr)
+        commands = [
+            sub.get("command")
+            for group in self._load()["hooks"]["PreToolUse"]
+            for sub in group.get("hooks", [])
+            if isinstance(sub, dict)
+        ]
+        self.assertEqual(
+            sum(1 for command in commands if "git-guardrail" in command), 1
+        )
+
+        disabled = self._disable()
+        self.assertEqual(disabled.returncode, 0, disabled.stdout + disabled.stderr)
+        remaining = [
+            sub.get("command")
+            for group in self._load().get("hooks", {}).get("PreToolUse", [])
+            for sub in group.get("hooks", [])
+            if isinstance(sub, dict)
+        ]
+        self.assertFalse(
+            [command for command in remaining if "git-guardrail" in command]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
