@@ -30,6 +30,10 @@
 
 ---
 
+### Linked platform documentation
+
+The task guides in `skills/sadskill/references/` are original Sadskill guidance linking to official [Supabase](https://supabase.com/docs), [Vercel](https://vercel.com/docs), and [Bklit UI](https://ui.bklit.com/docs) documentation. No upstream component source or complete third-party skill is copied into those guides. A consuming project that installs registry components must retain the upstream notices and check the license for the specific code it adds.
+
 ### Frontmatter Neutralization Notice
 
 In accordance with agent discovery standards, all vendored reference files within `skills/sadskill/vendor/` have their top-level frontmatter neutralised (by utilizing `.ref.md` suffixes or removing primary `name:` headers). This ensures that agent tools (such as `skills` CLI, Codex, Claude Code, Cursor) discover and register exactly one primary root skill: `sadskill`.

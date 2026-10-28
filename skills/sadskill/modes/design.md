@@ -82,6 +82,7 @@ Log new approved design tokens to `.sad/design-memory.md`:
 ---
 
 ## 🔗 Vendor Synergies
+- **Chart and data-visualization work**: Load [Bklit UI guidance](../references/bklit-ui.md) when relevant; preserve the current framework and verify data meaning and accessibility.
 - **Impeccable**: [impeccable/craft-floor.ref.md](../vendor/impeccable/craft-floor.ref.md) and [impeccable/modes.ref.md](../vendor/impeccable/modes.ref.md).
 - **Taste & Aesthetic**: [taste/taste-vocabulary.ref.md](../vendor/taste/taste-vocabulary.ref.md).
 - **Component Patterns**: [shadcn/component-patterns.ref.md](../vendor/shadcn/component-patterns.ref.md).
