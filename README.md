@@ -111,7 +111,7 @@ Tasks conclude with demonstrable terminal verification and machine-readable evid
 - `CI_CLAIMED`: Evidence contains self-reported CI metadata; no external verification was performed.
 - `CI_ATTESTED`: Use only when an independent trusted GitHub check verifies repository, run, workflow, and exact head SHA. The local verifier does not emit this state.
 
-Run `python3 scripts/verify-evidence.py --print-context` to obtain the local `project_id`, `commit_sha`, `worktree_dirty`, and content-bound `worktree_digest` values for a new evidence record. The verifier rejects mismatched or unbound records, including edits made after capture while the checkout remains dirty. It does not accept `--allow-custom-retest`; evidence can select only registered recipes with fixed arguments.
+Run `python3 scripts/verify-evidence.py --print-context` to obtain the local `project_id`, `commit_sha`, `worktree_dirty`, and content-bound `worktree_digest` values for a new evidence record. The digest covers tracked and untracked checkout content plus relevant ignored test sources, configs, and fixtures outside `.sad/evidence/`; standard generated dependency/build directories are excluded. The verifier rejects mismatched or unbound records, including edits made after capture while the checkout remains dirty. It does not accept `--allow-custom-retest`; evidence can select only registered recipes with fixed arguments.
 
 ### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
 Safety operates through layered boundaries:

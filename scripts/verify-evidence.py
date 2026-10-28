@@ -25,6 +25,16 @@ FORBIDDEN_ARG_TOKENS = {";", "&&", "||", "|", "`", "$(", ">", "<", "\n", "\r"}
 # Dangerous inline code flags rejected in unattended safe retest
 DISALLOWED_INLINE_FLAGS = {"-c", "-e", "--eval"}
 MAX_EVIDENCE_FILE_BYTES = 1024 * 1024
+_IGNORED_TEST_CONFIGS = {
+    "conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini",
+    "Cargo.toml", "Cargo.lock", "build.rs", "go.mod", "go.sum", "go.work",
+    "go.work.sum",
+}
+_IGNORED_TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__", "fixtures"}
+_IGNORED_GENERATED_DIRS = {
+    ".git", ".venv", "venv", "node_modules", ".tox", ".pytest_cache",
+    "target", "build", "dist",
+}
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -75,8 +85,39 @@ def _untracked_paths(project_root):
     return [path for path in result.stdout.split(b"\0") if path]
 
 
+def _is_relevant_ignored_test_input(relative):
+    """Select ignored source, config, and fixture files used by fixed recipes."""
+    path = Path(os.fsdecode(relative))
+    parts = [part.lower() for part in path.parts]
+    if any(part in _IGNORED_GENERATED_DIRS for part in parts):
+        return False
+    basename = path.name.lower()
+    if basename in _IGNORED_TEST_CONFIGS:
+        return True
+    if path.suffix.lower() in {".py", ".rs", ".go"}:
+        return True
+    return any(part in _IGNORED_TEST_DIRS for part in parts[:-1])
+
+
+def _ignored_test_paths(project_root):
+    """List ignored test inputs that Git status would otherwise omit."""
+    result = subprocess.run(
+        [
+            "git", "ls-files", "--others", "--ignored", "--exclude-standard",
+            "-z", "--", ".", ":(exclude).sad/evidence",
+            ":(exclude).sad/evidence/**",
+        ], cwd=str(project_root), capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return [
+        path for path in result.stdout.split(b"\0")
+        if path and _is_relevant_ignored_test_input(path)
+    ]
+
+
 def worktree_snapshot(project_root: Path):
-    """Return a digest of tracked and untracked dirt outside evidence records."""
+    """Digest tracked, untracked, and relevant ignored test inputs."""
     status = subprocess.run(
         [
             "git", "status", "--porcelain", "-z", "--untracked-files=all", "--",
@@ -84,7 +125,8 @@ def worktree_snapshot(project_root: Path):
         ], cwd=str(project_root), capture_output=True, check=False,
     )
     paths = _untracked_paths(project_root)
-    if status.returncode != 0 or paths is None:
+    ignored_paths = _ignored_test_paths(project_root)
+    if status.returncode != 0 or paths is None or ignored_paths is None:
         return None
 
     digest = hashlib.sha256()
@@ -94,7 +136,12 @@ def worktree_snapshot(project_root: Path):
     if not _hash_git_diff(digest, project_root):
         return None
 
-    for relative in sorted(paths):
+    digest.update(b"ignored-test-inputs\0")
+    for relative in sorted(ignored_paths):
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+
+    for relative in sorted(set(paths) | set(ignored_paths)):
         if relative == b".sad/evidence" or relative.startswith(b".sad/evidence/"):
             continue
         path = project_root / os.fsdecode(relative)
@@ -112,6 +159,10 @@ def worktree_snapshot(project_root: Path):
                             break
                         digest.update(chunk)
             elif stat.S_ISLNK(before.st_mode):
+                if relative in ignored_paths:
+                    # A test symlink could read external bytes that are outside
+                    # this checkout's content-bound snapshot.
+                    return None
                 digest.update(os.fsencode(os.readlink(path)))
             else:
                 return None
@@ -125,7 +176,7 @@ def worktree_snapshot(project_root: Path):
             return None
 
     return {
-        "worktree_dirty": bool(status.stdout),
+        "worktree_dirty": bool(status.stdout or ignored_paths),
         "worktree_digest": digest.hexdigest(),
     }
 
