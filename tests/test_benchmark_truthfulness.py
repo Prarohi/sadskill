@@ -49,13 +49,16 @@ class BenchmarkTruthfulnessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("NOT EXECUTED", result.stderr)
 
-    def test_all_condition_matrix_works_in_mock(self):
+    def test_all_condition_matrix_reports_expected_plain_mock_failure(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "benchmarks/harness/runner.py"),
              "--provider", "mock", "--condition", "all", "--task", "C1-01"],
             text=True, capture_output=True,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        # Plain intentionally retains defects in synthetic fixtures: a nonzero
+        # exit is expected, not a harness failure or a real-agent result.
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("🧪 MOCK FAIL", result.stdout)
         self.assertIn("SIMULATED FIXTURE CHECK ONLY", result.stdout)
         self.assertIn("Total Runs: 3", result.stdout)
 
