@@ -29,7 +29,8 @@ MAX_SUBMODULE_DEPTH = 16
 _IGNORED_TEST_CONFIGS = {
     "cargo.toml", "cargo.lock", "build.rs", "conftest.py", "pytest.ini",
     "pyproject.toml", "setup.cfg", "tox.ini", "go.mod", "go.sum", "go.work",
-    "go.work.sum", "config", "config.toml",
+    "go.work.sum", "rust-toolchain", "rust-toolchain.toml", "config",
+    "config.toml",
 }
 _IGNORED_TEST_DIRS = {
     "test", "tests", "spec", "specs", "__tests__", "fixtures", "testdata",
