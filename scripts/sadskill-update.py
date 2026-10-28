@@ -718,6 +718,10 @@ def build_transition(manifest, by_agent, rel_files):
             if mapped:
                 actions.append({"source": rel, "targets": mapped})
         elif rel.startswith("commands/claude/"):
+            if len(Path(rel).parts) != 3 or not rel.endswith(".md"):
+                raise core.IntegrityError(
+                    f"Claude command archive path is not a direct Markdown file: {rel}"
+                )
             name = os.path.basename(rel)
             for entry in by_agent.get("claude_command", []):
                 if os.path.basename(entry["destination"]) == name:
@@ -727,6 +731,10 @@ def build_transition(manifest, by_agent, rel_files):
                                       "claude_command")]}
                     )
         elif rel.startswith("commands/codex/"):
+            if len(Path(rel).parts) != 3 or not rel.endswith(".md"):
+                raise core.IntegrityError(
+                    f"Codex prompt archive path is not a direct Markdown file: {rel}"
+                )
             name = os.path.basename(rel)
             for entry in by_agent.get("codex_prompt", []):
                 if os.path.basename(entry["destination"]) == name:
@@ -1051,7 +1059,13 @@ def _cmd_apply_locked(args):
         for action in actions:
             for dest, entry, agent in action["targets"]:
                 dest = _validate_owned_destination(dest, entry)
-                destinations[str(dest)] = {
+                dest_key = str(dest)
+                if dest_key in destinations:
+                    raise core.IntegrityError(
+                        "multiple archive files map to the same update target: "
+                        f"{dest}"
+                    )
+                destinations[dest_key] = {
                     "agent": agent,
                     "entry_destination": entry["destination"],
                     "target_root": entry.get(
