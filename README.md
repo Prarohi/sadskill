@@ -26,7 +26,7 @@ npx skills add Prarohi/sadskill
 
 ## 🎯 The Engineering Confidence Layer
 
-Sadskill transforms autonomous coding agents from unpredictable code generators into reliable software engineers:
+Sadskill supplies task-routing instructions, engineering checklists and optional companion tools. Their value depends on the host loading them, the agent applying them, and verification of the resulting work:
 
 - 📖 **[Product Model & Strategy](docs/product/product-model.md)**: The 7 core questions, smallest valuable workflows, and bypass criteria.
 - 🔬 **[10 Real-World Engineering Scenarios](docs/product/examples.md)**: Concrete walkthroughs from T0 bugfixes to multi-tenant billing.
@@ -36,18 +36,20 @@ Sadskill transforms autonomous coding agents from unpredictable code generators 
 
 ---
 
-## 📊 Why `sadskill`? Core Advantages
+## 📊 Capabilities and verification limits
 
-| Dimension | Default Plain Coding Agent | Agent Powered by `sadskill` |
+| Capability | Sadskill workflow | Verification limit |
 |---|---|---|
-| **Verification Proof** | Claims *"all tests pass"* blindly without proof | Verifiable terminal proof with exit code `0` recorded in `.sad/evidence/` via trusted recipes |
-| **Context & Autonomy** | Loops asking repeated questions or loses intent | **TaskContext Interpretation** & **Autonomous Continuation** without unnecessary approval loops |
-| **Codebase Discovery** | Shallow single-file edits with cross-module bugs | **Whole-Codebase Mapping** with explicit Coverage Ledgers (`FULL_COVERAGE` vs `PARTIAL_COVERAGE`) |
-| **Token Efficiency** | Speculative trial-and-error editing cycles | **Adaptive Planning** (proportional plans for bugfixes; AST Contracts for architectural features) |
-| **Context Retention** | Resets completely across sessions | Persistent `.sad/` memory (`history.md`, `decisions.md`, `design-memory.md`) |
-| **Safety Guardrails** | Can run `git reset --hard` or `DROP TABLE` | Executable `git-guardrail.sh` defense filter and Git `pre-push` ref validation |
-| **UI/UX Craft Floor** | Generic AI aesthetic (purple gradients, unscaled cards) | **Zero-Lift** hover rule (click compression; drawers/tooltips permitted), preferred 44px targets, 20 UI polish rules |
-| **Backend Reliability** | Destructive migrations and permissive queries | Reversible UP/DOWN migrations, database-level RLS, safe `EXPLAIN (BUFFERS)` |
+| **Verification** | Record commands, exit codes and evidence; retest through trusted recipes | An agent-written record does not prove execution; independent retest or trusted CI is stronger evidence |
+| **Context & autonomy** | Interpret current intent and continue authorized work | Prompt guidance depends on host behavior and cannot override user constraints |
+| **Codebase discovery** | Map scope with explicit Coverage Ledgers (`FULL_COVERAGE` vs `PARTIAL_COVERAGE`) | A ledger label alone does not prove that source was inspected |
+| **Planning** | Scale planning to the task: small fixes through architectural contracts | Token savings and comparative coding success have not been established by paired agent trials |
+| **Context retention** | Maintain `.sad/` history and decisions for later reads | Files help only when the next session can access and reads them |
+| **Safety guardrails** | Optional command filter and Git `pre-push` ref validation | Requires host activation; lexical filtering is supplemental, not a complete execution boundary |
+| **UI/UX guidance** | Zero-Lift hover default, preferred 44px targets, 20 UI polish rules | Project decisions still apply; rendered behavior needs browser/accessibility checks |
+| **Backend guidance** | Engine-aware RLS, migration/recovery planning and query analysis | Policies need real-role tests; a reverse schema script does not restore deleted data |
+
+Current deterministic checks and prebuilt fixtures are documented in the [benchmark methodology](docs/benchmark-methodology.md). Real-agent C1 trials remain `NOT_EXECUTED`; no superiority over a plain agent or another skill is claimed.
 
 ---
 
@@ -56,9 +58,9 @@ Sadskill transforms autonomous coding agents from unpredictable code generators 
 | Command | Workflow | Description & Core Value |
 |---|---|---|
 | `/sad-plan` | **Adaptive Spec & Planning** | **Tier 1 (Surgical)**: <= 2 files/bugfix/CSS; single-turn lean diff table.<br>**Tier 2 (Architectural)**: Contract-First AST signatures, Mermaid data flows, and failure modes in `.sad/plans/`. |
-| `/sad-design` | **UI/UX & Visual Polish** | Distinctive, accessible UI. Enforces the Zero-Lift hover rule (`translateY` card-hover float banned, `scale(0.97)` micro-compression), 20 UI polish tips, and reads `.sad/design-memory.md`. |
+| `/sad-design` | **UI/UX & Visual Polish** | Guidance for distinctive, accessible UI: Zero-Lift hover defaults, `scale(0.97)` micro-compression, 20 UI polish tips, and `.sad/design-memory.md`. |
 | `/sad-backend` | **Schema, RLS & Safe APIs** | Schema-first DDL, reversible UP/DOWN migrations, zero-trust Row Level Security policies, and safe query performance analysis (`EXPLAIN (BUFFERS)`). |
-| `/sad-sec` | **Security & Compliance Audit** | Strictly read-only audit: OWASP Top 10 web & API (2025 Standard), secrets exposure, offline-resilient dependency scanning, and 15-point launch legal compliance in `.sad/reports/`. |
+| `/sad-sec` | **Security & Compliance Audit** | Strictly read-only audit guidance: OWASP web/API risks, secrets exposure, dependency scanning and a 15-point launch compliance checklist in `.sad/reports/`. |
 | `/sad-analyze` | **Architecture & Code Health** | Scoped (`/sad-analyze <path>`) or whole-codebase scan: coverage accounting, John Ousterhout deep module analysis, coupling, and dead code detection. |
 
 > **Universal Invocation**: If slash commands are not supported in your environment, trigger with `$sadskill <mode>` (e.g. `$sadskill plan`, `$sadskill design`) or via natural language intent.
