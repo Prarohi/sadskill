@@ -1,4 +1,4 @@
 interface:
   display_name: "sadskill"
-  short_description: "Unified autonomous engineering skill for coding agents"
-  default_prompt: "Run sadskill to plan, design, implement backend, audit security, or analyze this codebase."
+  short_description: "Engineering confidence layer for autonomous coding agents"
+  default_prompt: "Run sadskill to plan proportionally, design accessible UI, write resilient schemas, audit security, or analyze architecture with verified evidence."
