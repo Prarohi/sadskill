@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
@@ -29,6 +31,15 @@ jobs:
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
           node-version: ${{ matrix.node-version }}
+
+      - name: Check Python and Bash syntax and patch whitespace
+        run: |
+          python3 -m compileall -q scripts benchmarks tests
+          bash -n install.sh uninstall.sh scripts/git-guardrail.sh
+          git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}"...HEAD
+
+      - name: Run Python regression tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 
       - name: Run sadskill Verification Suite
         run: python3 scripts/verify.py

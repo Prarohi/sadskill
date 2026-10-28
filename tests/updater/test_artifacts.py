@@ -136,7 +136,6 @@ class LockTests(SandboxCase):
         # Hold the manifest lock in a foreign process.
         lock_path = os.path.join(self.home, ".sadskill",
                                  ".install-manifest.json.lock")
-        holder = subprocess_hold = os.fork if False else None
         import subprocess as sp
         hold = sp.Popen(
             [sys.executable, "-c",
@@ -147,14 +146,33 @@ class LockTests(SandboxCase):
              "time.sleep(30)\n",
              lock_path],
             stdout=sp.PIPE, stderr=sp.PIPE, text=True)
-        self.addCleanup(hold.kill)
+
+        def stop_holder():
+            if hold.poll() is None:
+                hold.terminate()
+            try:
+                hold.wait(timeout=5)
+            except sp.TimeoutExpired:
+                hold.kill()
+                hold.wait(timeout=5)
+            if hold.stdout:
+                hold.stdout.close()
+            if hold.stderr:
+                hold.stderr.close()
+
+        self.addCleanup(stop_holder)
         try:
             line = hold.stdout.readline().strip()
         finally:
             pass
         self.assertEqual(line, "HELD")
+        before = self.home_snapshot()
         p = self.run_update("apply", "--json")
         self.assertEqual(p.returncode, 6, p.stdout + p.stderr)
+        self.assertEqual(
+            self.home_snapshot(), before,
+            "lock contention changed installed files or updater state",
+        )
 
 
 class PolicyTests(SandboxCase):
@@ -177,7 +195,7 @@ class PolicyTests(SandboxCase):
         p = self.run_update("apply", "--json", "--channel", "pinned")
         self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
 
-    def test_external_manager_refused_then_adopt(self):
+    def test_external_manager_refused_even_with_adopt(self):
         # Simulate npx skills managing the install.
         self.write_file(self.home, ".skills-lock.json",
                         json.dumps({"sadskill": {"version": "0.3.0"}}))
@@ -186,9 +204,12 @@ class PolicyTests(SandboxCase):
         data = json.loads(p.stdout)
         self.assertTrue(data["refused"])
         self.assertIn("external-manager", data["reasons"][0])
-        # --adopt takes explicit ownership and proceeds.
+        # A boolean flag is not a safe ownership transfer protocol.
+        before = self.home_snapshot()
         p = self.run_update("apply", "--json", "--adopt")
-        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertTrue(json.loads(p.stdout)["refused"])
+        self.assertEqual(self.home_snapshot(), before)
 
 
 if __name__ == "__main__":

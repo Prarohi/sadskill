@@ -208,6 +208,8 @@ _ENTRY_TYPES = {
     "backup": str,
     "content_hash": str,
     "backup_hash": str,
+    "content_hash_type": str,
+    "target_root": str,
     "installed_at": str,
     "restored": bool,
 }
@@ -248,6 +250,11 @@ def validate_manifest_data(data):
                 raise ManifestError(
                     f"entry field {field!r} must be {expected.__name__}"
                 )
+        if entry.get("content_hash_type") not in (None, "file", "tree"):
+            raise ManifestError("entry content_hash_type must be 'file' or 'tree'")
+        target_root = entry.get("target_root")
+        if target_root and not os.path.isabs(target_root):
+            raise ManifestError("entry target_root must be an absolute path")
     return data
 
 
@@ -347,7 +354,7 @@ class Journal:
 
     def begin(self, from_version, to_version, stage_dir, repo, channel):
         self.data = {
-            "journal_version": 1,
+            "journal_version": 2,
             "action": "update",
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "from_version": from_version,

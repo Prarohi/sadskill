@@ -45,6 +45,8 @@ _ENTRY_TYPES = {
     "destination": str,
     "backup": str,
     "content_hash": str,
+    "content_hash_type": str,
+    "target_root": str,
     "backup_hash": str,
     "installed_at": str,
     "restored": bool,
@@ -177,6 +179,15 @@ def validate_manifest(data):
                     f"manifest entry #{index} field {field!r} must be of type "
                     f"{expected_type.__name__}"
                 )
+        if entry.get("content_hash_type") not in (None, "file", "tree"):
+            raise ManifestError(
+                f"manifest entry #{index} content_hash_type must be 'file' or 'tree'"
+            )
+        target_root = entry.get("target_root")
+        if target_root and not os.path.isabs(target_root):
+            raise ManifestError(
+                f"manifest entry #{index} target_root must be an absolute path"
+            )
 
 
 def load_manifest(manifest_path: Path):
@@ -289,11 +300,32 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
     backup_hash = compute_sha256(backup_p) if backup_p and backup_p.exists() else ""
     timestamp = _now_iso()
 
+    # Record the actual security boundary that owns this destination. The
+    # install CLI always passes its Cursor workspace target, even when it is
+    # recording an ordinary HOME install, so using target_dir unconditionally
+    # both mislabels ownership and can later block safe updater operations.
+    matching_roots = []
+    for root in allowed_roots:
+        try:
+            if dest_p == root or dest_p.is_relative_to(root):
+                matching_roots.append(root)
+        except AttributeError:  # Python < 3.9 compatibility
+            try:
+                dest_p.relative_to(root)
+                matching_roots.append(root)
+            except ValueError:
+                pass
+    if not matching_roots:
+        raise ValueError(f"Destination has no recorded allowed root: {destination}")
+    recorded_root = max(matching_roots, key=lambda root: len(root.parts))
+
     entry = {
         "agent": agent,
         "destination": str(dest_p),
         "backup": str(backup_p) if backup_p else "",
         "content_hash": content_hash,
+        "content_hash_type": "tree" if dest_p.is_dir() else "file",
+        "target_root": str(recorded_root),
         "backup_hash": backup_hash,
         "installed_at": timestamp,
         "restored": False,

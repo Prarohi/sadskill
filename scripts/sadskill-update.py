@@ -4,8 +4,8 @@
 Update surfaces handled:
   1. installer-managed installs  (recorded in ~/.sadskill/install-manifest.json)
   2. external-manager installs   (npx skills / skills-lock.json) — NEVER
-     silently replaced; apply refuses unless the user passes --adopt to take
-     explicit ownership.
+     silently replaced; apply refuses because a boolean flag is not a safe
+     ownership-transfer protocol.
   3. vendored knowledge          (NOT handled here — reviewed PRs only)
 
 Commands:
@@ -40,11 +40,13 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -70,8 +72,17 @@ HTTP_TIMEOUT = 15
 MAX_REDIRECTS = 3
 MAX_TARBALL_BYTES = 32 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 4096
+MAX_ARCHIVE_DEPTH = 32
+MAX_EXPANSION_RATIO = 1000
 
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+GITHUB_CONTENT_HOSTS = {
+    "api.github.com", "github.com", "codeload.github.com",
+    "release-assets.githubusercontent.com", "objects.githubusercontent.com",
+    "github-releases.githubusercontent.com",
+}
 
 EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_NET, EXIT_INTEGRITY, EXIT_CONFLICT, EXIT_LOCK = (
     0, 1, 2, 3, 4, 5, 6
@@ -104,10 +115,29 @@ class _RedirectCapper(urllib.request.HTTPRedirectHandler):
         count = getattr(req, "_sad_redirects", 0) + 1
         if count > MAX_REDIRECTS:
             raise NetworkError(f"too many redirects (>{MAX_REDIRECTS})")
+        source = _parse_network_url(req.full_url)
+        target = _parse_network_url(newurl)
+        source_is_test = source.scheme == "http" and source.hostname in LOOPBACK_HOSTS
+        if source_is_test:
+            if target.scheme != "http" or target.hostname not in LOOPBACK_HOSTS:
+                raise NetworkError("loopback test request redirected outside loopback")
+        elif target.scheme != "https" or target.hostname.lower() not in GITHUB_CONTENT_HOSTS:
+            raise NetworkError("redirect target is not an approved GitHub HTTPS host")
+        if source.scheme == "https" and target.scheme != "https":
+            raise NetworkError("HTTPS redirect downgrade refused")
+        source_origin = _url_origin(source)
+        target_origin = _url_origin(target)
         try:
             new = super().redirect_request(req, fp, code, msg, headers, newurl)
         except urllib.error.HTTPError as exc:
             raise NetworkError(f"redirect failed: {exc}") from exc
+        if new is None:
+            return None
+        if source_origin != target_origin:
+            for name in ("Authorization", "Cookie", "Proxy-Authorization"):
+                new.remove_header(name)
+                new.headers.pop(name, None)
+                new.unredirected_hdrs.pop(name, None)
         new._sad_redirects = count
         return new
 
@@ -116,8 +146,38 @@ _OPENER = urllib.request.build_opener(_RedirectCapper())
 
 
 def _loopback_allowed(base):
-    parsed = urllib.parse.urlparse(base)
+    try:
+        parsed = _parse_network_url(base)
+    except NetworkError:
+        return False
     return parsed.scheme == "http" and parsed.hostname in LOOPBACK_HOSTS
+
+
+def _parse_network_url(url):
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        parsed.port  # Access validates malformed and out-of-range ports.
+    except (TypeError, ValueError) as exc:
+        raise NetworkError("invalid network URL") from exc
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or any(ord(char) < 0x20 for char in url)):
+        raise NetworkError("unsafe network URL")
+    return parsed
+
+
+def _url_origin(parsed):
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return parsed.scheme.lower(), parsed.hostname.lower(), port
+
+
+def _validate_request_url(url):
+    parsed = _parse_network_url(url)
+    if parsed.scheme == "http" and parsed.hostname in LOOPBACK_HOSTS:
+        return parsed
+    if parsed.scheme == "https" and parsed.hostname.lower() in GITHUB_CONTENT_HOSTS:
+        return parsed
+    raise NetworkError("request URL is not an approved GitHub HTTPS or loopback URL")
 
 
 def _api_base():
@@ -133,12 +193,17 @@ def _api_base():
 
 def _open(req, size_cap, dest_bytes=False):
     """Perform request with timeout; enforce response size cap."""
+    _validate_request_url(req.full_url)
     try:
         resp = _OPENER.open(req, timeout=HTTP_TIMEOUT)
     except urllib.error.HTTPError as exc:
         if exc.code == 403 and exc.headers.get("X-RateLimit-Remaining") == "0":
             raise NetworkError("GitHub API rate limit exceeded") from exc
-        raise NetworkError(f"HTTP {exc.code} for {req.full_url}") from exc
+        parsed = urllib.parse.urlsplit(req.full_url)
+        safe_url = urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, "", "")
+        )
+        raise NetworkError(f"HTTP {exc.code} for {safe_url}") from exc
     except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as exc:
         raise NetworkError(f"network error: {exc}") from exc
 
@@ -163,6 +228,10 @@ def _open(req, size_cap, dest_bytes=False):
 
 
 def http_get_json(url):
+    parsed = _validate_request_url(url)
+    api_base = _parse_network_url(_api_base())
+    if _url_origin(parsed) != _url_origin(api_base):
+        raise NetworkError("metadata request is outside the configured API origin")
     req = urllib.request.Request(url)
     req.add_header("Accept", "application/vnd.github+json")
     token = os.environ.get("GITHUB_TOKEN", "")
@@ -177,9 +246,6 @@ def http_get_json(url):
 
 def http_download(url, size_cap=MAX_TARBALL_BYTES):
     req = urllib.request.Request(url)
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if token and urllib.parse.urlparse(url).hostname not in LOOPBACK_HOSTS:
-        req.add_header("Authorization", "Bearer " + token)
     data, _ = _open(req, size_cap)
     return data
 
@@ -197,12 +263,99 @@ def fetch_release(channel):
     release = payload[0] if isinstance(payload, list) and payload else payload
     if not isinstance(release, dict):
         raise NetworkError("unexpected release payload")
-    # Repo identity verification: release API URLs must reference our repo.
-    evidence = json.dumps(release)
-    if f"/repos/{REPO}/" not in evidence and f"/repos/{REPO}" not in evidence:
-        raise NetworkError(
-            f"release metadata does not reference {REPO}; refusing"
+    return _validate_release(release)
+
+
+def _path_is_repo_release(parsed, endpoint):
+    path = parsed.path.rstrip("/")
+    prefix = f"/repos/{REPO}/releases/"
+    if not path.startswith(prefix):
+        return False
+    suffix = path[len(prefix):]
+    if endpoint == "api":
+        return bool(re.fullmatch(r"[0-9]+", suffix))
+    return endpoint == "web" and suffix.startswith("tag/") and bool(suffix[4:])
+
+
+def _validate_release_url(url, kind, tag):
+    if not isinstance(url, str) or not url:
+        raise NetworkError(f"release metadata is missing its {kind} URL")
+    parsed = _parse_network_url(url)
+    host = parsed.hostname.lower()
+    if kind == "api":
+        valid = (
+            parsed.scheme == "https" and host == "api.github.com"
+            and _path_is_repo_release(parsed, "api")
         )
+    elif kind == "web":
+        valid = (
+            parsed.scheme == "https" and host == "github.com"
+            and parsed.path == f"/{REPO}/releases/tag/{tag}"
+            and not parsed.query and not parsed.fragment
+        )
+    else:
+        api_base = _parse_network_url(_api_base())
+        if parsed.scheme == "http" and host in LOOPBACK_HOSTS:
+            valid = (
+                _url_origin(parsed) == _url_origin(api_base)
+                and parsed.path.startswith("/")
+            )
+        elif parsed.scheme == "https" and host == "api.github.com":
+            valid = parsed.path == f"/repos/{REPO}/tarball/{tag}"
+        elif parsed.scheme == "https" and host == "codeload.github.com":
+            valid = parsed.path in (
+                f"/{REPO}/legacy.tar.gz/refs/tags/{tag}",
+                f"/{REPO}/tar.gz/refs/tags/{tag}",
+            )
+        else:
+            valid = False
+    if not valid or parsed.username is not None or parsed.password is not None:
+        raise NetworkError(f"release {kind} URL does not match the official repository")
+    return parsed
+
+
+def _validate_release_asset_url(url, tag):
+    parsed = _parse_network_url(url)
+    host = parsed.hostname.lower()
+    api_base = _parse_network_url(_api_base())
+    if parsed.scheme == "http" and host in LOOPBACK_HOSTS:
+        valid = _url_origin(parsed) == _url_origin(api_base)
+    else:
+        valid = (
+            parsed.scheme == "https" and host == "github.com"
+            and parsed.path.startswith(f"/{REPO}/releases/download/{tag}/")
+        )
+    if not valid:
+        raise core.IntegrityError("SHA256SUMS URL is not from the official release")
+
+
+def _validate_release(release, expected_tag=None):
+    tag = release.get("tag_name")
+    if not isinstance(tag, str) or not tag:
+        raise NetworkError("release metadata is missing tag_name")
+    try:
+        core.parse_version(tag)
+    except ValueError as exc:
+        raise NetworkError("release tag is not a supported version") from exc
+    if expected_tag is not None and tag != expected_tag:
+        raise NetworkError("release tag does not match the requested version")
+    _validate_release_url(release.get("url"), "api", tag)
+    _validate_release_url(release.get("html_url"), "web", tag)
+    tarball = release.get("tarball_url")
+    if not isinstance(tarball, str) or not tarball:
+        raise NetworkError("release has no tarball_url")
+    _validate_release_url(tarball, "tarball", tag)
+    assets = release.get("assets", [])
+    if not isinstance(assets, list):
+        raise NetworkError("release assets must be a list")
+    for asset in assets:
+        if not isinstance(asset, dict) or not isinstance(asset.get("name", ""), str):
+            raise NetworkError("release asset metadata is malformed")
+        if asset.get("name", "").strip().lower() == "sha256sums.txt":
+            url = asset.get("browser_download_url")
+            if not isinstance(url, str) or not url:
+                raise core.IntegrityError("SHA256SUMS asset has no download URL")
+            _validate_release_asset_url(url, tag)
     return release
 
 
@@ -217,22 +370,38 @@ def release_version(release):
 def release_digest(release, tarball_url):
     """Return expected sha256 for the tarball from a SHA256SUMS asset, else None."""
     assets = release.get("assets") or []
-    for asset in assets:
-        name = asset.get("name", "")
-        if name.strip().lower() == "sha256sums.txt":
-            url = asset.get("browser_download_url")
-            if not url:
-                return None
-            data, _ = _open(
-                urllib.request.Request(url), MAX_JSON_BYTES
+    matches = [asset for asset in assets
+               if asset.get("name", "").strip().lower() == "sha256sums.txt"]
+    if len(matches) > 1:
+        raise core.IntegrityError("release contains duplicate SHA256SUMS assets")
+    if matches:
+        url = matches[0].get("browser_download_url")
+        if not url:
+            raise core.IntegrityError("SHA256SUMS asset has no download URL")
+        _validate_release_asset_url(url, release.get("tag_name", ""))
+        data, _ = _open(urllib.request.Request(url), MAX_JSON_BYTES)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise core.IntegrityError("SHA256SUMS is not valid UTF-8") from exc
+        tar_name = os.path.basename(urllib.parse.urlsplit(tarball_url).path)
+        found = None
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            match = re.fullmatch(r"([0-9a-fA-F]{64})\s+\*?(.+)", line)
+            if not match:
+                raise core.IntegrityError("SHA256SUMS contains a malformed entry")
+            if match.group(2).strip() == tar_name:
+                if found is not None:
+                    raise core.IntegrityError("SHA256SUMS has duplicate artifact entries")
+                found = match.group(1).lower()
+        if found is None:
+            raise core.IntegrityError(
+                f"SHA256SUMS does not contain the requested artifact {tar_name}"
             )
-            text = data.decode("utf-8", errors="replace")
-            tar_name = os.path.basename(urllib.parse.urlparse(tarball_url).path)
-            for line in text.splitlines():
-                fields = line.split()
-                if len(fields) == 2 and fields[1] == tar_name:
-                    return fields[0].lower()
-            return None
+        return found
     return None
 
 
@@ -242,44 +411,67 @@ def release_digest(release, tarball_url):
 
 def _member_ok(member, seen_names):
     name = member.name
-    if name.startswith("/") or "\\" in name:
+    if not name or name.startswith("/") or "\\" in name or "\x00" in name:
         raise core.IntegrityError(f"archive member unsafe path: {name!r}")
-    parts = [p for p in name.split("/") if p not in ("", ".")]
-    if any(p == ".." for p in parts):
+    parts = [unicodedata.normalize("NFC", p)
+             for p in name.split("/") if p not in ("", ".")]
+    if (not parts or any(p in ("..", "") or ":" in p
+                          or any(ord(char) < 0x20 for char in p)
+                          for p in parts)):
         raise core.IntegrityError(f"archive member escapes root: {name!r}")
     norm = "/".join(parts)
-    if norm in seen_names:
+    collision_key = norm.casefold()
+    if collision_key in seen_names:
         raise core.IntegrityError(f"duplicate archive member: {norm}")
     if member.issym() or member.islnk():
         raise core.IntegrityError(f"archive member is a link: {name!r}")
     if member.isdev() or member.isfifo():
         raise core.IntegrityError(f"archive member is device/fifo: {name!r}")
-    if member.size > MAX_TARBALL_BYTES:
+    if member.size < 0 or member.size > MAX_TARBALL_BYTES:
         raise core.IntegrityError(f"archive member too large: {name!r}")
-    seen_names.add(norm)
+    if len(parts) > MAX_ARCHIVE_DEPTH:
+        raise core.IntegrityError(f"archive member is nested too deeply: {name!r}")
+    seen_names.add(collision_key)
     return parts, norm
 
 
-def stage_archive(tar_bytes):
-    """Validate + extract into a fresh staging dir. Returns (stage_dir, rel_files).
+def stage_archive(tar_bytes, write=True):
+    """Validate an archive and optionally extract it into a fresh staging dir.
 
-    Only regular files are written. Never writes outside the staging dir and
-    never executes anything.
+    With ``write=False`` this performs bounded, read-only metadata validation
+    for plan. With ``write=True`` only validated regular files are written,
+    under the private updater staging directory. Downloaded content is never
+    executed.
     """
-    stage = Path(tempfile.mkdtemp(prefix="sadskill-stage.", dir=str(STATE_DIR)))
+    if len(tar_bytes) > MAX_TARBALL_BYTES:
+        raise core.IntegrityError("compressed archive exceeds size limit")
     seen = set()
     top_dirs = set()
     members = []
+    total_size = 0
     try:
         with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
             for member in tar:
+                if len(members) >= MAX_ARCHIVE_MEMBERS:
+                    raise core.IntegrityError("archive has too many members")
                 parts, norm = _member_ok(member, seen)
+                if member.isfile():
+                    total_size += member.size
+                    if total_size > MAX_UNCOMPRESSED_BYTES:
+                        raise core.IntegrityError(
+                            "archive exceeds total uncompressed size limit"
+                        )
                 if member.isdir():
                     top_dirs.add(parts[0])
+                elif not member.isfile():
+                    raise core.IntegrityError(
+                        f"archive member is not a regular file: {norm}"
+                    )
                 members.append((member, parts, norm))
     except (tarfile.TarError, EOFError, OSError) as exc:
-        shutil.rmtree(stage, ignore_errors=True)
         raise core.IntegrityError(f"archive unreadable: {exc}") from exc
+    if total_size and total_size / max(1, len(tar_bytes)) > MAX_EXPANSION_RATIO:
+        raise core.IntegrityError("archive expansion ratio exceeds limit")
 
     rel_files = []
     strip = 0
@@ -288,7 +480,6 @@ def stage_archive(tar_bytes):
         if len(top_dirs) == 1 and next(iter(top_dirs)) not in ("skills", "commands"):
             strip = 1
         else:
-            shutil.rmtree(stage, ignore_errors=True)
             raise core.IntegrityError(
                 f"archive has unexpected top-level layout: {sorted(top_dirs)}"
             )
@@ -296,35 +487,53 @@ def stage_archive(tar_bytes):
         if len(file_tops) == 1 and next(iter(file_tops)) not in ("skills", "commands"):
             strip = 1
         else:
-            shutil.rmtree(stage, ignore_errors=True)
             raise core.IntegrityError(
                 f"archive has unexpected top-level layout: {sorted(file_tops)}"
             )
+    member_paths = {}
     for member, parts, norm in members:
         rel = "/".join(parts[strip:])
         if not rel:
             continue
         if member.isdir():
-            (stage / rel).mkdir(parents=True, exist_ok=True)
             continue
-        if not member.isfile():
-            shutil.rmtree(stage, ignore_errors=True)
-            raise core.IntegrityError(
-                f"archive member is not a regular file: {norm}"
-            )
-        dest = stage / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        fobj = None
-        try:
-            with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar2:
-                fobj = tar2.extractfile(member)
+        rel_files.append(rel)
+        member_paths[norm] = rel
+    file_keys = {path.casefold() for path in rel_files}
+    for path in rel_files:
+        parts = path.split("/")
+        for index in range(1, len(parts)):
+            if "/".join(parts[:index]).casefold() in file_keys:
+                raise core.IntegrityError(
+                    f"archive file is also used as a parent directory: {path}"
+                )
+    if not write:
+        return None, rel_files
+
+    stage = Path(tempfile.mkdtemp(prefix="sadskill-stage.", dir=str(STATE_DIR)))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as tar:
+            for member in tar:
+                norm = "/".join(
+                    unicodedata.normalize("NFC", part)
+                    for part in member.name.split("/") if part not in ("", ".")
+                )
+                rel = member_paths.get(norm)
+                if rel is None:
+                    continue
+                dest = stage / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                fobj = tar.extractfile(member)
                 if fobj is None:
                     raise core.IntegrityError(f"cannot read member: {norm}")
-                dest.write_bytes(fobj.read())
-        except (tarfile.TarError, OSError) as exc:
-            shutil.rmtree(stage, ignore_errors=True)
-            raise core.IntegrityError(f"archive extraction failed: {exc}") from exc
-        rel_files.append(rel)
+                data = fobj.read(member.size + 1)
+                if len(data) != member.size:
+                    raise core.IntegrityError(f"archive member size mismatch: {norm}")
+                with dest.open("xb") as output:
+                    output.write(data)
+    except (tarfile.TarError, OSError) as exc:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise core.IntegrityError(f"archive extraction failed: {exc}") from exc
     return stage, rel_files
 
 
@@ -370,8 +579,12 @@ def skills_lock_active():
         return False
     try:
         data = json.loads(SKILLS_LOCK_FILE.read_bytes().decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return False
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise core.ManifestError(
+            f"cannot safely determine external skills-manager ownership: {exc}"
+        ) from exc
+    if not isinstance(data, (dict, list)):
+        raise core.ManifestError("external skills-manager lock has invalid structure")
     return bool(data)
 
 
@@ -583,6 +796,8 @@ def cmd_check(args):
         "latest": latest,
         "up_to_date": up_to_date,
         "release_url": release.get("html_url"),
+        "artifact_trust": _artifact_trust_hint(release),
+        "publisher_authenticated": False,
         "modified_installation": False,
     }, EXIT_OK
 
@@ -595,24 +810,16 @@ def cmd_plan(args):
     current = installed_version(manifest)
     if channel in ("stable", "beta"):
         release = fetch_release(channel)
-        target_ver = core.version_text(release_version(release))
-        tarball_url = release.get("tarball_url")
-        if not tarball_url:
-            raise NetworkError("release has no tarball_url")
     else:
         target_ver = args.version
-        tarball_url = None
-    # Download + stage without writing outside ~/.sadskill staging.
-    if tarball_url:
-        tar_bytes = _download_verified(release, tarball_url)
-        stage, rel_files = stage_archive(tar_bytes)
-    else:
-        raise UsageError("pinned channel plans require a network release lookup")
-    try:
-        actions = build_transition(manifest, by_agent, rel_files)
-        conflicts = conflicts_for(actions)
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        release = _fetch_pinned(args.version)
+    target_ver = core.version_text(release_version(release))
+    tarball_url = release.get("tarball_url")
+    tar_bytes, artifact_trust = _download_verified(release, tarball_url)
+    # A plan validates the bounded archive in memory and never creates staging files.
+    _stage, rel_files = stage_archive(tar_bytes, write=False)
+    actions = build_transition(manifest, by_agent, rel_files)
+    conflicts = conflicts_for(actions)
     return {
         "command": "plan",
         "from_version": current,
@@ -630,6 +837,8 @@ def cmd_plan(args):
         "backup_strategy": "per-destination copies under "
                            "~/.sadskill/backups/update-<version>-<ts>/",
         "rollback": "sadskill-update.py rollback (journal-based)",
+        "artifact_trust": artifact_trust,
+        "publisher_authenticated": False,
         "zero_writes": True,
     }, EXIT_OK
 
@@ -654,21 +863,42 @@ def _download_verified(release, tarball_url):
             raise core.IntegrityError(
                 f"tarball digest mismatch: expected {expected}, got {actual}"
             )
-    return tar_bytes
+        return tar_bytes, "SOURCE_CHECKSUM_MATCHED"
+    return tar_bytes, "TRANSPORT_ONLY"
+
+
+def _artifact_trust_hint(release):
+    if any(asset.get("name", "").strip().lower() == "sha256sums.txt"
+           for asset in release.get("assets", [])):
+        return "SHA256SUMS_AVAILABLE_NOT_VALIDATED"
+    return "TRANSPORT_ONLY"
 
 
 def cmd_apply(args):
     if args.dry_run:
         return cmd_plan(args)[0], EXIT_OK
+    with core.LockFile(MANIFEST_FILE):
+        return _cmd_apply_locked(args)
+
+
+def _cmd_apply_locked(args):
     channel = args.channel or read_channel() or "stable"
     if channel == "pinned" and not args.version:
         raise UsageError("pinned channel requires --version for apply")
     hosts, manifest, by_agent = detect_hosts()
 
-    # Ownership preflight.
+    prior_journal = core.Journal.load(JOURNAL_FILE)
+    if prior_journal and prior_journal.get("state") not in ("done", "rolled_back"):
+        return {
+            "command": "apply", "refused": True,
+            "reasons": ["an unresolved updater journal requires recovery"],
+            "hint": "run sadskill-update.py rollback and inspect its result",
+        }, EXIT_CONFLICT
+
+    # External manager ownership cannot be transferred by a boolean override.
     external = skills_lock_active()
     unmanaged = unmanaged_dests(manifest, by_agent)
-    if (external or unmanaged) and not args.adopt:
+    if external or unmanaged:
         reasons = []
         if external:
             reasons.append(
@@ -680,7 +910,8 @@ def cmd_apply(args):
         return {
             "command": "apply", "refused": True,
             "reasons": reasons,
-            "hint": "pass --adopt to take explicit ownership of these files",
+            "hint": "remove or update the installation through its owning manager; "
+                    "safe manager transfer is not supported",
         }, EXIT_ERROR
 
     if channel in ("stable", "beta"):
@@ -706,7 +937,7 @@ def cmd_apply(args):
                 "message": f"installation already at {current}; nothing to do",
             }, EXIT_OK
 
-    tar_bytes = _download_verified(release, tarball_url)
+    tar_bytes, artifact_trust = _download_verified(release, tarball_url)
     stage, rel_files = stage_archive(tar_bytes)
     try:
         actions = build_transition(manifest, by_agent, rel_files)
@@ -716,6 +947,17 @@ def cmd_apply(args):
                 "reasons": ["no installer-managed destinations in manifest"],
                 "hint": "run ./install.sh first or pass --adopt",
             }, EXIT_ERROR
+        destinations = {}
+        for action in actions:
+            for dest, entry, agent in action["targets"]:
+                dest = _validate_owned_destination(dest, entry)
+                destinations[str(dest)] = {
+                    "agent": agent,
+                    "entry_destination": entry["destination"],
+                    "target_root": entry.get(
+                        "target_root", str(Path.home().resolve())
+                    ),
+                }
         conflicts = conflicts_for(actions)
         if conflicts and not args.force:
             return {
@@ -724,96 +966,172 @@ def cmd_apply(args):
                         "reviewing (your modifications will be backed up)",
             }, EXIT_CONFLICT
 
+        _assert_no_symlink_components(STATE_DIR)
+        backups_dir = STATE_DIR / "backups" / f"update-{to_version}-{time.time_ns()}"
         journal = Journal_path()
         journal.begin(current, to_version, str(stage), REPO, channel)
+        journal.data["backups_dir"] = str(backups_dir)
+        journal.data["backup_map"] = {}
+        journal.data["metadata_backup_map"] = {}
+        journal._flush()
         try:
             journal.step("staged", {"files": len(rel_files)})
-            backups_dir = STATE_DIR / "backups" / f"update-{to_version}-{time.time_ns()}"
             backups_dir.mkdir(parents=True, exist_ok=False)
             journal.step("backing_up", {"backups_dir": str(backups_dir)})
 
-            # Pre-change checkpoints: copy each affected destination BEFORE apply.
-            for action in actions:
-                for dest, entry, agent in action["targets"]:
-                    _backup_dest(dest, backups_dir, agent)
-            journal.step("backed_up", {"backups_dir": str(backups_dir)})
-            journal.data["backups_dir"] = str(backups_dir)
+            # Exact destination->backup mapping is durable before any replacement.
+            for index, (dest_str, record) in enumerate(destinations.items(), 1):
+                backup = _backup_dest(dest_str, backups_dir, f"destination-{index:06d}")
+                backup.update(record)
+                journal.data["backup_map"][dest_str] = backup
+            for key, state_path in (("manifest", MANIFEST_FILE),
+                                    ("install_state", INSTALL_STATE_FILE)):
+                backup = _backup_dest(
+                    state_path, backups_dir, f"metadata-{key}"
+                )
+                journal.data["metadata_backup_map"][str(state_path)] = backup
+            journal.step("backed_up", {
+                "destinations": len(journal.data["backup_map"]),
+                "metadata": len(journal.data["metadata_backup_map"]),
+            })
             journal._flush()
 
             apply_failure_env_fault()  # test hook: simulated crash after backup
 
             applied = {}
+            mutation_index = 0
             for action in actions:
                 for dest, entry, agent in action["targets"]:
+                    dest = _validate_owned_destination(dest, entry)
                     staged = stage / action["source"]
+                    mutation_index += 1
+                    old_hash = (
+                        core.compute_sha256(dest)
+                        if dest.exists() else None
+                    )
+                    new_hash = core.compute_sha256(staged)
+                    journal.step("mutation_intent", {
+                        "category": "destination",
+                        "destination": str(dest),
+                        "entry_destination": entry["destination"],
+                        "agent": agent,
+                        "old_sha256": old_hash,
+                        "new_sha256": new_hash,
+                    })
                     written = _atomic_install_file(staged, Path(dest))
                     applied[str(dest)] = core.compute_sha256(written)
-            journal.step("applied", {"destinations": applied})
+                    journal.step("mutation_applied", {
+                        "category": "destination",
+                        "destination": str(dest),
+                        "sha256": applied[str(dest)],
+                    })
+                    if os.environ.get(FAULT_ENV) in (
+                        "after_first_replace" if mutation_index == 1 else "",
+                        f"after_replace:{mutation_index}",
+                    ):
+                        raise RuntimeError(
+                            f"simulated crash after replacement {mutation_index}"
+                        )
 
-            # Manifest update under the exclusive lock.
-            with core.LockFile(MANIFEST_FILE):
-                manifest = core.load_manifest_data(MANIFEST_FILE)
-                for dest_str, new_hash in applied.items():
-                    for entry in manifest["entries"]:
-                        if entry["destination"] == dest_str or (
-                            entry.get("agent") in _SKILL_AGENTS
-                            and dest_str.endswith("/SKILL.md")
-                            and Path(dest_str).parent == Path(entry["destination"])
-                        ):
-                            entry["backup_hash"] = entry.get("content_hash", "")
-                            entry["content_hash"] = new_hash
-                            entry["installed_at"] = time.strftime(
-                                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-                            )
-                            entry.setdefault("updates", []).append(
-                                {"version": to_version,
-                                 "at": entry["installed_at"]}
-                            )
-                core.save_manifest_data(MANIFEST_FILE, manifest)
+            updated_skill_roots = {
+                record["entry_destination"] for record in destinations.values()
+                if record["agent"] in _SKILL_AGENTS
+            }
+            updated_exact = {
+                dest for dest, record in destinations.items()
+                if record["agent"] not in _SKILL_AGENTS
+            }
+            manifest = core.load_manifest_data(MANIFEST_FILE)
+            for entry in manifest["entries"]:
+                entry_dest = entry["destination"]
+                if entry.get("agent") in _SKILL_AGENTS and entry_dest in updated_skill_roots:
+                    new_hash = core.compute_sha256(entry_dest)
+                    new_hash_type = "tree"
+                elif entry_dest in updated_exact:
+                    new_hash = core.compute_sha256(entry_dest)
+                    new_hash_type = "tree" if Path(entry_dest).is_dir() else "file"
+                else:
+                    continue
+                entry["backup_hash"] = entry.get("content_hash", "")
+                entry["content_hash"] = new_hash
+                entry["content_hash_type"] = new_hash_type
+                entry.setdefault("target_root", str(Path.home().resolve()))
+                entry["installed_at"] = time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                )
+                entry.setdefault("updates", []).append(
+                    {"version": to_version, "at": entry["installed_at"]}
+                )
+            core.validate_manifest_data(manifest)
+            manifest_text = json.dumps(manifest, indent=2) + "\n"
+            manifest_new_hash = core.compute_sha256_of_bytes(
+                manifest_text.encode("utf-8")
+            )
+            manifest_old_hash = (
+                core.compute_sha256(MANIFEST_FILE)
+                if MANIFEST_FILE.exists() else None
+            )
+            journal.step("mutation_intent", {
+                "category": "metadata", "destination": str(MANIFEST_FILE),
+                "backup_key": str(MANIFEST_FILE),
+                "old_sha256": manifest_old_hash,
+                "new_sha256": manifest_new_hash,
+            })
+            core.atomic_write_text(MANIFEST_FILE, manifest_text)
+            journal.step("mutation_applied", {
+                "category": "metadata", "destination": str(MANIFEST_FILE),
+                "sha256": manifest_new_hash,
+            })
             journal.step("manifest_updated")
 
-            core.atomic_write_text(
-                INSTALL_STATE_FILE,
-                json.dumps(
-                    {
-                        "version": to_version,
-                        "updated_at": time.strftime(
-                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
-                        ),
-                        "channel": channel,
-                    },
-                    indent=2,
-                )
-                + "\n",
+            state_text = json.dumps({
+                "version": to_version,
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "channel": channel,
+            }, indent=2) + "\n"
+            state_new_hash = core.compute_sha256_of_bytes(state_text.encode("utf-8"))
+            state_old_hash = (
+                core.compute_sha256(INSTALL_STATE_FILE)
+                if INSTALL_STATE_FILE.exists() else None
             )
+            journal.step("mutation_intent", {
+                "category": "metadata", "destination": str(INSTALL_STATE_FILE),
+                "backup_key": str(INSTALL_STATE_FILE),
+                "old_sha256": state_old_hash,
+                "new_sha256": state_new_hash,
+            })
+            core.atomic_write_text(INSTALL_STATE_FILE, state_text)
+            journal.step("mutation_applied", {
+                "category": "metadata", "destination": str(INSTALL_STATE_FILE),
+                "sha256": state_new_hash,
+            })
             journal.step("install_state_written")
+            history_append({
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "action": "update", "from": current, "to": to_version,
+                "channel": channel, "conflicts_forced": bool(conflicts),
+                "artifact_trust": artifact_trust,
+            })
             journal.finish("done")
-            history_append(
-                {
-                    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "action": "update",
-                    "from": current,
-                    "to": to_version,
-                    "channel": channel,
-                    "conflicts_forced": bool(conflicts),
-                }
-            )
             return {
                 "command": "apply", "applied": True,
                 "from_version": current, "to_version": to_version,
                 "backups_dir": str(backups_dir), "conflicts_forced": bool(conflicts),
+                "artifact_trust": artifact_trust,
+                "publisher_authenticated": False,
             }, EXIT_OK
         except Exception as exc:
-            journal.step("failure", {"error": str(exc)})
-            journal.finish("interrupted")
-            history_append(
-                {
+            try:
+                journal.step("failure", {"error": str(exc)})
+                journal.finish("interrupted")
+                history_append({
                     "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "action": "update_interrupted",
-                    "from": current, "to": to_version,
-                    "error": str(exc),
-                }
-            )
+                    "action": "update_interrupted", "from": current,
+                    "to": to_version, "error": str(exc),
+                })
+            except Exception:
+                # The last durable per-file intent remains the recovery source.
+                pass
             if isinstance(exc, (core.IntegrityError, NetworkError, core.LockError, ConflictError)):
                 raise
             raise ApplyFailure(str(exc)) from exc
@@ -838,127 +1156,399 @@ def _fetch_pinned(version):
     payload = http_get_json(url)
     if not isinstance(payload, dict) or "tag_name" not in payload:
         raise NetworkError(f"no release found for version {version}")
-    evidence = json.dumps(payload)
-    if f"/repos/{REPO}/" not in evidence:
-        raise NetworkError(f"release metadata does not reference {REPO}")
-    return payload
+    return _validate_release(payload, expected_tag=f"v{version.lstrip('v')}")
 
 
-def _backup_dest(dest, backups_dir, agent):
+_AGENT_PATH_MARKERS = {
+    "claude": (".claude", "skills", "sadskill"),
+    "codex": (".codex", "skills", "sadskill"),
+    "gemini": (".gemini", "skills", "sadskill"),
+    "antigravity": (".gemini", "antigravity", "skills", "sadskill"),
+    "cursor_skill": (".cursor", "skills", "sadskill"),
+    "claude_command": (".claude", "commands"),
+    "codex_prompt": (".codex", "prompts"),
+    "claude_hook": (".claude",),
+}
+
+
+def _has_path_marker(path, marker):
+    parts = Path(path).parts
+    width = len(marker)
+    return any(tuple(parts[index:index + width]) == marker
+               for index in range(max(0, len(parts) - width + 1)))
+
+
+def _assert_no_symlink_components(path):
+    path = Path(path)
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise core.IntegrityError(f"cannot inspect path component {current}: {exc}") from exc
+        if stat.S_ISLNK(mode):
+            raise core.IntegrityError(f"symlink path component is not safe: {current}")
+
+
+def _assert_no_symlinks_below(path):
+    path = Path(path)
+    _assert_no_symlink_components(path)
+    if not path.is_dir():
+        return
+    for root, dirs, files in os.walk(path, followlinks=False):
+        for name in dirs + files:
+            if (Path(root) / name).is_symlink():
+                raise core.IntegrityError(
+                    f"symlink inside managed destination is not safe: {Path(root) / name}"
+                )
+
+
+def _validate_owned_destination(dest, entry):
     dest = Path(dest)
+    root = Path(entry.get("destination", ""))
+    agent = entry.get("agent", "")
+    if not dest.is_absolute() or ".." in dest.parts:
+        raise core.IntegrityError(f"destination is not a canonical absolute path: {dest}")
+    marker = _AGENT_PATH_MARKERS.get(agent)
+    if not marker or not _has_path_marker(root, marker):
+        raise core.IntegrityError(
+            f"manifest path does not match the recorded {agent!r} installation type"
+        )
+    if agent in _SKILL_AGENTS:
+        if root.name != "sadskill" or (dest != root and root not in dest.parents):
+            raise core.IntegrityError("skill update target is outside its owned root")
+    elif dest != root:
+        raise core.IntegrityError("non-skill update target differs from its manifest path")
+    target_root = Path(entry.get("target_root") or Path.home())
+    try:
+        dest.resolve(strict=False).relative_to(target_root.resolve(strict=False))
+    except ValueError as exc:
+        raise core.IntegrityError(
+            f"destination is outside its recorded target root {target_root}: {dest}"
+        ) from exc
+    if not entry.get("target_root"):
+        try:
+            dest.resolve(strict=False).relative_to(Path.home().resolve())
+        except ValueError as exc:
+            raise core.IntegrityError(
+                f"legacy manifest destination outside HOME is untrusted: {dest}"
+            ) from exc
+    _assert_no_symlink_components(root)
+    _assert_no_symlink_components(dest)
+    return dest
+
+
+def _sync_file(path):
+    fd = os.open(str(path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _sync_tree(path):
+    path = Path(path)
+    if path.is_file():
+        _sync_file(path)
+        core.fsync_dir(path.parent)
+        return
+    for root, dirs, files in os.walk(path, topdown=False, followlinks=False):
+        for name in files:
+            _sync_file(Path(root) / name)
+        core.fsync_dir(root)
+
+
+def _backup_dest(dest, backups_dir, backup_id):
+    dest = Path(dest)
+    _assert_no_symlink_components(dest)
     if not dest.exists():
-        return None
-    rel = dest.name or "file"
-    target = backups_dir / f"{agent}--{rel}"
-    n = 1
-    while target.exists():
-        n += 1
-        target = backups_dir / f"{agent}--{rel}--{n}"
+        return {"existed": False, "backup_path": None, "sha256": None,
+                "kind": None}
+    _assert_no_symlinks_below(dest)
+    if not dest.is_file() and not dest.is_dir():
+        raise core.IntegrityError(f"unsupported destination type: {dest}")
+    kind = "tree" if dest.is_dir() else "file"
+    target_dir = Path(backups_dir) / "destinations"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{backup_id}.backup"
     if dest.is_dir():
-        shutil.copytree(dest, target, symlinks=True)
+        shutil.copytree(dest, target, symlinks=False)
     else:
         shutil.copy2(dest, target)
-    return target
+    _sync_tree(target)
+    original_hash = core.compute_sha256(dest)
+    backup_hash = core.compute_sha256(target)
+    if not original_hash or original_hash != backup_hash:
+        raise core.IntegrityError(f"backup verification failed for {dest}")
+    return {"existed": True, "backup_path": str(target),
+            "sha256": original_hash, "kind": kind}
 
 
 def _atomic_install_file(staged, dest):
     """Copy a staged file to dest atomically; returns written path."""
     dest = Path(dest)
-    if dest.exists() and dest.is_dir():
-        dest = dest / staged.name
+    _assert_no_symlink_components(dest)
+    if dest.exists() and not dest.is_file():
+        raise core.IntegrityError(f"update target is not a regular file: {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".update-tmp.", dir=str(dest.parent))
-    os.close(fd)
-    shutil.copyfile(staged, tmp)
-    if staged.name == "git-guardrail.sh":
-        os.chmod(tmp, 0o755)
-    os.replace(tmp, str(dest))
-    core.fsync_dir(dest.parent)
+    try:
+        os.close(fd)
+        shutil.copyfile(staged, tmp)
+        if dest.exists():
+            mode = stat.S_IMODE(dest.stat().st_mode)
+        else:
+            mode = 0o755 if staged.name == "git-guardrail.sh" else 0o644
+        os.chmod(tmp, mode)
+        _sync_file(tmp)
+        os.replace(tmp, str(dest))
+        core.fsync_dir(dest.parent)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return dest
 
 
 def cmd_rollback(args):
+    with core.LockFile(MANIFEST_FILE):
+        return _cmd_rollback_locked(args)
+
+
+def _rollback_backup_record(record, backups_dir):
+    """Validate and verify an exact journal backup before any rollback write."""
+    if not isinstance(record, dict) or not isinstance(record.get("existed"), bool):
+        raise core.IntegrityError("rollback backup record is malformed")
+    if not record["existed"]:
+        if record.get("backup_path") is not None or record.get("sha256") is not None:
+            raise core.IntegrityError("absent rollback backup has unexpected data")
+        return None
+    backup_path = record.get("backup_path")
+    if not isinstance(backup_path, str) or not backup_path:
+        raise core.IntegrityError("rollback backup path is missing")
+    backup = Path(backup_path)
+    root = Path(backups_dir).resolve(strict=True)
+    _assert_no_symlink_components(backup)
+    try:
+        backup.resolve(strict=True).relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise core.IntegrityError("rollback backup escapes the journal backup directory") from exc
+    if record.get("kind") != "file" or not backup.is_file():
+        raise core.IntegrityError("rollback backup is not a regular file")
+    expected = record.get("sha256")
+    actual = core.compute_sha256(backup)
+    if not isinstance(expected, str) or actual != expected:
+        raise core.IntegrityError(f"rollback backup verification failed: {backup}")
+    return backup
+
+
+def _rollback_current_hash(dest):
+    dest = Path(dest)
+    _assert_no_symlink_components(dest)
+    if not dest.exists():
+        return None
+    if not dest.is_file():
+        raise core.IntegrityError(f"rollback target is not a regular file: {dest}")
+    return core.compute_sha256(dest)
+
+
+def _restore_rollback_file(dest, record, backup):
+    dest = Path(dest)
+    _assert_no_symlink_components(dest)
+    if not record["existed"]:
+        try:
+            dest.unlink()
+        except FileNotFoundError:
+            pass
+        core.fsync_dir(dest.parent)
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".rollback-tmp.", dir=str(dest.parent))
+    try:
+        os.close(fd)
+        shutil.copyfile(backup, tmp)
+        os.chmod(tmp, stat.S_IMODE(backup.stat().st_mode))
+        _sync_file(tmp)
+        os.replace(tmp, str(dest))
+        core.fsync_dir(dest.parent)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _cmd_rollback_locked(args):
     journal_data = core.Journal.load(JOURNAL_FILE)
     if journal_data is None:
         return {
             "command": "rollback", "performed": False,
             "reason": "no update journal found",
         }, EXIT_ERROR
+    if journal_data.get("state") == "rolled_back":
+        return {
+            "command": "rollback", "performed": False,
+            "reason": "the last update is already rolled back",
+        }, EXIT_OK
+    if (journal_data.get("journal_version") != 2
+            or not isinstance(journal_data.get("backup_map"), dict)
+            or not isinstance(journal_data.get("metadata_backup_map"), dict)):
+        return {
+            "command": "rollback", "performed": False,
+            "reason": "journal predates exact backup mappings; automatic rollback is unsafe",
+            "hint": "preserve the installation and recover its paths from the saved backup manually",
+        }, EXIT_ERROR
     backups_dir = journal_data.get("backups_dir")
-    if not backups_dir or not Path(backups_dir).is_dir():
+    if not isinstance(backups_dir, str):
         return {
             "command": "rollback", "performed": False,
             "reason": "journal has no usable backups directory",
         }, EXIT_ERROR
-    # Restore: journal 'applied' step lists post-apply hashes; backups map
-    # agent--<name> files created pre-apply.
-    applied = {}
+    backups = Path(backups_dir)
+    _assert_no_symlink_components(backups)
+    expected_backups_root = (STATE_DIR / "backups").resolve(strict=False)
+    try:
+        backups.resolve(strict=True).relative_to(expected_backups_root)
+    except (OSError, ValueError) as exc:
+        raise core.IntegrityError("journal backup directory is outside Sadskill state") from exc
+    if not backups.is_dir():
+        return {
+            "command": "rollback", "performed": False,
+            "reason": "journal has no usable backups directory",
+        }, EXIT_ERROR
+
+    intent_by_target = {}
     for step in journal_data.get("steps", []):
-        if step.get("name") == "applied":
-            applied = step.get("payload", {}).get("destinations", {})
-    hosts, manifest, by_agent = detect_hosts()
-    conflicts = []
-    for dest_str, applied_hash in applied.items():
+        if not isinstance(step, dict) or step.get("name") != "mutation_intent":
+            continue
+        payload = step.get("payload")
+        if not isinstance(payload, dict):
+            raise core.IntegrityError("journal mutation intent is malformed")
+        category = payload.get("category")
+        dest_str = payload.get("destination")
+        if category not in ("destination", "metadata") or not isinstance(dest_str, str):
+            raise core.IntegrityError("journal mutation intent has invalid target")
         dest = Path(dest_str)
-        if not dest.exists():
-            continue
-        try:
-            current_hash = core.compute_sha256(dest)
-        except core.IntegrityError:
-            conflicts.append(str(dest))
-            continue
-        if current_hash != applied_hash:
-            conflicts.append(str(dest))
+        if not dest.is_absolute() or ".." in dest.parts:
+            raise core.IntegrityError("journal mutation target is not an absolute safe path")
+        old_hash = payload.get("old_sha256")
+        new_hash = payload.get("new_sha256")
+        if old_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", str(old_hash)):
+            raise core.IntegrityError("journal old hash is malformed")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(new_hash)):
+            raise core.IntegrityError("journal new hash is malformed")
+        key = (category, dest_str)
+        intent = {"category": category, "destination": dest_str,
+                  "old_sha256": old_hash, "new_sha256": new_hash}
+        prior = intent_by_target.get(key)
+        if prior is not None and prior != intent:
+            raise core.IntegrityError("journal has inconsistent mutation intents")
+        intent_by_target[key] = intent
+
+    rollback_targets = []
+    for (category, dest_str), intent in intent_by_target.items():
+        mapping_name = "backup_map" if category == "destination" else "metadata_backup_map"
+        mapping = journal_data[mapping_name]
+        record = mapping.get(dest_str)
+        if record is None:
+            raise core.IntegrityError(f"journal has no exact backup mapping for {dest_str}")
+        backup = _rollback_backup_record(record, backups)
+        if record["existed"] != (intent["old_sha256"] is not None):
+            raise core.IntegrityError(f"backup existence does not match journal intent for {dest_str}")
+        if record["existed"] and record["sha256"] != intent["old_sha256"]:
+            raise core.IntegrityError(f"backup hash does not match journal intent for {dest_str}")
+        current_hash = _rollback_current_hash(dest_str)
+        allowed_hashes = {intent["old_sha256"], intent["new_sha256"]}
+        if current_hash not in allowed_hashes:
+            rollback_targets.append({"category": category, "destination": dest_str,
+                                     "intent": intent, "record": record,
+                                     "backup": backup, "current_hash": current_hash})
+        else:
+            rollback_targets.append({"category": category, "destination": dest_str,
+                                     "intent": intent, "record": record,
+                                     "backup": backup, "current_hash": current_hash})
+
+    conflicts = [item["destination"] for item in rollback_targets
+                 if item["current_hash"] not in {
+                     item["intent"]["old_sha256"], item["intent"]["new_sha256"]
+                 }]
     if conflicts and not args.force:
         return {
             "command": "rollback", "performed": False,
             "conflicts": conflicts,
-            "hint": "post-apply user modifications detected; pass --force "
-                    "to back them up and roll back anyway",
+            "hint": "post-update changes detected; pass --force to preserve them in a conflict backup before rollback",
         }, EXIT_CONFLICT
 
-    # Copy each backup over its destination.
-    backups = Path(backups_dir)
+    journal = core.Journal(JOURNAL_FILE)
+    journal.data = journal_data
+    conflict_backups = journal.data.setdefault("rollback_conflict_backups", {})
+    if conflicts and args.force:
+        # Preserve every conflicting current file and durably record all copies
+        # before restoring any destination or metadata file.
+        pending = {}
+        conflict_dir = backups / "rollback-conflicts"
+        conflict_dir.mkdir(parents=True, exist_ok=True)
+        for index, item in enumerate(rollback_targets, 1):
+            if item["destination"] not in conflicts:
+                continue
+            existing = conflict_backups.get(item["destination"])
+            if existing and item["current_hash"] == existing.get("sha256"):
+                continue
+            snapshot = _backup_dest(
+                item["destination"], conflict_dir,
+                f"conflict-{index:06d}-{time.time_ns()}"
+            )
+            if snapshot["existed"] and snapshot["sha256"] != item["current_hash"]:
+                raise core.IntegrityError(
+                    f"rollback conflict changed while backing up: {item['destination']}"
+                )
+            pending[item["destination"]] = snapshot
+        conflict_backups.update(pending)
+        journal.step("rollback_conflicts_backed_up", {
+            "destinations": sorted(pending),
+        })
+
+    journal.step("rollback_started", {"forced": bool(conflicts and args.force)})
     restored = []
-    for backup_file in sorted(backups.rglob("*")):
-        if not backup_file.is_file() or backup_file.name.startswith("."):
-            continue
-        parts = backup_file.name.split("--")
-        if len(parts) < 2:
-            continue
-        agent, orig_name = parts[0], "--".join(parts[1:])
-        for dest_str in applied:
-            dest = Path(dest_str)
-            if dest.name == orig_name:
-                if dest.is_dir():
-                    shutil.rmtree(dest)
-                    shutil.copytree(backup_file, dest)
-                else:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    fd, tmp = tempfile.mkstemp(
-                        prefix=".rollback-tmp.", dir=str(dest.parent)
-                    )
-                    os.close(fd)
-                    shutil.copyfile(backup_file, tmp)
-                    os.replace(tmp, str(dest))
-                    core.fsync_dir(dest.parent)
-                restored.append(dest_str)
-                break
+    # Restore managed files first; exact saved metadata is restored last so it
+    # continues to describe the final pre-update filesystem state.
+    rollback_targets.sort(key=lambda item: item["category"] == "metadata")
+    for item in rollback_targets:
+        dest_str = item["destination"]
+        current_hash = _rollback_current_hash(dest_str)
+        old_hash = item["intent"]["old_sha256"]
+        if current_hash == old_hash:
+            continue  # already restored, or an interrupted apply never wrote it
+        if current_hash != item["intent"]["new_sha256"]:
+            # A forced conflict was backed up above. If it changed again while
+            # rollback was running, stop before overwriting that new edit.
+            saved_conflict = conflict_backups.get(dest_str)
+            saved_hash = (saved_conflict.get("sha256")
+                          if isinstance(saved_conflict, dict) else object())
+            if not (args.force and dest_str in conflicts
+                    and current_hash == saved_hash):
+                raise ConflictError(
+                    f"rollback target changed during recovery: {dest_str}"
+                )
+        journal.step("rollback_intent", {
+            "category": item["category"], "destination": dest_str,
+            "current_sha256": current_hash, "restore_sha256": old_hash,
+        })
+        _restore_rollback_file(dest_str, item["record"], item["backup"])
+        if _rollback_current_hash(dest_str) != old_hash:
+            raise core.IntegrityError(f"rollback restore verification failed: {dest_str}")
+        journal.step("rollback_applied", {
+            "category": item["category"], "destination": dest_str,
+            "sha256": old_hash,
+        })
+        restored.append(dest_str)
 
-    # Re-sync manifest content hashes to the restored (pre-update) content.
-    with core.LockFile(MANIFEST_FILE):
-        manifest = core.load_manifest_data(MANIFEST_FILE)
-        for entry in manifest["entries"]:
-            if entry["destination"] in restored:
-                try:
-                    entry["content_hash"] = core.compute_sha256(
-                        entry["destination"]
-                    )
-                except core.IntegrityError:
-                    pass
-        core.save_manifest_data(MANIFEST_FILE, manifest)
-
-    journal = core.Journal.load(JOURNAL_FILE)
     journal = core.Journal(JOURNAL_FILE)
     journal.data = journal_data
     journal.finish("rolled_back")
@@ -972,7 +1562,8 @@ def cmd_rollback(args):
     )
     return {
         "command": "rollback", "performed": True,
-        "restored": restored, "backups_dir": backups_dir,
+        "restored": restored, "backups_dir": str(backups),
+        "conflict_backups": sorted(conflict_backups),
     }, EXIT_OK
 
 
@@ -1067,7 +1658,7 @@ def main(argv=None):
                         help="proceed over detected user modifications "
                              "(after backing them up)")
     common.add_argument("--adopt", action="store_true",
-                        help="take ownership of external-manager/unmanaged installs")
+                        help="deprecated; external-manager installs remain refused")
 
     parser = argparse.ArgumentParser(
         prog="sadskill-update.py",

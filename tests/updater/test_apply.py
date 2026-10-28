@@ -4,8 +4,12 @@ import json
 import os
 import sys
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
+from scripts import sadskill_core as core  # noqa: E402
 from helpers import SandboxCase  # noqa: E402
 from tests.updater.stub import GitHubStub, build_tarball  # noqa: E402
 
@@ -35,6 +39,7 @@ class ApplyRollbackTests(SandboxCase):
         data = json.loads(p.stdout)
         self.assertTrue(data["applied"])
         self.assertEqual(data["to_version"], "0.3.1")
+        self.assertEqual(data.get("artifact_trust"), "TRANSPORT_ONLY")
         # Content updated.
         with open(self.skill_md(), encoding="utf-8") as fh:
             self.assertIn(MARKER, fh.read())
@@ -45,10 +50,9 @@ class ApplyRollbackTests(SandboxCase):
         manifest = self.load_manifest()
         entry = [e for e in manifest["entries"]
                  if e["agent"] == "claude"][0]
-        import hashlib
         self.assertEqual(
             entry["content_hash"],
-            hashlib.sha256(open(self.skill_md(), "rb").read()).hexdigest(),
+            core.compute_sha256(entry["destination"]),
         )
         # History + journal closed.
         with open(os.path.join(self.home, ".sadskill", "history.jsonl"),
@@ -107,6 +111,9 @@ class ApplyRollbackTests(SandboxCase):
         self.assertIn("USER_LOCAL_EDIT", backup_text)
 
     def test_rollback_restores_preapply_and_keeps_unrelated(self):
+        manifest_before = Path(self.manifest_path()).read_bytes()
+        state_path = Path(self.home) / ".sadskill" / "install-state.json"
+        state_before = state_path.read_bytes() if state_path.exists() else None
         self.run_update("apply", "--json")
         p = self.run_update("rollback", "--json")
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
@@ -114,11 +121,58 @@ class ApplyRollbackTests(SandboxCase):
             content = fh.read()
         self.assertNotIn(MARKER, content)
         self.assertIn("sadskill", content)
+        self.assertEqual(Path(self.manifest_path()).read_bytes(), manifest_before)
+        self.assertEqual(
+            state_path.read_bytes() if state_path.exists() else None,
+            state_before,
+            "rollback did not restore exact install-state metadata",
+        )
         self.assertTrue(self.content_exists_under_home(UNRELATED))
         with open(os.path.join(self.home, ".sadskill", "update-journal.json"),
                   encoding="utf-8") as fh:
             journal = json.load(fh)
         self.assertEqual(journal["state"], "rolled_back")
+
+        # Repeating recovery is a harmless no-op.
+        snapshot = self.home_snapshot()
+        again = self.run_update("rollback", "--json")
+        self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+        self.assertEqual(self.home_snapshot(), snapshot)
+
+    def test_corrupt_backup_refuses_force_rollback_without_changes(self):
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        journal_path = Path(self.home) / ".sadskill" / "update-journal.json"
+        journal = json.loads(journal_path.read_text())
+        target = self.skill_md()
+        backup = Path(journal["backup_map"][target]["backup_path"])
+        backup.write_bytes(backup.read_bytes() + b"CORRUPTED_BACKUP")
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write("\nKEEP_CURRENT_ON_BACKUP_FAILURE\n")
+        target_before = Path(target).read_bytes()
+        manifest_before = Path(self.manifest_path()).read_bytes()
+        state_path = Path(self.home) / ".sadskill" / "install-state.json"
+        state_before = state_path.read_bytes()
+        journal_before = journal_path.read_bytes()
+
+        result = self.run_update("rollback", "--json", "--force")
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertEqual(Path(target).read_bytes(), target_before)
+        self.assertEqual(Path(self.manifest_path()).read_bytes(), manifest_before)
+        self.assertEqual(state_path.read_bytes(), state_before)
+        self.assertEqual(journal_path.read_bytes(), journal_before)
+
+    def test_interrupted_after_first_replace_is_recovered(self):
+        original = Path(self.skill_md()).read_bytes()
+        self.env["SADSKILL_FAULT"] = "after_first_replace"
+        interrupted = self.run_update("apply", "--json")
+        self.assertNotEqual(interrupted.returncode, 0, interrupted.stdout)
+        self.env.pop("SADSKILL_FAULT", None)
+        self.assertIn(MARKER.encode(), Path(self.skill_md()).read_bytes())
+
+        restored = self.run_update("rollback", "--json")
+        self.assertEqual(restored.returncode, 0, restored.stdout + restored.stderr)
+        self.assertEqual(Path(self.skill_md()).read_bytes(), original)
 
     def test_rollback_conflict_on_postapply_user_edit(self):
         self.run_update("apply", "--json")
@@ -132,6 +186,66 @@ class ApplyRollbackTests(SandboxCase):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         with open(self.skill_md(), encoding="utf-8") as fh:
             self.assertNotIn(MARKER, fh.read())
+
+    def test_forced_rollback_preserves_postapply_user_edit(self):
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        sentinel = "POST_APPLY_FORCE_ROLLBACK_SENTINEL"
+        with open(self.skill_md(), "a", encoding="utf-8") as fh:
+            fh.write("\n" + sentinel + "\n")
+
+        result = self.run_update("rollback", "--json", "--force")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        journal_path = os.path.join(self.home, ".sadskill", "update-journal.json")
+        with open(journal_path, encoding="utf-8") as fh:
+            journal = json.load(fh)
+        found = False
+        for dirpath, _dirs, files in os.walk(journal["backups_dir"]):
+            for name in files:
+                with open(os.path.join(dirpath, name), "rb") as fh:
+                    found |= sentinel.encode() in fh.read()
+        self.assertTrue(found, "forced rollback discarded the post-apply edit")
+
+    def test_rollback_restores_exact_paths_with_duplicate_skill_basenames(self):
+        installed = self.run_install("-a", "all")
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        manifest = self.load_manifest()
+        entries = [e for e in manifest["entries"]
+                   if e.get("agent") in ("claude", "codex", "gemini")]
+        self.assertGreaterEqual(len(entries), 3)
+
+        def snapshot(root):
+            result = {}
+            for current, _dirs, files in os.walk(root):
+                for filename in files:
+                    path = Path(current) / filename
+                    result[str(path.relative_to(root))] = path.read_bytes()
+            return result
+
+        before = {}
+        for entry in entries:
+            root = Path(entry["destination"])
+            agent = entry["agent"]
+            skill = root / "SKILL.md"
+            with skill.open("a", encoding="utf-8") as fh:
+                fh.write(f"\nORIGINAL_HOST_{agent}\n")
+            entry["content_hash"] = core.compute_sha256(root)
+            before[agent] = snapshot(root)
+        with open(self.manifest_path(), "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2)
+            fh.write("\n")
+
+        applied = self.run_update("apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        rolled = self.run_update("rollback", "--json")
+        self.assertEqual(rolled.returncode, 0, rolled.stdout + rolled.stderr)
+        for entry in entries:
+            agent = entry["agent"]
+            root = Path(entry["destination"])
+            self.assertEqual(snapshot(root), before[agent], agent)
+            self.assertIn(
+                f"ORIGINAL_HOST_{agent}", (root / "SKILL.md").read_text()
+            )
 
     def test_interrupted_apply_is_recoverable_via_rollback(self):
         self.env["SADSKILL_FAULT"] = "after_backup"
