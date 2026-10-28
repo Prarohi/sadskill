@@ -95,48 +95,60 @@ if [[ -f "$MANIFEST_FILE" ]]; then
   python3 "${SCRIPT_DIR}/scripts/manifest.py" uninstall "${opts[@]}"
 else
   # Fallback for unmanaged/legacy installs without a manifest:
-  # Check and remove only verified sadskill installations without deleting restored or unrelated files.
+  # Removal is ownership-verified: a file is sadskill's only when it is
+  # byte-identical to a file shipped in this repository; a directory is
+  # sadskill's only when its entire tree matches the shipped skill tree.
+  # Anything else is user content and is preserved.
   echo "-> Notice: Manifest ledger not found. Running safe fallback uninstallation..."
 
-  remove_safe_file() {
+  remove_owned_file() {
     local file="$1"
-    if [[ -f "$file" ]]; then
-      if grep -q "sadskill" "$file" 2>/dev/null; then
-        echo "   [REMOVE] Removing verified sadskill file: $file"
+    [[ -f "$file" ]] || return 0
+    local shipped
+    for shipped in "${SCRIPT_DIR}/commands/claude/"*.md \
+                   "${SCRIPT_DIR}/commands/codex/"*.md \
+                   "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh"; do
+      [[ -f "$shipped" ]] || continue
+      if cmp -s "$file" "$shipped"; then
+        echo "   [REMOVE] Removing sadskill-owned file (content-verified): $file"
         if [[ "$DRY_RUN" != "true" ]]; then
           rm -f "$file"
         fi
-      else
-        echo "   [PRESERVE] Skipping file without sadskill signature: $file"
+        return 0
       fi
-    fi
+    done
+    echo "   [PRESERVE] File is not byte-identical to any shipped sadskill file, keeping: $file"
   }
 
-  remove_safe_dir() {
+  remove_owned_dir() {
     local dir="$1"
-    if [[ -d "$dir" && "$(basename "$dir")" == "sadskill" ]]; then
-      echo "   [REMOVE] Removing sadskill directory: $dir"
+    [[ -d "$dir" && "$(basename "$dir")" == "sadskill" ]] || return 0
+    if diff -r "$dir" "${SCRIPT_DIR}/skills/sadskill" >/dev/null 2>&1; then
+      echo "   [REMOVE] Removing sadskill-owned directory (content-verified): $dir"
       if [[ "$DRY_RUN" != "true" ]]; then
         rm -rf "$dir"
       fi
+    else
+      echo "   [PRESERVE] Directory differs from shipped sadskill skill tree, keeping: $dir"
+      echo "            (contains user modifications or a different version; remove manually if unwanted)"
     fi
   }
 
-  remove_safe_dir "${HOME}/.codex/skills/sadskill"
+  remove_owned_dir "${HOME}/.codex/skills/sadskill"
   for f in "${HOME}/.codex/prompts/sad-"*.md; do
-    remove_safe_file "$f"
+    remove_owned_file "$f"
   done
 
-  remove_safe_dir "${HOME}/.claude/skills/sadskill"
+  remove_owned_dir "${HOME}/.claude/skills/sadskill"
   for f in "${HOME}/.claude/commands/sad-"*.md; do
-    remove_safe_file "$f"
+    remove_owned_file "$f"
   done
-  remove_safe_file "${HOME}/.claude/hooks/git-guardrail.sh"
+  remove_owned_file "${HOME}/.claude/hooks/git-guardrail.sh"
 
-  remove_safe_dir "${HOME}/.gemini/antigravity/skills/sadskill"
+  remove_owned_dir "${HOME}/.gemini/antigravity/skills/sadskill"
 
-  remove_safe_file "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
-  remove_safe_dir "${TARGET_DIR}/.cursor/skills/sadskill"
+  remove_owned_file "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
+  remove_owned_dir "${TARGET_DIR}/.cursor/skills/sadskill"
 fi
 
 if [[ "$PURGE" == "true" ]]; then
