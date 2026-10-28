@@ -135,10 +135,10 @@ class SandboxCase(unittest.TestCase):
         return False
 
     def find_paths_under(self, root, substr):
-        """Relative paths under root whose name contains substr."""
+        """Relative paths (files AND directories) under root whose name contains substr."""
         hits = []
-        for dirpath, _dirnames, filenames in os.walk(root):
-            for name in filenames:
+        for dirpath, dirnames, filenames in os.walk(root):
+            for name in dirnames + filenames:
                 if substr in name:
                     hits.append(os.path.relpath(os.path.join(dirpath, name), root))
         return hits

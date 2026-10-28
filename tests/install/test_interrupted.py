@@ -20,7 +20,7 @@ class InterruptedTests(SandboxCase):
         rc = self.run_install("--agent", "claude")
         self.assertEqual(rc.returncode, 0, rc.stderr)
         orphan = os.path.join(
-            self.home, ".claude/skills/.bak.20260101000000_1234"
+            self.home, ".claude/skills/sadskill.bak.20260101000000_1234"
         )
         os.makedirs(orphan)
         with open(os.path.join(orphan, "SKILL.md"), "w", encoding="utf-8") as fh:

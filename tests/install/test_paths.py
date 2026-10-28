@@ -41,9 +41,26 @@ class WeirdPathTests(SandboxCase):
             self.content_exists_under_home(MARKER),
             "uninstall lost user modification under weird paths",
         )
+        # A user-modified install is preserved on plain uninstall (no --force):
+        # the modified content must still be present under HOME.
+        self.assertTrue(
+            os.path.exists(installed),
+            "uninstall silently removed user-modified content under weird paths "
+            "(expected PRESERVE-MODIFIED)",
+        )
+
+    def test_uninstall_removes_pristine_install(self):
+        rc = self.run_install("--agent", "claude")
+        self.assertEqual(rc.returncode, 0, f"install failed: {rc.stderr}")
+        installed = os.path.join(
+            self.home, ".claude/skills/sadskill/SKILL.md"
+        )
+        self.assertTrue(os.path.exists(installed), "pristine skill not installed")
+        rc = self.run_uninstall()
+        self.assertEqual(rc.returncode, 0, f"uninstall failed: {rc.stderr}")
         self.assertFalse(
             os.path.exists(installed),
-            "uninstall did not remove the installed skill under weird paths",
+            "uninstall did not remove the pristine installed skill",
         )
 
     def test_cursor_rule_with_spaced_target(self):

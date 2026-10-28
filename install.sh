@@ -75,7 +75,9 @@ if [[ "$DRY_RUN" == "true" ]]; then
   echo "   [DRY-RUN MODE] No filesystem modifications will be made."
 fi
 
-mkdir -p "${HOME}/.sadskill"
+if [[ "$DRY_RUN" != "true" ]]; then
+  mkdir -p "${HOME}/.sadskill"
+fi
 
 # Generate collision-safe backup paths with PID and timestamp
 make_backup_path() {
@@ -337,7 +339,9 @@ install_gemini() {
 }
 
 # Ensure workstation profile template is discoverable
-mkdir -p "${HOME}/.sadskill"
+if [[ "$DRY_RUN" != "true" ]]; then
+  mkdir -p "${HOME}/.sadskill"
+fi
 if [[ ! -f "${HOME}/.sadskill/profile.md" && -f "${SCRIPT_DIR}/skills/sadskill/templates/profile.template.md" ]]; then
   echo "-> Tip: You can customize your local workstation profile by editing ~/.sadskill/profile.md"
 fi
