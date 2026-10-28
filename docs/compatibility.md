@@ -49,7 +49,8 @@ python3 scripts/doctor.py --json
 
 Status definitions:
 - `NOT_INSTALLED`: No skill or command files found in the standard directory.
-- `AVAILABLE`: Hook script is installed in the agent hooks directory, but requires user activation in settings.
-- `REGISTERED`: Hook is configured in host settings.
-- `ACTIVE`: Hook is verified responsive to simulated tool events.
-- `UNSUPPORTED`: Host agent does not expose a native hook lifecycle.
+- `AVAILABLE`: Hook script exists on disk but is not registered in settings.
+- `REGISTERED`: A Bash-matching host entry references the hook, but its script is missing or local simulation did not pass.
+- `LOCAL_TEST_PASSED`: Hook passed a benign local simulation; this does not prove host activation.
+- `HOST_VERIFIED_ACTIVE`: An operator explicitly confirmed host activity; the doctor cannot observe host events.
+- `UNKNOWN`: Local settings could not be parsed safely.

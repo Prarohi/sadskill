@@ -8,6 +8,7 @@ agent-reported claims, verified executions via trusted recipes, and CI attestati
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -17,21 +18,74 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Safe predetermined executables allowed during --retest
-ALLOWED_EXECUTABLES = {
-    "pytest",
-    "python3",
-    "python",
-    "npm",
-    "cargo",
-    "go",
-}
-
 # Dangerous shell syntax tokens rejected in arguments during safe execution
 FORBIDDEN_ARG_TOKENS = {";", "&&", "||", "|", "`", "$(", ">", "<", "\n", "\r"}
 
 # Dangerous inline code flags rejected in unattended safe retest
 DISALLOWED_INLINE_FLAGS = {"-c", "-e", "--eval"}
+MAX_EVIDENCE_FILE_BYTES = 1024 * 1024
+
+
+def is_within(path: Path, root: Path) -> bool:
+    """Containment check without string-prefix or Python-version ambiguity."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def project_identity(project_root: Path) -> str:
+    """Stable local-checkout identity that does not expose the user's path."""
+    canonical = str(project_root.resolve()).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def git_context(project_root: Path):
+    """Return commit and dirty state, excluding evidence records themselves."""
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(project_root),
+            capture_output=True, text=True, check=False,
+        )
+        if head.returncode != 0:
+            return None
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "-z", "--untracked-files=all"],
+            cwd=str(project_root), capture_output=True, text=True, check=False,
+        )
+        if status.returncode != 0:
+            return None
+        dirty = False
+        for entry in status.stdout.split("\0"):
+            if not entry:
+                continue
+            path = entry[3:] if len(entry) >= 3 else ""
+            if path == ".sad/evidence" or path.startswith(".sad/evidence/"):
+                continue
+            dirty = True
+            break
+        return {"commit_sha": head.stdout.strip(), "worktree_dirty": dirty}
+    except OSError:
+        return None
+
+
+def github_repository_slug(project_root: Path):
+    """Read only the owner/repo portion of an origin URL; never expose creds."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"], cwd=str(project_root),
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        match = re.search(
+            r"(?:github\.com[:/])([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?$",
+            result.stdout.strip(), re.IGNORECASE,
+        )
+        return f"{match.group(1)}/{match.group(2)}" if match else None
+    except OSError:
+        return None
 
 
 def detect_project_root(explicit_root=None):
@@ -72,8 +126,11 @@ def validate_contained_path(project_root: Path, rel_path: str):
     if not rel_path or not isinstance(rel_path, str):
         return False, "File path must be a non-empty string"
 
-    if rel_path.startswith("/") or rel_path.startswith("\\"):
+    if rel_path.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", rel_path):
         return False, f"Absolute paths prohibited in evidence: {rel_path}"
+
+    if "\\" in rel_path:
+        return False, f"Backslash paths are not portable evidence paths: {rel_path}"
 
     parts = Path(rel_path).parts
     if ".." in parts:
@@ -85,13 +142,8 @@ def validate_contained_path(project_root: Path, rel_path: str):
     except Exception as e:
         return False, f"Failed to resolve path {rel_path}: {e}"
 
-    try:
-        if not resolved.is_relative_to(project_root.resolve()):
-            return False, f"Path traverses outside project root: {rel_path} -> {resolved}"
-    except AttributeError:
-        # Python < 3.9 fallback
-        if not str(resolved).startswith(str(project_root.resolve())):
-            return False, f"Path traverses outside project root: {rel_path} -> {resolved}"
+    if not is_within(resolved, project_root):
+        return False, f"Path traverses outside project root: {rel_path} -> {resolved}"
 
     if not target.exists():
         return False, f"Declared file does not exist: {rel_path}"
@@ -111,12 +163,13 @@ TRUSTED_RECIPES = {
 }
 
 
-def resolve_retest_argv(data: dict, project_root: Path, allow_custom: bool = False):
+def resolve_retest_argv(data: dict, project_root: Path):
     """
     Resolves the execution argv for safe re-testing.
     Prioritizes trusted recipe IDs. If raw command is provided, matches against
-    known safe patterns, and strictly rejects arbitrary repository scripts unless
-    --allow-custom-retest is explicitly granted.
+    known safe patterns and rejects every arbitrary repository script. Repository
+    containment alone is not an execution sandbox, so there is no custom-script
+    bypass.
     """
     check_id = data.get("check_id") or data.get("recipe_id")
     if check_id:
@@ -167,24 +220,11 @@ def resolve_retest_argv(data: dict, project_root: Path, allow_custom: bool = Fal
     if exe == "go" and len(argv) >= 2 and argv[1] == "test":
         return True, ["go", "test"] + argv[2:], "Matched go-test recipe"
 
-    if not allow_custom:
-        return (
-            False,
-            [],
-            f"Arbitrary repository script execution ({exe}) prohibited in unattended retest. Use a registered check_id/recipe_id or pass --allow-custom-retest",
-        )
-
-    # If allow_custom is True, validate script containment within project root
-    if exe in ("python", "python3") and len(argv) > 1:
-        script_path = project_root / argv[1]
-        try:
-            resolved_script = script_path.resolve()
-            if not (resolved_script.is_relative_to(project_root) if hasattr(resolved_script, "is_relative_to") else str(resolved_script).startswith(str(project_root))):
-                return False, [], f"Script path outside project root: {argv[1]}"
-        except Exception:
-            return False, [], f"Invalid script path: {argv[1]}"
-
-    return True, argv, "Custom execution allowed via --allow-custom-retest"
+    return (
+        False,
+        [],
+        f"Arbitrary repository script execution ({exe}) prohibited in evidence retests; use a registered check_id/recipe_id",
+    )
 
 
 def execute_safe_argv(project_root: Path, argv: list, timeout_seconds=30):
@@ -234,14 +274,19 @@ def is_valid_iso_timestamp(ts: str) -> bool:
         return False
     # Validate ISO 8601 format
     iso_pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
-    return bool(re.match(iso_pattern, ts))
+    if not re.match(iso_pattern, ts):
+        return False
+    try:
+        parsed = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return parsed.tzinfo is not None and parsed.utcoffset() is not None
+    except ValueError:
+        return False
 
 
 def verify_evidence(
     project_root=None,
     evidence_dir=None,
     retest=False,
-    allow_custom_retest=False,
     require_evidence=False,
     timeout=30,
     log_stream=sys.stdout,
@@ -249,16 +294,13 @@ def verify_evidence(
     def log(msg=""):
         print(msg, file=log_stream)
 
-    root = detect_project_root(project_root)
+    root = detect_project_root(project_root).resolve()
     ev_dir = Path(evidence_dir).resolve() if evidence_dir else (root / ".sad" / "evidence")
 
     # Security check: evidence dir must be contained within project root unless explicitly permitted
-    try:
-        if not (ev_dir.is_relative_to(root) if hasattr(ev_dir, "is_relative_to") else str(ev_dir).startswith(str(root))):
-            log(f"  [FAIL] Evidence directory outside project root: {ev_dir}")
-            return 1, []
-    except Exception:
-        pass
+    if not is_within(ev_dir, root):
+        log(f"  [FAIL] Evidence directory outside project root: {ev_dir}")
+        return 1, []
 
     log(f"=== sadskill Evidence Verifier ===")
     log(f"  Project Root: {root}")
@@ -284,36 +326,38 @@ def verify_evidence(
     schema_valid_count = 0
     retested_count = 0
 
-    required_keys = ["timestamp", "task_slug", "command", "exit_code", "summary", "files_touched"]
+    required_keys = [
+        "timestamp", "task_slug", "command", "exit_code", "summary",
+        "files_touched", "project_id", "commit_sha", "worktree_dirty",
+    ]
 
     # Check current git commit for freshness binding
-    current_head_sha = ""
-    try:
-        res_sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if res_sha.returncode == 0:
-            current_head_sha = res_sha.stdout.strip()
-    except Exception:
-        pass
+    current_context = git_context(root)
+    current_project_id = project_identity(root)
 
     for ef in evidence_files:
         log(f"\n-> Inspecting evidence record: {ef.name}")
 
+        try:
+            if ef.stat().st_size > MAX_EVIDENCE_FILE_BYTES:
+                log(f"   [FAIL] Evidence file exceeds {MAX_EVIDENCE_FILE_BYTES} byte limit.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "Evidence file too large"})
+                continue
+        except OSError as e:
+            log(f"   [FAIL] Cannot inspect evidence file: {e}")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "Cannot inspect evidence file"})
+            continue
+
         # Check if evidence file is a symlink escaping root
         try:
-            if ef.is_symlink():
-                resolved_ef = ef.resolve()
-                if not (resolved_ef.is_relative_to(root) if hasattr(resolved_ef, "is_relative_to") else str(resolved_ef).startswith(str(root))):
-                    log("   [FAIL] Evidence symlink escapes project root.")
-                    errors += 1
-                    records.append({"file": ef.name, "status": "FAILED", "reason": "Symlink escape"})
-                    continue
-        except Exception as e:
+            if ef.is_symlink() and not is_within(ef, root):
+                log("   [FAIL] Evidence symlink escapes project root.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "Symlink escape"})
+                continue
+        except (OSError, RuntimeError, ValueError) as e:
             log(f"   [FAIL] Symlink error: {e}")
             errors += 1
             records.append({"file": ef.name, "status": "FAILED", "reason": str(e)})
@@ -339,6 +383,62 @@ def verify_evidence(
             errors += 1
             records.append({"file": ef.name, "status": "FAILED", "reason": f"Missing keys: {missing}"})
             continue
+
+        ci_attestation = data.get("ci_attestation")
+        if "ci_attestation" in data and not isinstance(ci_attestation, dict):
+            log("   [FAIL] ci_attestation must be an object when present.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "ci_attestation not an object"})
+            continue
+        if isinstance(ci_attestation, dict):
+            claim_fields = ("repository", "run_url", "head_sha", "workflow")
+            if any(not isinstance(ci_attestation.get(key), str) or not ci_attestation[key].strip()
+                   for key in claim_fields):
+                log("   [FAIL] ci_attestation requires non-empty repository, run_url, head_sha, and workflow strings.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "incomplete CI claim"})
+                continue
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", ci_attestation["repository"]):
+                log("   [FAIL] ci_attestation repository must be owner/repository.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "invalid CI repository claim"})
+                continue
+            actual_repository = github_repository_slug(root)
+            if actual_repository is None:
+                log("   [NOT_VERIFIABLE] Cannot determine this checkout's GitHub repository from origin.")
+                errors += 1
+                records.append({"file": ef.name, "status": "NOT_VERIFIABLE", "reason": "GitHub repository unavailable"})
+                continue
+            if ci_attestation["repository"].lower() != actual_repository.lower():
+                log("   [FAIL] ci_attestation repository does not match this checkout's origin.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "CI repository mismatch"})
+                continue
+            if not re.fullmatch(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+(?:/attempts/[0-9]+)?", ci_attestation["run_url"]):
+                log("   [FAIL] ci_attestation run_url is not a GitHub Actions run URL.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "invalid CI run URL claim"})
+                continue
+            url_match = re.match(
+                r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/actions/runs/",
+                ci_attestation["run_url"], re.IGNORECASE,
+            )
+            url_repository = f"{url_match.group(1)}/{url_match.group(2)}" if url_match else ""
+            if url_repository.lower() != actual_repository.lower():
+                log("   [FAIL] ci_attestation run URL repository does not match this checkout's origin.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "CI run repository mismatch"})
+                continue
+            if not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", ci_attestation["head_sha"]):
+                log("   [FAIL] ci_attestation head_sha is not a Git object ID.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "invalid CI head claim"})
+                continue
+            if "verified" in ci_attestation and type(ci_attestation["verified"]) is not bool:
+                log("   [FAIL] ci_attestation verified must be a boolean claim.")
+                errors += 1
+                records.append({"file": ef.name, "status": "FAILED", "reason": "invalid CI verified claim"})
+                continue
 
         # Strict type checking (T16, T17)
         is_skipped = data.get("status") in ("SKIPPED", "SKIPPED_WITH_REASON", "NOT_APPLICABLE", "DOCS_ONLY", "NOT_RUN")
@@ -368,6 +468,65 @@ def verify_evidence(
             records.append({"file": ef.name, "status": "FAILED", "reason": "files_touched not a list"})
             continue
 
+        if any(not isinstance(path, str) for path in data["files_touched"]):
+            log("   [FAIL] Every files_touched entry must be a string.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "files_touched item not a string"})
+            continue
+
+        if not isinstance(data.get("task_slug"), str) or not data["task_slug"].strip():
+            log("   [FAIL] task_slug must be a non-empty string.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "invalid task_slug"})
+            continue
+        if not isinstance(data.get("command"), str) or not isinstance(data.get("summary"), str):
+            log("   [FAIL] command and summary must be strings.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "command or summary not a string"})
+            continue
+
+        if not isinstance(data.get("project_id"), str) or not re.fullmatch(r"[0-9a-f]{64}", data["project_id"]):
+            log("   [FAIL] project_id must be a SHA-256 hex digest.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "invalid project_id"})
+            continue
+        if not isinstance(data.get("commit_sha"), str) or not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", data["commit_sha"]):
+            log("   [FAIL] commit_sha must be a 40- or 64-character hexadecimal Git object ID.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "invalid commit_sha"})
+            continue
+        if isinstance(ci_attestation, dict) and ci_attestation["head_sha"].lower() != data["commit_sha"].lower():
+            log("   [FAIL] ci_attestation head_sha claim does not match evidence commit_sha.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "CI head claim mismatch"})
+            continue
+        if type(data.get("worktree_dirty")) is not bool:
+            log("   [FAIL] worktree_dirty must be a boolean.")
+            errors += 1
+            records.append({"file": ef.name, "status": "FAILED", "reason": "invalid worktree_dirty"})
+            continue
+
+        if current_context is None:
+            log("   [NOT_VERIFIABLE] Project is not in a readable Git worktree.")
+            errors += 1
+            records.append({"file": ef.name, "status": "NOT_VERIFIABLE", "reason": "Git context unavailable"})
+            continue
+        if data["project_id"] != current_project_id:
+            log("   [NOT_VERIFIABLE] Evidence project identity does not match this checkout.")
+            errors += 1
+            records.append({"file": ef.name, "status": "NOT_VERIFIABLE", "reason": "project identity mismatch"})
+            continue
+        if data["commit_sha"].lower() != current_context["commit_sha"].lower():
+            log("   [STALE] Evidence commit does not match current HEAD.")
+            errors += 1
+            records.append({"file": ef.name, "status": "STALE", "reason": "commit mismatch"})
+            continue
+        if data["worktree_dirty"] != current_context["worktree_dirty"]:
+            log("   [DIRTY_WORKTREE] Evidence dirty-state does not match current checkout.")
+            errors += 1
+            records.append({"file": ef.name, "status": "DIRTY_WORKTREE", "reason": "dirty-state mismatch"})
+            continue
+
         if not is_valid_iso_timestamp(data.get("timestamp")):
             log(f"   [FAIL] Invalid timestamp format (must be ISO 8601): {data.get('timestamp')}")
             errors += 1
@@ -389,20 +548,8 @@ def verify_evidence(
             continue
 
         # Check freshness binding to repository commit
-        freshness = "UNBOUND"
-        record_commit = data.get("commit_sha")
-        if record_commit:
-            if current_head_sha and record_commit == current_head_sha:
-                freshness = "VERIFIED_FRESH"
-                log(f"   [FRESH] Bound to current repository HEAD ({record_commit[:8]}).")
-            elif current_head_sha:
-                freshness = "STALE"
-                log(f"   [WARN] Stale commit binding: record is for {record_commit[:8]}, current HEAD is {current_head_sha[:8]}.")
-            else:
-                freshness = "RECORDED"
-
-        # Check CI attestation if present
-        ci_attestation = data.get("ci_attestation")
+        freshness = "VERIFIED_FRESH"
+        log(f"   [FRESH] Bound to project and current HEAD ({data['commit_sha'][:8]}), dirty={data['worktree_dirty']}.")
         provenance = "REPORTED"
 
         # If retest requested, safely execute authorized check via recipe registry
@@ -412,7 +559,7 @@ def verify_evidence(
             provenance = "NOT_RUN"
             log(f"   [SKIPPED] Task marked non-executable / documentation-only: {ef.name}")
         elif retest:
-            res_ok, argv_to_run, res_msg = resolve_retest_argv(data, root, allow_custom=allow_custom_retest)
+            res_ok, argv_to_run, res_msg = resolve_retest_argv(data, root)
             if not res_ok:
                 log(f"   [FAIL] Re-test rejected: {res_msg}")
                 errors += 1
@@ -430,10 +577,11 @@ def verify_evidence(
             provenance = "RETESTED"
             retested_count += 1
             log(f"   [RETESTED] Authorized check passed successfully: {ef.name}")
-        elif ci_attestation and isinstance(ci_attestation, dict) and ci_attestation.get("verified"):
-            current_status = "CI_ATTESTED"
-            provenance = "CI_ATTESTED"
-            log(f"   [CI_ATTESTED] Evidence record verified via CI attestation.")
+        elif "ci_attestation" in data:
+            current_status = "CI_CLAIMED"
+            provenance = "CI_CLAIMED"
+            schema_valid_count += 1
+            log("   [CI_CLAIMED] Metadata is self-reported; no external GitHub verification was performed.")
         else:
             schema_valid_count += 1
             provenance = "SCHEMA_VALID"
@@ -445,6 +593,8 @@ def verify_evidence(
             "provenance": provenance,
             "freshness": freshness,
             "task_slug": data.get("task_slug"),
+            "commit_sha": data.get("commit_sha"),
+            "worktree_dirty": data.get("worktree_dirty"),
         })
 
     log("\n--------------------------------------------------")
@@ -460,7 +610,7 @@ def main():
     parser.add_argument("--project-root", help="Explicit project root directory")
     parser.add_argument("--evidence-dir", help="Explicit evidence directory")
     parser.add_argument("--retest", action="store_true", help="Safely re-execute authorized test commands via recipe registry")
-    parser.add_argument("--allow-custom-retest", action="store_true", help="Allow custom repository script execution under safe retest")
+    parser.add_argument("--print-context", action="store_true", help="Print project_id, commit_sha, and worktree_dirty for a new evidence record")
     parser.add_argument(
         "--require-evidence", action="store_true", help="Fail if zero evidence records are present"
     )
@@ -468,6 +618,17 @@ def main():
     parser.add_argument("--json", action="store_true", help="Output JSON results")
 
     args = parser.parse_args()
+
+    if args.print_context:
+        if args.json:
+            parser.error("--print-context and --json cannot be combined")
+        root = detect_project_root(args.project_root).resolve()
+        context = git_context(root)
+        if context is None:
+            print(json.dumps({"status": "NOT_VERIFIABLE"}, indent=2))
+            sys.exit(1)
+        print(json.dumps({"project_id": project_identity(root), **context}, indent=2))
+        sys.exit(0)
 
     # Validate timeout bounds
     if args.timeout < 1 or args.timeout > 300:
@@ -481,7 +642,6 @@ def main():
         project_root=args.project_root,
         evidence_dir=args.evidence_dir,
         retest=args.retest,
-        allow_custom_retest=args.allow_custom_retest,
         require_evidence=args.require_evidence,
         timeout=args.timeout,
         log_stream=log_stream,

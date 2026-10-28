@@ -106,23 +106,27 @@ Tasks conclude with demonstrable terminal verification and machine-readable evid
 
 #### Verification Provenance States:
 - `REPORTED`: Agent claims execution in conversation.
-- `SCHEMA_VALID`: Valid JSON format and strictly contained project paths verified by `scripts/verify-evidence.py`.
+- `SCHEMA_VALID`: Record schema, project identity, commit, dirty-worktree state, timestamp, and contained paths match the current checkout; this still does not prove the claimed command ran.
 - `RETESTED`: Independently executed by authorized verifier via trusted recipe registry.
-- `CI_ATTESTED`: Linked to immutable GitHub Actions CI run SHA/URL.
+- `CI_CLAIMED`: Evidence contains self-reported CI metadata; no external verification was performed.
+- `CI_ATTESTED`: Use only when an independent trusted GitHub check verifies repository, run, workflow, and exact head SHA. The local verifier does not emit this state.
+
+Run `python3 scripts/verify-evidence.py --print-context` to obtain the local `project_id`, `commit_sha`, and `worktree_dirty` values for a new evidence record. The verifier rejects mismatched or unbound records. It does not accept `--allow-custom-retest`; evidence can select only registered recipes.
 
 ### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
 Safety operates through layered boundaries:
 - **Tier 1 (Agent Prompts)**: Strictly forbids destructive operations without explicit confirmation.
-- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` intercepts dangerous bash commands before execution and parses Git `pre-push` ref streams.
+- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` can filter commands only when an agent host supports, loads, and invokes the registered hook; standalone tests do not prove host activation.
 - **Tier 3 (Host Boundaries)**: Sandbox permissions, branch rules, and least privilege.
 
 #### Hook Lifecycle Status:
-- `HOOK_AVAILABLE`: Hook script installed on disk.
-- `HOOK_REGISTERED`: Registered in host configuration (e.g. `PreToolUse` in `~/.claude/settings.json`).
-- `HOOK_ACTIVE`: Actively receiving and filtering host tool events.
+- `AVAILABLE`: Hook script is installed but not registered.
+- `REGISTERED`: A Bash-matching host entry references the hook, but its script is missing or local simulation did not pass.
+- `LOCAL_TEST_PASSED`: The hook passed a benign local simulation; this does not prove host activation.
+- `HOST_VERIFIED_ACTIVE`: Explicit operator attestation after checking the host; the local diagnostic cannot observe host events.
 
 ### 3. Capability Diagnostic Tool (`scripts/doctor.py`)
-Run the diagnostic doctor to check agent configurations and hook activation:
+Run the diagnostic doctor to check local configuration files, Claude hook registration, and benign local simulation. It cannot observe host activation:
 ```bash
 python3 scripts/doctor.py
 ```
@@ -156,7 +160,7 @@ Execute behavioral tests on real fixture code:
 # In-memory tenant isolation fixture
 python3 benchmarks/fixtures/tenant-isolation/grader.py
 
-# Database-level Row Level Security fixture
+# SQLite authorizer simulation of database RLS (not PostgreSQL RLS)
 python3 benchmarks/fixtures/real-rls/grader.py
 ```
 
