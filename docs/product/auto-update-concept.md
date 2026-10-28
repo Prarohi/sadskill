@@ -1,108 +1,43 @@
-# Sadskill Auto-Update & Version Lifecycle Specification
+# Sadskill Auto-Update & Version Lifecycle Proposal
 
-> Conceptual Architecture for Safe Version Discovery, Opt-in Upgrades, Pinning, and Rollback
+> Design proposal for opt-in update discovery, planning, applying, version pinning, and recovery.
 
----
+## Status and scope
 
-## 1. Problem Statement & Design Objectives
+This document describes the updater interface and safety contract. It does not by itself provide an updater. Only run a command below when `scripts/sadskill-update.py` exists in the checkout you are using; `install.sh --update`, `install.sh --restore`, `scripts/check-update.py`, and an assumed `skills update` subcommand are not Sadskill interfaces.
 
-Agent skills exist at the boundary between developer workflows, agent execution environments, and git repositories. Unlike traditional software dependencies (e.g. npm packages or Python wheels) that run in isolated runtime containers, prompt-based skills directly shape how autonomous AI agents interpret intent, modify files, and enforce safety boundaries.
+Updates must be explicit. A check or plan must not modify installed files. An updater must identify the owning installer, verify the release and archive, preserve each exact destination before replacement, and leave enough journal data to recover an interrupted update. It must refuse ambiguous ownership or untrusted artifacts.
 
-Uncontrolled, silent background updates introduce severe risks:
-1. **Behavioral Drift Mid-Sprint**: An unexpected prompt or protocol update can alter planning depth or change how an agent structures code edits in the middle of a complex project.
-2. **Hook Incompatibilities**: Silent changes to shell safety hooks (`scripts/git-guardrail.sh`) could block legitimate developer operations or break environment integrations.
-3. **Ecosystem Desynchronization**: A split where `npx skills` updates `skills/sadskill/` while local companion slash commands (`~/.claude/commands/`, `~/.codex/prompts/`) remain stale.
+## Ownership boundaries
 
-### Core Objectives:
-- **Zero Silent Mutations**: Never apply updates without explicit developer opt-in.
-- **Clear Separation of Ownership**: Explicitly define what `npx skills` manages versus what `install.sh` / `scripts/doctor.py` manages.
-- **Predictable Version Pinning & Instant Rollback**: Enable locking to a specific release tag and rolling back instantly if regressions appear.
+| Surface | Owner | Safe boundary |
+|---|---|---|
+| Skill package and vendored sources | Sadskill repository and the installation method selected by the user | Keep version selection explicit. Do not assume a third-party package manager has a particular update command or semantics. |
+| Companion commands, prompts, and hooks | Sadskill installer manifest | Update only destinations recorded as Sadskill-owned; refuse user-modified files unless the exact current contents are backed up first. |
+| Claude Code hook registration | `scripts/doctor.py` | `--enable-hooks` registers the hook; `--disable-hooks` removes only Sadskill-owned entries. A local script simulation does not prove the host loaded or invoked it. |
+| Project memory (`.sad/`) | Project Git repository | Never modify it as a side effect of updating installed skill files. |
 
----
+## Proposed updater workflow
 
-## 2. Ownership Boundaries: `skills.sh` vs Companion Installer
-
-To avoid conflicting update mechanisms, `sadskill` adheres to strict division of responsibility:
-
-| Component | Managed By | Update Mechanism | Safety Constraints |
-|---|---|---|---|
-| **Skill Package** (`skills/sadskill/`) | `skills.sh` (`npx skills`) | `npx skills update` | Respects npm registry semver; strictly sandboxed to skill directory. |
-| **Companion Slash Commands** (`~/.claude/commands/`, `~/.codex/prompts/`) | Companion Installer (`install.sh`) | `install.sh --update` | Creates timestamped backup in `~/.sadskill/backups/` before any file replacement. Refuses overwrite if user has customized prompt. |
-| **Host Hooks** (`scripts/git-guardrail.sh`, Claude hooks) | Companion Installer (`install.sh`, `scripts/doctor.py`) | `python3 scripts/doctor.py --enable-hooks` | Verified byte-for-byte; retains pre-existing hooks and supports `--restore-previous`. |
-| **Project Memory** (`.sad/`) | Project Git Repository | Developer git commits | Never modified or wiped by skill update scripts. Backward compatible with earlier schema versions. |
-
----
-
-## 3. Two-Phase Upgrade Workflow: Check vs. Apply
-
-Updates are decoupled into two distinct phases:
-
-### Phase 1: Non-Invasive Update Check
-`scripts/doctor.py` or `scripts/check-update.py` performs a read-only query against GitHub Releases:
-- Queries the latest release tag (e.g., `v0.3.1`) via the GitHub API (with 2-second timeout and offline graceful fallback).
-- Compares against local version defined in `skills/sadskill/SKILL.md` (e.g., `0.3.0`).
-- If an update is available, displays a non-blocking informational notice:
-  ```text
-  [UPDATE AVAILABLE] sadskill v0.3.1 is available (current: v0.3.0).
-  Release Highlights: Improved SQLite authorizer simulation & enhanced AST extraction.
-  To upgrade, run: ./install.sh --update (or npx skills update sadafbabu/sadskill)
-  ```
-- **Zero Network Delay in Hot Paths**: Update checks are strictly throttled (cached for 24 hours in `~/.sadskill/cache/update_check.json`) and never block agent prompt execution.
-
-### Phase 2: Explicit Developer Opt-In Apply
-The user initiates the update explicitly:
-```bash
-# For companion slash commands and hooks:
-./install.sh --update
-
-# For skills.sh ecosystem:
-npx skills update sadafbabu/sadskill
-```
-
-During apply:
-1. **Pre-flight Integrity Check**: Verifies that existing files match expected hashes.
-2. **Conflict Refusal**: If the user has modified their installed slash command or hook, the updater halts with `[CONFLICT-PRESERVED]` and requires `--force` to overwrite.
-3. **Automated Backup**: Copies previous version to `~/.sadskill/backups/<timestamp>-v<old_version>/`.
-4. **Post-Update Doctor Diagnostic**: Automatically runs `python3 scripts/doctor.py` to confirm that all registered commands, hooks, and discovery paths are functional.
-
----
-
-## 4. Version Pinning & Reproducible Environments
-
-For enterprise CI pipelines, teams, and regulated repositories, workflow repeatability is paramount. `sadskill` supports explicit version pinning:
-
-### 1. Git Submodule or Vendoring
-Pin to a specific git commit or release tag:
-```bash
-git submodule add -b v0.3.0 https://github.com/sadafbabu/sadskill.git vendor/sadskill
-```
-
-### 2. NPM / Package Pinning via `package.json`
-```json
-{
-  "devDependencies": {
-    "sadskill": "github:sadafbabu/sadskill#v0.3.0"
-  }
-}
-```
-
-### 3. CI Drift Prevention
-In continuous integration (`.github/workflows/ci.yml`), run `scripts/verify.py` and `scripts/verify-evidence.py` against the pinned repository SHA. If any protocol or hook has drifted from the certified manifest, CI fails immediately before merging.
-
----
-
-## 5. Instant Rollback Protocol
-
-If an updated version introduces unexpected behavior, rollback is single-command and deterministic:
+The following commands are available only in a checkout that contains `scripts/sadskill-update.py`:
 
 ```bash
-# Rollback companion installation to the immediate previous backup:
-./uninstall.sh --restore-previous
-
-# Or force-restore from a specific snapshot:
-./install.sh --restore ~/.sadskill/backups/20261028-v0.3.0/
+python3 scripts/sadskill-update.py check
+python3 scripts/sadskill-update.py plan --json
+python3 scripts/sadskill-update.py apply --json
+python3 scripts/sadskill-update.py rollback --json
 ```
 
-- Restores original pre-update files byte-for-byte.
-- Preserves `.sad/` project memory, historical ADRs, and verification evidence intact.
-- Re-verifies environment health via `scripts/doctor.py`.
+`check` reports release availability and the trust level of the downloaded metadata. `plan` describes exact source files and destinations and performs no filesystem writes. `apply` is an explicit mutation and must verify the archive, check destination ownership, back up exact paths, write a recovery journal before changes, and report whether artifact trust came only from HTTPS transport or also matched a published source checksum. A checksum published beside the archive is not an authenticated publisher signature.
+
+On a user modification, the updater refuses by default. A force option is acceptable only when it preserves the exact current content before replacement and reports the conflict. A malformed release identity, checksum, archive, ownership record, or recovery journal must fail closed.
+
+## Version selection and CI
+
+For repeatable environments, pin the repository to a reviewed commit or release tag using the installation method actually present in the project. Do not claim that CI checks evidence or a certified manifest unless the workflow at `.github/workflows/ci.yml` runs those checks. Workflow runs must be associated with the exact commit SHA under review; a successful run from an earlier head does not verify a later change. [GitHub documents that workflow runs use the workflow and commit associated with the triggering event.](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows)
+
+## Recovery
+
+Use the updater's `rollback` command only when its journal contains exact destination-to-backup mappings and each backup verifies. Recovery must restore the original manifest and install state from their saved copies. Before a forced rollback overwrites post-update edits, it must save and verify those current edits in a conflict backup. It must refuse older or ambiguous journals instead of guessing from filenames.
+
+The updater does not run downloaded code. Host health checks are separate from the update transaction, and their reports must distinguish local tests from host-confirmed activation. For Claude Code hook lifecycle and configuration, follow the [official hooks reference](https://code.claude.com/docs/en/hooks).

@@ -125,16 +125,17 @@ Tasks conclude with demonstrable terminal verification and machine-readable evid
 ### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
 Safety operates through layered boundaries:
 - **Tier 1 (Agent Prompts)**: Strictly forbids destructive operations without explicit confirmation.
-- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` intercepts dangerous bash commands before execution and parses Git `pre-push` ref streams.
+- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` can filter commands only when an agent host supports, loads, and invokes the registered hook; standalone tests do not prove host activation.
 - **Tier 3 (Host Boundaries)**: Sandbox permissions, branch rules, and least privilege.
 
 #### Hook Lifecycle Status:
-- `HOOK_AVAILABLE`: Hook script installed on disk.
-- `HOOK_REGISTERED`: Registered in host configuration (e.g. `PreToolUse` in `~/.claude/settings.json`).
-- `HOOK_ACTIVE`: Actively receiving and filtering host tool events.
+- `AVAILABLE`: Hook script installed on disk, but not registered.
+- `REGISTERED`: A Bash-matching `PreToolUse` entry references the hook, but its script is missing or the local simulation did not pass.
+- `LOCAL_TEST_PASSED`: Registered hook passed a benign local simulation; this does not prove host activation.
+- `HOST_VERIFIED_ACTIVE`: An operator explicitly confirmed host activity with `--confirm-active`; the diagnostic does not observe host events itself.
 
 ### 3. Capability Diagnostic Tool (`scripts/doctor.py`)
-Run the diagnostic doctor to check agent configurations and hook activation:
+Run the diagnostic doctor to check local agent configuration files, Claude hook registration, and a benign local hook simulation. It cannot observe whether an agent host loaded or invoked a hook:
 ```bash
 python3 scripts/doctor.py
 ```

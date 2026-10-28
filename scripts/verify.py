@@ -669,7 +669,7 @@ class VerificationSuite:
             )
             self.assert_true(res_enable.returncode == 0, "doctor.py --enable-hooks executed successfully")
             doc_data_act = json.loads(res_enable.stdout)
-            self.assert_true(doc_data_act["claude_hook"]["status"] == "ACTIVE", "doctor correctly diagnosed Claude hook as ACTIVE after --enable-hooks")
+            self.assert_true(doc_data_act["claude_hook"]["status"] == "LOCAL_TEST_PASSED", "doctor reports only a successful local hook simulation after --enable-hooks")
 
             # 8b. Simulate user modifying an installed prompt to test conflict preservation (P0-01, P0-05, T05)
             codex_backend = codex_prompts / "sad-backend.md"

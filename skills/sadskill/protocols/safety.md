@@ -59,9 +59,10 @@ The following database queries cause irreversible data loss and must never be ru
 `sadskill` provides an executable hook script packaged at `skills/sadskill/hooks/git-guardrail.sh` (mirrored at `scripts/git-guardrail.sh`) that intercepts dangerous commands and terminates with exit code 2 before they run.
 
 ### Hook Integration Status
-- **HOOK_AVAILABLE**: Script is installed on disk.
-- **HOOK_REGISTERED**: Host configuration references the hook.
-- **HOOK_ACTIVE**: Host tool events actively dispatch through the hook.
+- **AVAILABLE**: Script is installed on disk but is not registered.
+- **REGISTERED**: A Bash-matching `PreToolUse` entry references the hook, but its script is missing or the benign local simulation did not pass.
+- **LOCAL_TEST_PASSED**: A registered hook passed a benign local simulation; this does not prove host activation.
+- **HOST_VERIFIED_ACTIVE**: An operator explicitly confirmed the hook in the host. A local diagnostic cannot observe host events and must not assign this automatically.
 
 ### Setup for Claude Code (`~/.claude/settings.json`)
 Register the hook under `PreToolUse` in your Claude Code settings:

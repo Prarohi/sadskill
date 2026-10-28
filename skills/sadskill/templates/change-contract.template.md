@@ -45,6 +45,6 @@ export function {{FUNCTION_NAME}}(arg: {{ARG_TYPE}}): {{RETURN_TYPE}};
 | Type Check | `{{TYPECHECK_COMMAND}}` | 0 errors | `pending` |
 
 ## 8. Rollback & Reversal Strategy
-- **Strategy:** {{ROLLBACK_STRATEGY}} (e.g. `git stash pop`, `down.sql`, rollback branch)
+- **Strategy:** {{ROLLBACK_STRATEGY}} (for example, apply a reviewed inverse patch only to scoped paths; use a data migration rollback only after checking its effects and backup)
 - **Reversibility Assessment:** {{REVERSIBILITY}} (fully_reversible | data_migration_backup_required)
 - **Step 1:** {{RECOVERY_STEP_1}}

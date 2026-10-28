@@ -31,9 +31,11 @@
     }
   ],
   "rollback": {
-    "strategy": "git_revert_or_stash",
+    "strategy": "reviewed_scoped_recovery",
     "steps": [
-      "git checkout -- src/subsystem/target_module.ts"
+      "Inspect the current diff for every scoped path and preserve unrelated or newer user edits.",
+      "Apply only the inverse of this contract's changes to the listed paths; do not discard the whole working-tree file.",
+      "Re-run the listed verification commands and record the result."
     ],
     "reversibility": "fully_reversible"
   },

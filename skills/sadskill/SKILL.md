@@ -62,7 +62,7 @@ Regardless of the active mode, every agent turn must honor these core invariants
 
 ### 1. Safety Guardrails & Non-Destructive Operations
 - Autonomous agents must **never** execute destructive operations (`git reset --hard`, `git push --force`, `git clean -fd`, `DROP TABLE`, `TRUNCATE`) without an explicit user approval gate.
-- Enforce the executable guardrail hook at [scripts/git-guardrail.sh](../../scripts/git-guardrail.sh).
+- Use the packaged guardrail hook at [hooks/git-guardrail.sh](hooks/git-guardrail.sh). A local simulation proves the script runs, not that a host has loaded the hook.
 - Read protocol details in [protocols/safety.md](protocols/safety.md).
 
 ### 2. Verification Evidence Standard
