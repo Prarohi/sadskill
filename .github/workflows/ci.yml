@@ -30,6 +30,11 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      - name: Run Python regression and skill contract tests
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/skill-contract -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/install -v
+
       - name: Run sadskill Verification Suite
         run: python3 scripts/verify.py
 

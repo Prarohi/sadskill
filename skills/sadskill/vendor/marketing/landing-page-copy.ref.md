@@ -17,4 +17,4 @@ License: MIT
      - Bad: "Built with Rust and SIMD vectorization."
      - Good: "Processes 10GB logs in 1.2 seconds so you never wait on queries."
 4. **Friction Reducers**:
-   - Mention "No credit card required", "Open source under MIT", or "Installs in 30 seconds" near CTA buttons.
+   - Mention "No credit card required" or "Open source under MIT" only when true for this project. Use installation-time claims only when measured and verified on the supported setup.

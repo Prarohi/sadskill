@@ -1,0 +1,43 @@
+{
+  "$schema": "https://sadskill.org/schemas/change-contract.v1.json",
+  "contract_id": "CC-YYYYMMDD-HHMMSS-<slug>",
+  "created_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "intent": "Concise description of the concrete engineering outcome the user requested",
+  "scope": [
+    "src/subsystem/target_module.ts",
+    "tests/subsystem/target_test.ts"
+  ],
+  "constraints": [
+    "Preserve backward compatibility for public v1 API",
+    "Zero external dependency additions",
+    "WCAG 2.2 AA contrast compliance"
+  ],
+  "risk": {
+    "tier": "T1",
+    "blast_radius": "low",
+    "reversibility": "fully_reversible",
+    "data_sensitivity": "none",
+    "rationale": "Surgical bugfix confined to single function; no schema or auth mutations"
+  },
+  "assumptions": [
+    "Existing test runner npm test is operational in workspace",
+    "Node.js version is >= 18"
+  ],
+  "verification": [
+    {
+      "command": "npm test -- tests/subsystem/target_test.ts",
+      "expected_outcome": "exit_code_0",
+      "status": "pending"
+    }
+  ],
+  "rollback": {
+    "strategy": "reviewed_scoped_recovery",
+    "steps": [
+      "Inspect the current diff for every scoped path and preserve unrelated or newer user edits.",
+      "Apply only the inverse of this contract's changes to the listed paths; do not discard the whole working-tree file.",
+      "Re-run the listed verification commands and record the result."
+    ],
+    "reversibility": "fully_reversible"
+  },
+  "status": "planned"
+}

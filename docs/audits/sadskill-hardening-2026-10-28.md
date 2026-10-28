@@ -41,7 +41,7 @@
 
 ## 2. P1 Guardrails & Diagnostics
 
-1. **Diagnostic Doctor Utility (`scripts/doctor.py`)**: Added capability scanner reporting hook and agent states: `NOT_INSTALLED`, `AVAILABLE`, `REGISTERED`, `ACTIVE`, and `UNSUPPORTED`. Added `--enable-hooks` for opt-in, idempotent registration of `git-guardrail.sh` in `~/.claude/settings.json`.
+1. **Diagnostic Doctor Utility (`scripts/doctor.py`)**: Added a local capability scanner. It distinguishes `LOCAL_TEST_PASSED` from `HOST_VERIFIED_ACTIVE`; only an explicit operator confirmation can set the latter. Added ownership-aware hook registration and removal using Claude Code's nested settings schema.
 2. **Git Pre-Push Ref-Update Parsing (`scripts/git-guardrail.sh`)**: Added stdin stream inspection for Git pre-push hook protocol, parsing both 4-token streams (`<local_ref> <local_oid> <remote_ref> <remote_oid>`) and 3-token / empty `local_ref` streams (such as `git push origin :main`), blocking remote branch deletions and non-fast-forward force pushes.
 3. **Structured JSON Hook Parsing**: Swapped fragile single-line `sed` regex with robust Python JSON parser handling escaped characters and multi-line commands.
 4. **Lexical Command Parsing & Commit Message Stripping (`scripts/git-guardrail.sh`)**: Replaced naive `tr ';|&' '\n'` with `shlex.shlex(punctuation_chars=True)` lexer to avoid breaking quoted strings containing punctuation. Stripped commit message bodies (`-m`, `--message`) before SQL analysis, eliminating false positives on architectural commit descriptions.
@@ -77,7 +77,7 @@
 | S07 | P0 | Stop filename-only uninstall deletion | `uninstall.sh`, `scripts/manifest.py` | Manifest and content-signature verified | **FIXED** |
 | S08 | P0 | Atomic installer transaction / collision | `scripts/manifest.py` | Atomic temp file write + rename with SHA-256 | **FIXED** |
 | S09 | P1 | Correct purge/no-backup user experience | `install.sh`, `uninstall.sh` | Added `--dry-run` and clear warnings | **FIXED** |
-| S10 | P1 | Hook active-state doctor | `scripts/doctor.py` | Reports AVAILABLE, REGISTERED, ACTIVE honestly | **FIXED** |
+| S10 | P1 | Hook active-state doctor | `scripts/doctor.py` | Local simulations never claim host activation; confirmation is explicit | **FIXED** |
 | S11 | P1 | Correct Git pre-push ref handling | `scripts/git-guardrail.sh` | Ref update stream parsed for force push & delete | **FIXED** |
 | S12 | P1 | Structured Claude JSON parser | `scripts/git-guardrail.sh` | Escaped quotes and multi-line payloads parsed | **FIXED** |
 | S13 | P1 | Guardrail classifier hardening | `scripts/git-guardrail.sh` | Dangerous keywords inside `-m` messages allowed | **FIXED** |

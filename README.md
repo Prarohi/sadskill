@@ -4,13 +4,13 @@
 > *A portable engineering workflow for coding agents that plans proportionally, remembers decisions, verifies outcomes, and reports uncertainty.*  
 > Version: `v0.3.0` · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity, Gemini CLI)
 
-> *"Don't just generate code. Engineer it, verify it, and remember why."*
+> *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
 [![CI](https://github.com/sadafbabu/sadskill/actions/workflows/ci.yml/badge.svg)](https://github.com/sadafbabu/sadskill/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://img.shields.io/badge/skills.sh-sadskill-success.svg)](https://skills.sh)
 
-`sadskill` is an open-source engineering workflow framework for AI coding agents. Instead of juggling conflicting prompt fragments or enduring repetitive trial-and-error cycles, `sadskill` provides **conversation-aware context interpretation, whole-codebase discovery with coverage ledgers, adaptive planning, persistent project memory, defense-in-depth safety guardrails, and proof-grounded verification** across coding agents.
+`sadskill` is an open-source **Engineering Confidence Layer** for AI coding agents. Instead of juggling conflicting prompt fragments or enduring repetitive trial-and-error cycles, `sadskill` provides **conversation-aware context interpretation, whole-codebase discovery with coverage ledgers, risk-proportional planning, persistent project memory, defense-in-depth safety guardrails, and proof-grounded verification** across coding agents.
 
 ---
 
@@ -21,6 +21,18 @@ Install `sadskill` into any supported agent using the universal standard:
 ```bash
 npx skills add sadafbabu/sadskill
 ```
+
+---
+
+## 🎯 The Engineering Confidence Layer
+
+Sadskill transforms autonomous coding agents from unpredictable code generators into reliable software engineers:
+
+- 📖 **[Product Model & Strategy](docs/product/product-model.md)**: The 7 core questions, smallest valuable workflows, and bypass criteria.
+- 🔬 **[10 Real-World Engineering Scenarios](docs/product/examples.md)**: Concrete walkthroughs from T0 bugfixes to multi-tenant billing.
+- 🔄 **[Auto-Update & Lifecycle Concept](docs/product/auto-update-concept.md)**: Opt-in upgrades, pinning, and instant rollback.
+- 📋 **[Product Audit & Ledger](docs/product/audit.md)**: Grounded inspection ledger and architectural findings.
+- 🖥️ **[Host Compatibility & Degradation Matrix](docs/compatibility.md)**: Native, Companion, and Prompt-only capability tiers.
 
 ---
 
@@ -113,16 +125,17 @@ Tasks conclude with demonstrable terminal verification and machine-readable evid
 ### 2. Defense-in-Depth Safety Guardrails (`protocols/safety.md`)
 Safety operates through layered boundaries:
 - **Tier 1 (Agent Prompts)**: Strictly forbids destructive operations without explicit confirmation.
-- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` intercepts dangerous bash commands before execution and parses Git `pre-push` ref streams.
+- **Tier 2 (Hook Filter)**: `skills/sadskill/hooks/git-guardrail.sh` can filter commands only when an agent host supports, loads, and invokes the registered hook; standalone tests do not prove host activation.
 - **Tier 3 (Host Boundaries)**: Sandbox permissions, branch rules, and least privilege.
 
 #### Hook Lifecycle Status:
-- `HOOK_AVAILABLE`: Hook script installed on disk.
-- `HOOK_REGISTERED`: Registered in host configuration (e.g. `PreToolUse` in `~/.claude/settings.json`).
-- `HOOK_ACTIVE`: Actively receiving and filtering host tool events.
+- `AVAILABLE`: Hook script installed on disk, but not registered.
+- `REGISTERED`: A Bash-matching `PreToolUse` entry references the hook, but its script is missing or the local simulation did not pass.
+- `LOCAL_TEST_PASSED`: Registered hook passed a benign local simulation; this does not prove host activation.
+- `HOST_VERIFIED_ACTIVE`: An operator explicitly confirmed host activity with `--confirm-active`; the diagnostic does not observe host events itself.
 
 ### 3. Capability Diagnostic Tool (`scripts/doctor.py`)
-Run the diagnostic doctor to check agent configurations and hook activation:
+Run the diagnostic doctor to check local agent configuration files, Claude hook registration, and a benign local hook simulation. It cannot observe whether an agent host loaded or invoked a hook:
 ```bash
 python3 scripts/doctor.py
 ```
