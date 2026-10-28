@@ -335,7 +335,7 @@ def _validate_release_asset_url(url, tag):
             and parsed.path.startswith(f"/{REPO}/releases/download/{tag}/")
         )
     if not valid:
-        raise core.IntegrityError("SHA256SUMS URL is not from the official release")
+        raise core.IntegrityError("release asset URL is not from the official release")
 
 
 def _validate_release(release, expected_tag=None):
@@ -365,6 +365,7 @@ def _validate_release(release, expected_tag=None):
             if not isinstance(url, str) or not url:
                 raise core.IntegrityError("SHA256SUMS asset has no download URL")
             _validate_release_asset_url(url, tag)
+    release_artifact_url(release)
     return release
 
 
@@ -374,6 +375,23 @@ def release_version(release):
         return core.parse_version(tag)
     except ValueError as exc:
         raise NetworkError(f"release tag unparsable: {tag!r}") from exc
+
+
+def release_artifact_url(release):
+    """Prefer the exact uploaded archive whose bytes the release checksums cover."""
+    name = f"sadskill-{core.version_text(release_version(release))}.tar.gz"
+    matches = [asset for asset in release.get("assets", []) if asset.get("name") == name]
+    if len(matches) > 1:
+        raise core.IntegrityError("release contains duplicate archive assets")
+    if not matches:
+        return release["tarball_url"]
+    url = matches[0].get("browser_download_url")
+    if not isinstance(url, str) or not url:
+        raise core.IntegrityError("release archive asset has no download URL")
+    _validate_release_asset_url(url, release["tag_name"])
+    if os.path.basename(urllib.parse.urlsplit(url).path) != name:
+        raise core.IntegrityError("release archive URL does not match its asset name")
+    return url
 
 
 def release_digest(release, tarball_url):
@@ -642,15 +660,10 @@ def skills_lock_active():
     return bool(data)
 
 
-def installed_version(manifest):
-    """Version from install-state.json, else SKILL.md frontmatter, else None."""
-    try:
-        state = json.loads(INSTALL_STATE_FILE.read_bytes().decode("utf-8"))
-        if isinstance(state, dict) and state.get("version"):
-            return str(state["version"])
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        pass
-    for agent in _SKILL_AGENTS:
+def observed_installed_versions(manifest):
+    """Actual host versions, independently of possibly stale updater state."""
+    versions = []
+    for agent in sorted(_SKILL_AGENTS):
         default = _AGENT_DIRS.get(agent)
         candidates = [entry["destination"] for entry in manifest["entries"]
                       if entry.get("agent") == agent]
@@ -669,7 +682,30 @@ def installed_version(manifest):
             m = re.search(r"^\s*version:\s*['\"]?([0-9][0-9A-Za-z.+-]*)['\"]?\s*$",
                           head, re.MULTILINE)
             if m:
-                return m.group(1)
+                try:
+                    core.parse_version(m.group(1))
+                except ValueError as exc:
+                    raise core.ManifestError("installed skill contains an invalid version") from exc
+                versions.append(m.group(1))
+    return sorted(set(versions), key=core.parse_version)
+
+
+def installed_version(manifest):
+    """Newest observed host version is the downgrade ceiling; state is fallback."""
+    versions = observed_installed_versions(manifest)
+    if versions:
+        return max(versions, key=core.parse_version)
+    try:
+        state = json.loads(INSTALL_STATE_FILE.read_bytes().decode("utf-8"))
+        if isinstance(state, dict) and state.get("version"):
+            version = str(state["version"])
+            try:
+                core.parse_version(version)
+            except ValueError as exc:
+                raise core.ManifestError("install-state contains an invalid version") from exc
+            return version
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        pass
     return None
 
 
@@ -832,7 +868,14 @@ def validate_file_targets(actions):
 # History
 # ---------------------------------------------------------------------------
 
+def validate_history_path():
+    _assert_no_symlink_components(HISTORY_FILE)
+    if HISTORY_FILE.exists() and not HISTORY_FILE.is_file():
+        raise core.IntegrityError("history must be a regular file")
+
+
 def history_append(record):
+    validate_history_path()
     line = json.dumps(record, sort_keys=True) + "\n"
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(line)
@@ -865,6 +908,8 @@ def cmd_status(args):
     result = {
         "command": "status",
         "version": version,
+        "installed_versions": observed_installed_versions(manifest),
+        "mixed_versions": len(observed_installed_versions(manifest)) > 1,
         "channel": channel,
         "hosts": hosts,
         "ownership": ownership,
@@ -895,7 +940,7 @@ def cmd_check(args):
     current = installed_version(manifest)
     up_to_date = current is not None and core.parse_version(
         current
-    ) >= release_version(release)
+    ) >= release_version(release) and len(observed_installed_versions(manifest)) <= 1
     return {
         "command": "check",
         "repo": REPO,
@@ -903,6 +948,7 @@ def cmd_check(args):
         "current": current,
         "latest": latest,
         "up_to_date": up_to_date,
+        "mixed_versions": len(observed_installed_versions(manifest)) > 1,
         "release_url": release.get("html_url"),
         "artifact_trust": _artifact_trust_hint(release),
         "publisher_authenticated": False,
@@ -922,7 +968,7 @@ def cmd_plan(args):
         target_ver = args.version
         release = _fetch_pinned(args.version)
     target_ver = core.version_text(release_version(release))
-    tarball_url = release.get("tarball_url")
+    tarball_url = release_artifact_url(release)
     tar_bytes, artifact_trust = _download_verified(release, tarball_url)
     # A plan validates the bounded archive in memory and never creates staging files.
     _stage, rel_files = stage_archive(tar_bytes, write=False)
@@ -990,6 +1036,7 @@ def cmd_apply(args):
 
 
 def _cmd_apply_locked(args):
+    validate_history_path()
     channel = args.channel or read_channel() or "stable"
     if channel == "pinned" and not args.version:
         raise UsageError("pinned channel requires --version for apply")
@@ -1022,17 +1069,26 @@ def _cmd_apply_locked(args):
                     "safe manager transfer is not supported",
         }, EXIT_ERROR
 
+    versions = observed_installed_versions(manifest)
+    if len(versions) > 1:
+        return {
+            "command": "apply", "refused": True, "mixed_versions": True,
+            "installed_versions": versions,
+            "reasons": ["mixed installed host versions need explicit reconciliation"],
+            "hint": "align the hosts with their owning installer before applying a global update",
+        }, EXIT_CONFLICT
+
     if channel in ("stable", "beta"):
         release = fetch_release(channel)
         to_version = core.version_text(release_version(release))
-        tarball_url = release.get("tarball_url")
+        tarball_url = release_artifact_url(release)
         if not tarball_url:
             raise NetworkError("release has no tarball_url")
     else:
         # Pinned: resolve an explicit release by version tag (network).
         release = _fetch_pinned(args.version)
         to_version = args.version
-        tarball_url = release.get("tarball_url")
+        tarball_url = release_artifact_url(release)
         if not tarball_url:
             raise NetworkError("release has no tarball_url")
 
@@ -1202,9 +1258,9 @@ def _cmd_apply_locked(args):
                     new_hash_type = "tree" if Path(entry_dest).is_dir() else "file"
                 else:
                     continue
-                entry["backup_hash"] = entry.get("content_hash", "")
                 entry["content_hash"] = new_hash
                 entry["content_hash_type"] = new_hash_type
+                entry["content_hash_format"] = "tree-sha256-v2" if new_hash_type == "tree" else "sha256"
                 entry.setdefault("target_root", str(_default_target_root(
                     entry.get("agent"), Path(entry["destination"])
                 )))
@@ -1754,6 +1810,7 @@ def _restore_rollback_file(dest, record, backup):
 
 
 def _cmd_rollback_locked(args):
+    validate_history_path()
     journal_data = core.Journal.load(JOURNAL_FILE)
     if journal_data is None:
         return {

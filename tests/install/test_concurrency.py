@@ -34,7 +34,7 @@ class ConcurrencyTests(SandboxCase):
                 "--agent", agent, "--destination", dest,
                 "--backup", "", "--target", self.project,
             )
-            for agent, dest in (("codex", dest_a), ("cursor", dest_b))
+            for agent, dest in (("claude", dest_a), ("codex", dest_b))
         ]
         outs = [p.communicate() for p in procs]
         for p, (out, err) in zip(procs, outs):

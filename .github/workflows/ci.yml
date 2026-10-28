@@ -125,5 +125,6 @@ jobs:
           echo "Sandbox installation & restore verified."
 
       - name: Test Single Skill Discovery
+        if: matrix.node-version == 22
         run: |
-          npx skills add . -l
+          npx --yes skills@1.7.4 add . -l

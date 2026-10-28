@@ -140,8 +140,20 @@ check_segment() {
     local stripped_git="$clean_cmd"
 
     # Remove global flags: -C <path>, --git-dir=<path>, --git-dir <path>, --work-tree=<path>, -c <key>=<val>, -p, --no-pager
-    local tokens=()
-    read -r -a raw_tokens <<< "$stripped_git"
+    local raw_tokens=()
+    if command -v python3 >/dev/null 2>&1; then
+      # Preserve quoted option values (notably `git -C "path with spaces"`).
+      # NUL separators also preserve whitespace inside individual arguments.
+      local parsed_token
+      while IFS= read -r -d '' parsed_token; do
+        raw_tokens+=("$parsed_token")
+      done < <(python3 -c '
+import shlex, sys
+sys.stdout.write("\0".join(shlex.split(sys.argv[1])) + "\0")
+' "$stripped_git")
+    else
+      read -r -a raw_tokens <<< "$stripped_git"
+    fi
     local idx=1
     local verb=""
     local args=()
@@ -180,11 +192,18 @@ check_segment() {
         fi
         ;;
       push)
-        if [[ "$args_str" =~ (--force|-f\b|--force-with-lease|--delete\b) ]] || [[ "$args_str" =~ (\+[a-zA-Z0-9_\/\.-]+|:[a-zA-Z0-9_\/\.-]+) ]]; then
-          echo "BLOCKED: Destructive or force push detected in 'git $args_str'." >&2
-          echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
-          exit 2
-        fi
+        local push_arg
+        for push_arg in "${args[@]}"; do
+          # A nonempty source in source:destination is an ordinary refspec.
+          # Only an empty source deletes; a leading + requests a force push.
+          if [[ "$push_arg" == --force* || "$push_arg" == --delete ||
+                "$push_arg" =~ ^-[^-]*[fd] || "$push_arg" == +* ||
+                "$push_arg" == :* ]]; then
+            echo "BLOCKED: Destructive or force push detected in 'git push $args_str'." >&2
+            echo "Autonomous execution halted by sadskill safety guardrail (protocols/safety.md)." >&2
+            exit 2
+          fi
+        done
         ;;
       clean)
         if [[ "$args_str" =~ (-f|-fd|-df|-x) ]]; then

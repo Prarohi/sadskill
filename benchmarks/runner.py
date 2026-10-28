@@ -322,7 +322,8 @@ def run_track_c_suite():
 
 def run_benchmarks(output_file=None):
     print("==================================================")
-    print("  sadskill Deterministic Benchmark Validation (v0.3.0)")
+    version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    print(f"  sadskill Deterministic Benchmark Validation (v{version})")
     print("==================================================")
 
     if not TASKS_FILE.exists():

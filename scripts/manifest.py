@@ -25,15 +25,21 @@ Exit codes:
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import re
 import shutil
+import stat
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from . import sadskill_core as core
+except ImportError:
+    import sadskill_core as core
 
 MANIFEST_VERSION = "0.3.0"
 
@@ -65,30 +71,7 @@ def compute_sha256(path):
     """Compute SHA-256 digest of a file or directory tree ("" if absent)."""
     if not path.exists():
         return ""
-    if path.is_file():
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            while chunk := f.read(65536):
-                h.update(chunk)
-        return h.hexdigest()
-    elif path.is_dir():
-        h = hashlib.sha256()
-        for root, dirs, files in os.walk(str(path)):
-            dirs.sort()
-            for file in sorted(files):
-                file_path = Path(root) / file
-                rel = file_path.relative_to(path)
-                h.update(str(rel).encode("utf-8"))
-                try:
-                    with open(file_path, "rb") as f:
-                        while chunk := f.read(65536):
-                            h.update(chunk)
-                except OSError:
-                    # Unreadable files must not silently change the digest:
-                    # include a marker so unreadable != readable-clean.
-                    h.update(b"\x00unreadable\x00")
-        return h.hexdigest()
-    return ""
+    return core.compute_sha256(path)
 
 
 def get_allowed_roots(target_dir=None):
@@ -163,6 +146,10 @@ def validate_manifest(data):
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             raise ManifestError(f"manifest entry #{index} must be a JSON object")
+        try:
+            core.validate_ownership_metadata(entry)
+        except core.ManifestError as exc:
+            raise ManifestError(str(exc)) from exc
         destination = entry.get("destination")
         if not isinstance(destination, str) or not destination:
             raise ManifestError(f"manifest entry #{index} has no valid 'destination'")
@@ -218,22 +205,8 @@ def _fsync_dir(directory: Path):
 
 def save_manifest_atomic(manifest_path: Path, data: dict):
     """Write the manifest via write-temp + rename, fsyncing file and directory."""
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = manifest_path.with_name(f"{manifest_path.name}.tmp.{os.getpid()}")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, manifest_path)
-        _fsync_dir(manifest_path.parent)
-    except Exception as e:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-        raise e
+    validate_manifest(data)
+    core.atomic_write_text(manifest_path, json.dumps(data, indent=2) + "\n", mode=0o600)
 
 
 class LockFile:
@@ -242,10 +215,25 @@ class LockFile:
     def __init__(self, manifest_path: Path):
         self.path = manifest_path.parent / f".{manifest_path.name}.lock"
         self.fd = None
+        self.borrowed = False
 
     def __enter__(self):
+        inherited = os.environ.get("SADSKILL_INSTALL_LOCK_FD")
+        if inherited:
+            try:
+                fd = int(inherited)
+                actual = os.fstat(fd)
+                expected = self.path.lstat()
+                if not stat.S_ISREG(expected.st_mode) or (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
+                    raise ValueError("descriptor does not identify the manifest lock")
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.fd = os.dup(fd)
+                self.borrowed = True
+                return self
+            except (OSError, ValueError) as exc:
+                raise LockError(f"invalid inherited installer lock: {exc}") from exc
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.fd = os.open(str(self.path), os.O_CREAT | os.O_RDWR, 0o600)
+        self.fd = os.open(str(self.path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         deadline = time.monotonic() + LOCK_WAIT_SECONDS
         while True:
             try:
@@ -264,7 +252,8 @@ class LockFile:
     def __exit__(self, *exc):
         if self.fd is not None:
             try:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
+                if not self.borrowed:
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
             finally:
                 os.close(self.fd)
                 self.fd = None
@@ -273,6 +262,43 @@ class LockFile:
 
 def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def validate_owned_destinations(data, target_dir=""):
+    """A manifest may name only the artifacts this installer actually owns."""
+    home = Path.home().resolve()
+    fixed = {
+        "claude": home / ".claude/skills/sadskill",
+        "codex": home / ".codex/skills/sadskill",
+        "gemini": home / ".gemini/skills/sadskill",
+        "antigravity": home / ".gemini/antigravity/skills/sadskill",
+        "claude_hook": home / ".claude/hooks/git-guardrail.sh",
+    }
+    command_names = {f"sad-{mode}.md" for mode in ("plan", "design", "backend", "sec", "analyze")}
+    for entry in data["entries"]:
+        agent = entry["agent"]
+        dest = Path(entry["destination"])
+        if agent in fixed:
+            expected = fixed[agent]
+        elif agent in {"claude_command", "codex_prompt"}:
+            parent = home / (".claude/commands" if agent == "claude_command" else ".codex/prompts")
+            if dest.name not in command_names:
+                raise ManifestError(f"not a Sadskill command destination: {dest}")
+            expected = parent / dest.name
+        elif agent in {"cursor_skill", "cursor_rule"}:
+            workspace = Path(entry.get("target_root") or target_dir).resolve()
+            expected = workspace / (".cursor/skills/sadskill" if agent == "cursor_skill" else ".cursor/rules/sadskill.mdc")
+        else:
+            raise ManifestError(f"unsupported installation agent: {agent}")
+        if dest != expected or dest.resolve() != expected:
+            raise ManifestError(f"destination does not match its canonical Sadskill artifact: {dest}")
+        if entry.get("backup"):
+            backup = Path(entry["backup"])
+            if (backup.parent != dest.parent
+                    or not backup.name.startswith(dest.name + ".bak.")
+                    or backup.name == dest.name + ".bak."
+                    or backup.resolve() != backup or backup.is_symlink()):
+                raise ManifestError(f"backup is not a canonical sibling of its destination: {backup}")
 
 
 def _remove_path(path: Path):
@@ -297,6 +323,8 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
 
     data = load_manifest(manifest_path)
     content_hash = compute_sha256(dest_p)
+    if not content_hash:
+        raise ManifestError("cannot record ownership of an absent destination")
     backup_hash = compute_sha256(backup_p) if backup_p and backup_p.exists() else ""
     timestamp = _now_iso()
 
@@ -325,11 +353,13 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
         "backup": str(backup_p) if backup_p else "",
         "content_hash": content_hash,
         "content_hash_type": "tree" if dest_p.is_dir() else "file",
+        "content_hash_format": "tree-sha256-v2" if dest_p.is_dir() else "sha256",
         "target_root": str(recorded_root),
         "backup_hash": backup_hash,
         "installed_at": timestamp,
         "restored": False,
     }
+    validate_owned_destinations({"entries": [entry]}, target_dir)
 
     existing_idx = None
     for idx, e in enumerate(data["entries"]):
@@ -380,6 +410,7 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
 
     allowed_roots = get_allowed_roots(target_dir)
     data = load_manifest(manifest_path)
+    validate_owned_destinations(data, target_dir)
     entries = data.get("entries", [])
     restored_count = 0
     had_conflict = False
@@ -400,6 +431,11 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
 
         if not bak_p.exists():
             print(f"   [WARN] Backup not found at {bak_p}")
+            continue
+
+        if compute_sha256(bak_p) != entry.get("backup_hash"):
+            print(f"   [CONFLICT] Backup changed or uses an unverified legacy tree hash: {bak_p}")
+            had_conflict = True
             continue
 
         if dest_p.exists():
@@ -439,7 +475,8 @@ def _entry_has_preserved_content(entry: dict) -> bool:
     if backup and Path(backup).exists():
         backup_hash = entry.get("backup_hash", "")
         content_hash = entry.get("content_hash", "")
-        if not (backup_hash and content_hash and backup_hash == content_hash):
+        current_hash = compute_sha256(Path(backup))
+        if not (backup_hash and content_hash and current_hash == backup_hash == content_hash):
             return True
     conflicts = entry.get("conflict_backups") or []
     if isinstance(conflicts, list):
@@ -459,6 +496,7 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
 
     allowed_roots = get_allowed_roots(target_dir)
     data = load_manifest(manifest_path)
+    validate_owned_destinations(data, target_dir)
     entries = data.get("entries", [])
 
     # Step 1: If restore_previous requested, perform safe restoration first
@@ -520,7 +558,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
                 continue
             backup_hash = entry.get("backup_hash", "")
             content_hash = entry.get("content_hash", "")
-            if backup_hash and content_hash and backup_hash == content_hash:
+            current_backup_hash = compute_sha256(bak_p)
+            if backup_hash and content_hash and current_backup_hash == backup_hash == content_hash:
                 # Backup is byte-identical to what sadskill installed: no user
                 # content can be lost by removing it.
                 print(f"   [CLEAN-BACKUP] Removing owned backup: {bak_p}")
@@ -587,6 +626,9 @@ def adopt_orphans(manifest_path: Path, target_dir: str = "", dry_run: bool = Fal
     Orphan backups are kept exactly where they are; they are only referenced.
     """
     data = load_manifest(manifest_path)
+    orphans = data.setdefault("orphan_backups", [])
+    if not isinstance(orphans, list):
+        raise ManifestError("orphan_backups must be a list")
     home = Path.home().resolve()
     candidates = []
     for parts in _ORPHAN_PARENTS:
@@ -608,43 +650,22 @@ def adopt_orphans(manifest_path: Path, target_dir: str = "", dry_run: bool = Fal
             if not original_name:
                 print(f"   [WARN] Cannot derive original name for backup artifact, skipping: {child}")
                 continue
+            if original_name != "sadskill" and original_name != "git-guardrail.sh" and not re.fullmatch(
+                    r"sad-(?:plan|design|backend|sec|analyze)\.md|sadskill\.mdc", original_name):
+                continue
+            if child.is_symlink() or not is_path_contained_in_roots(child, get_allowed_roots(target_dir)):
+                continue
             destination = parent / original_name
             backup_hash = compute_sha256(child)
-            content_hash = compute_sha256(destination) if destination.exists() else ""
             timestamp = _now_iso()
-
-            existing_idx = None
-            for idx, entry in enumerate(data["entries"]):
-                if entry.get("destination") == str(destination):
-                    existing_idx = idx
-                    break
-
-            if existing_idx is not None:
-                entry = data["entries"][existing_idx]
-                conflicts = entry.get("conflict_backups")
-                if not isinstance(conflicts, list):
-                    conflicts = []
-                if str(child) not in [c.get("path") for c in conflicts if isinstance(c, dict)]:
-                    conflicts.append(
-                        {"path": str(child), "hash": backup_hash, "created_at": timestamp}
-                    )
-                    entry["conflict_backups"] = conflicts
-                    adopted += 1
-                    print(f"   [ADOPT] Referenced existing backup for {destination}: {child}")
-            else:
-                data["entries"].append(
-                    {
-                        "agent": agent,
-                        "destination": str(destination),
-                        "backup": str(child),
-                        "content_hash": content_hash,
-                        "backup_hash": backup_hash,
-                        "installed_at": timestamp,
-                        "restored": False,
-                    }
-                )
+            # Discovery is not proof that the current destination is ours.
+            # Keep recovery inventory separate from installed ownership entries.
+            if not any(isinstance(record, dict) and record.get("path") == str(child) for record in orphans):
+                orphans.append({"path": str(child), "hash": backup_hash,
+                                "destination": str(destination), "agent": agent,
+                                "discovered_at": timestamp})
                 adopted += 1
-                print(f"   [ADOPT] Referenced orphan backup for {destination}: {child}")
+                print(f"   [ADOPT] Inventoried recovery backup without destination ownership: {child}")
 
     if not dry_run and adopted:
         save_manifest_atomic(manifest_path, data)
@@ -655,6 +676,15 @@ def adopt_orphans(manifest_path: Path, target_dir: str = "", dry_run: bool = Fal
 def main():
     parser = argparse.ArgumentParser(description="sadskill manifest & transaction manager")
     subparsers = parser.add_subparsers(dest="action", required=True)
+
+    val = subparsers.add_parser("validate", help="Validate before any installer mutation")
+    val.add_argument("--manifest", required=True)
+    val.add_argument("--target", default="")
+    val.add_argument("--dry-run", action="store_true")
+    ins = subparsers.add_parser("install", help="Run installer under its manifest lock")
+    ins.add_argument("--manifest", required=True)
+    ins.add_argument("--target", default="")
+    ins.add_argument("installer_args", nargs=argparse.REMAINDER)
 
     # record
     rec = subparsers.add_parser("record")
@@ -703,7 +733,25 @@ def main():
 
     try:
         rc = 0
-        if args.action == "record":
+        if args.action == "install":
+            with LockFile(manifest_p) as lock:
+                validate_owned_destinations(load_manifest(manifest_p), args.target)
+                environment = dict(os.environ)
+                environment["SADSKILL_INSTALL_LOCK_FD"] = str(lock.fd)
+                arguments = args.installer_args
+                if arguments[:1] == ["--"]:
+                    arguments = arguments[1:]
+                rc = subprocess.run(
+                    ["bash", str(Path(__file__).resolve().parent.parent / "install.sh"), *arguments],
+                    env=environment, pass_fds=(lock.fd,), check=False,
+                ).returncode
+        elif args.action == "validate":
+            if args.dry_run:
+                validate_owned_destinations(load_manifest(manifest_p), args.target)
+            else:
+                with LockFile(manifest_p):
+                    validate_owned_destinations(load_manifest(manifest_p), args.target)
+        elif args.action == "record":
             with LockFile(manifest_p):
                 rc = record_entry(
                     manifest_path=manifest_p,
@@ -771,6 +819,9 @@ def main():
     except LockError as exc:
         print(f"   [ERROR] {exc}", file=sys.stderr)
         return 6
+    except (core.IntegrityError, OSError) as exc:
+        print(f"   [ERROR] {exc}", file=sys.stderr)
+        return 4
     return rc or 0
 
 

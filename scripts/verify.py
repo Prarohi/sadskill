@@ -109,6 +109,9 @@ class VerificationSuite:
         ]
 
         for cmd in expected_commands:
+            mode = cmd.removeprefix("sad-").removesuffix(".md")
+            mode = "security" if mode == "sec" else mode
+            mode_reference = f"modes/{mode}.md"
             codex_cmd = REPO_ROOT / "commands" / "codex" / cmd
             claude_cmd = REPO_ROOT / "commands" / "claude" / cmd
             self.assert_true(codex_cmd.exists(), f"Codex command exists: commands/codex/{cmd}")
@@ -120,12 +123,20 @@ class VerificationSuite:
                     "$ARGUMENTS" in text,
                     f"Codex command commands/codex/{cmd} supports $ARGUMENTS",
                 )
+                self.assert_true(
+                    mode_reference in text and (SKILL_DIR / mode_reference).is_file(),
+                    f"Codex command {cmd} loads its packaged canonical mode",
+                )
 
             if claude_cmd.exists():
                 text = claude_cmd.read_text(encoding="utf-8")
                 self.assert_true(
                     "$ARGUMENTS" in text,
                     f"Claude command commands/claude/{cmd} supports $ARGUMENTS",
+                )
+                self.assert_true(
+                    mode_reference in text and (SKILL_DIR / mode_reference).is_file(),
+                    f"Claude command {cmd} loads its packaged canonical mode",
                 )
 
     def test_modes_and_protocols(self):
@@ -235,9 +246,16 @@ class VerificationSuite:
             self.assert_true(guardrail_script.read_bytes() == skill_hook.read_bytes(), "Guardrail root script and packaged hook are byte-identical")
 
         evidence_verifier = REPO_ROOT / "scripts" / "verify-evidence.py"
+        packaged_verifier = SKILL_DIR / "tools" / "verify-evidence.py"
         self.assert_true(evidence_verifier.exists(), "Evidence verifier exists at scripts/verify-evidence.py")
+        self.assert_true(packaged_verifier.is_file(), "Evidence verifier is packaged at tools/verify-evidence.py")
         if evidence_verifier.exists():
             self.assert_true(os.access(evidence_verifier, os.X_OK), "scripts/verify-evidence.py is marked executable")
+            if packaged_verifier.is_file():
+                self.assert_true(
+                    evidence_verifier.read_bytes() == packaged_verifier.read_bytes(),
+                    "Root evidence verifier and packaged helper are byte-identical",
+                )
 
         manifest_script = REPO_ROOT / "scripts" / "manifest.py"
         self.assert_true(manifest_script.exists(), "Manifest manager exists at scripts/manifest.py")
@@ -318,13 +336,12 @@ class VerificationSuite:
         readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         install_text = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
         uninstall_text = (REPO_ROOT / "uninstall.sh").read_text(encoding="utf-8")
-        guardrail_text = (REPO_ROOT / "scripts" / "git-guardrail.sh").read_text(encoding="utf-8")
-
-        self.assert_true("version: 0.3.0" in skill_text, "SKILL.md defines version: 0.3.0")
-        self.assert_true("v0.3.0" in readme_text, "README.md references v0.3.0")
-        self.assert_true("v0.3.0" in install_text, "install.sh references v0.3.0")
-        self.assert_true("v0.3.0" in uninstall_text, "uninstall.sh references v0.3.0")
-        self.assert_true("v0.3.0" in guardrail_text, "git-guardrail.sh references v0.3.0")
+        version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assert_true(bool(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version)), "VERSION contains a release version")
+        self.assert_true(f"version: {version}" in skill_text, "SKILL.md matches VERSION")
+        self.assert_true(f"v{version}" in readme_text, "README.md matches VERSION")
+        self.assert_true('SCRIPT_DIR}/VERSION' in install_text, "install.sh reads release VERSION")
+        self.assert_true('SCRIPT_DIR}/VERSION' in uninstall_text, "uninstall.sh reads release VERSION")
 
     def test_evidence_verifier_safety(self):
         print("\n--- Testing Evidence Verifier Hardening & Safety ---")

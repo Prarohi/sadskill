@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -58,8 +59,8 @@ _VERSION_RE = re.compile(
 def parse_version(text):
     """Parse 'v?MAJOR.MINOR.PATCH[-pre]' into a comparable tuple.
 
-    Returns (major, minor, patch, pre_tuple) where a release beats any
-    prerelease of the same numeric version (empty pre_tuple sorts highest).
+    Returns (major, minor, patch, is_release, pre_tuple). A release beats
+    every prerelease of the same numeric version.
     Raises ValueError for anything unparseable.
     """
     if not isinstance(text, str):
@@ -74,19 +75,20 @@ def parse_version(text):
         # Each dot-segment: numeric segments compare numerically and always
         # rank BELOW release; non-numeric segments compare as strings.
         pre = tuple(
-            (1, "", int(seg)) if seg.isdigit() else (0, seg, 0)
+            (0, "", int(seg)) if seg.isdigit() else (1, seg, 0)
             for seg in pre_raw.split(".")
         )
     return (
         int(m.group("major")),
         int(m.group("minor")),
         int(m.group("patch")),
+        not bool(pre),
         pre,
     )
 
 
 def version_text(t):
-    major, minor, patch, pre = t
+    major, minor, patch, _is_release, pre = t
     out = f"{major}.{minor}.{patch}"
     if pre:
         out += "-" + ".".join(seg[1] or str(seg[2]) for seg in pre)
@@ -100,6 +102,8 @@ def version_text(t):
 def compute_sha256(path):
     """SHA-256 of a file or directory tree; raises IntegrityError for unreadable content."""
     path = Path(path)
+    if path.is_symlink():
+        raise IntegrityError(f"refusing to hash a symlink root: {path}")
     if not path.exists():
         raise IntegrityError(f"path does not exist: {path}")
     digest = hashlib.sha256()
@@ -111,19 +115,30 @@ def compute_sha256(path):
         except OSError as exc:
             raise IntegrityError(f"cannot read {path}: {exc}") from exc
     elif path.is_dir():
+        digest.update(b"sadskill-tree-sha256-v2\0")
         try:
-            for root, dirs, files in os.walk(str(path)):
+            def walk_error(exc):
+                raise exc
+
+            for root, dirs, files in os.walk(str(path), onerror=walk_error):
                 dirs.sort()
-                for file in sorted(files):
-                    file_path = Path(root) / file
-                    rel = file_path.relative_to(path)
-                    digest.update(str(rel).encode("utf-8"))
-                    try:
-                        with open(file_path, "rb") as f:
-                            for chunk in iter(lambda: f.read(1024 * 512), b""):
-                                digest.update(chunk)
-                    except OSError:
-                        digest.update(b"\x00unreadable\x00")
+                for name in sorted(dirs + files):
+                    child = Path(root) / name
+                    relative = os.fsencode(child.relative_to(path).as_posix())
+                    mode = child.lstat().st_mode
+                    if stat.S_ISLNK(mode):
+                        kind, payload = b"L", os.fsencode(os.readlink(child))
+                    elif stat.S_ISDIR(mode):
+                        kind, payload = b"D", b""
+                    elif stat.S_ISREG(mode):
+                        kind, payload = b"F", bytes.fromhex(compute_sha256(child))
+                    else:
+                        raise IntegrityError(f"unsupported tree entry: {child}")
+                    digest.update(kind)
+                    digest.update(len(relative).to_bytes(8, "big"))
+                    digest.update(relative)
+                    digest.update(len(payload).to_bytes(8, "big"))
+                    digest.update(payload)
         except OSError as exc:
             raise IntegrityError(f"cannot walk {path}: {exc}") from exc
     else:
@@ -215,6 +230,19 @@ _ENTRY_TYPES = {
 }
 
 
+def validate_ownership_metadata(entry):
+    """A structurally incomplete ledger cannot grant deletion authority."""
+    if not isinstance(entry.get("agent"), str) or not entry["agent"]:
+        raise ManifestError("entry requires a non-empty agent")
+    content_hash = entry.get("content_hash")
+    if not isinstance(content_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", content_hash):
+        raise ManifestError("entry requires a valid SHA-256 content_hash")
+    if entry.get("backup"):
+        backup_hash = entry.get("backup_hash")
+        if not isinstance(backup_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", backup_hash):
+            raise ManifestError("recorded backup requires a valid SHA-256 backup_hash")
+
+
 def validate_manifest_data(data):
     """Validate structure; raises ManifestError. Unknown keys are preserved."""
     if not isinstance(data, dict):
@@ -237,6 +265,7 @@ def validate_manifest_data(data):
     for entry in entries:
         if not isinstance(entry, dict):
             raise ManifestError("each manifest entry must be an object")
+        validate_ownership_metadata(entry)
         dest = entry.get("destination")
         if not isinstance(dest, str) or not dest:
             raise ManifestError("entry missing 'destination'")
@@ -307,7 +336,7 @@ class LockFile:
 
     def __enter__(self):
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fd = os.open(str(self.lock_path), os.O_WRONLY | os.O_CREAT, 0o600)
+        self._fd = os.open(str(self.lock_path), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         deadline = time.monotonic() + self.wait_seconds
         while True:
             try:
