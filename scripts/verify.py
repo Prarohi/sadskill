@@ -30,6 +30,28 @@ REPO_ROOT = find_repo_root()
 SKILL_DIR = REPO_ROOT / "skills" / "sadskill"
 
 
+def prepare_evidence_fixture(project_dir):
+    """Initialize a clean Git identity for evidence verifier sandbox tests."""
+    root = Path(project_dir).resolve()
+    readme = root / "README.md"
+    if not readme.exists():
+        readme.write_text("# Evidence verifier fixture\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "--all"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Sadskill Tests",
+         "-c", "user.email=tests@example.invalid", "commit", "-q",
+         "--allow-empty", "-m", "fixture baseline"],
+        check=True,
+    )
+    context = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "verify-evidence.py"),
+         "--project-root", str(root), "--print-context"],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(context.stdout)
+
+
 class VerificationSuite:
     def __init__(self):
         self.errors = []
@@ -277,9 +299,9 @@ class VerificationSuite:
         print("\n--- Testing Reproducible Benchmark Suite ---")
         runner = REPO_ROOT / "benchmarks" / "runner.py"
         res = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True)
-        self.assert_true(res.returncode == 0, f"Reproducible benchmarks passed 100% (exit code {res.returncode})")
+        self.assert_true(res.returncode == 0, f"Deterministic benchmark validation exited cleanly; real-agent execution remains NOT_EXECUTED (exit code {res.returncode})")
         suite_24 = REPO_ROOT / "benchmarks" / "tasks" / "suite_24.json"
-        self.assert_true(suite_24.exists(), "24-task benchmark evaluation suite exists at benchmarks/tasks/suite_24.json")
+        self.assert_true(suite_24.exists(), "24-task benchmark catalog specification exists; seed repos, harness, and C1 runs are not implied")
 
     def test_version_consistency(self):
         print("\n--- Testing Version Consistency Across Files ---")
@@ -315,7 +337,9 @@ class VerificationSuite:
         with tempfile.TemporaryDirectory() as proj_dir:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
+            context = prepare_evidence_fixture(proj_dir)
             bad_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "traversal-test",
                 "command": "python3 test.py",
@@ -340,8 +364,10 @@ class VerificationSuite:
             ev_dir.mkdir(parents=True)
             test_file = Path(proj_dir) / "test.py"
             test_file.write_text("print('ok')", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
 
             chained_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "chained-test",
                 "command": "python3 test.py && echo pwned",
@@ -364,7 +390,9 @@ class VerificationSuite:
         with tempfile.TemporaryDirectory() as proj_dir:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
+            context = prepare_evidence_fixture(proj_dir)
             bool_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "bool-test",
                 "command": "python3 test.py",
@@ -387,7 +415,9 @@ class VerificationSuite:
         with tempfile.TemporaryDirectory() as proj_dir:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
+            context = prepare_evidence_fixture(proj_dir)
             untrusted_cmd_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "untrusted-eval",
                 "command": "python3 -c 'print(1)'",
@@ -412,7 +442,9 @@ class VerificationSuite:
             ev_dir.mkdir(parents=True)
             arbitrary_script = Path(proj_dir) / "evil.py"
             arbitrary_script.write_text("print('pwned')", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
             evil_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "arbitrary-script",
                 "command": "python3 evil.py",
@@ -436,7 +468,9 @@ class VerificationSuite:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
             (Path(proj_dir) / "test_sample.py").write_text("import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
             recipe_record = {
+                **context,
                 "schema_version": "1.0.0",
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "trusted-recipe-test",
@@ -463,7 +497,9 @@ class VerificationSuite:
             ev_dir.mkdir(parents=True)
             doc_file = Path(proj_dir) / "README.md"
             doc_file.write_text("# Doc update", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
             docs_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "doc-update-task",
                 "command": "NONE",
@@ -506,12 +542,12 @@ class VerificationSuite:
             res = subprocess.run([sys.executable, str(fixture_grader)], capture_output=True, text=True)
             self.assert_true(res.returncode == 0, f"Tenant isolation behavioral tests passed cleanly (exit {res.returncode})")
 
-        # 2. Real database RLS fixture
+        # 2. SQLite authorizer simulation of database RLS
         rls_grader = REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"
-        self.assert_true(rls_grader.exists(), "Real database RLS fixture grader exists")
+        self.assert_true(rls_grader.exists(), "SQLite authorizer RLS-simulation grader exists")
         if rls_grader.exists():
             res_rls = subprocess.run([sys.executable, str(rls_grader)], capture_output=True, text=True)
-            self.assert_true(res_rls.returncode == 0, f"Real database RLS behavioral tests passed cleanly (exit {res_rls.returncode})")
+            self.assert_true(res_rls.returncode == 0, f"SQLite authorizer RLS-simulation checks passed (exit {res_rls.returncode})")
 
     def test_markdown_relative_links(self):
         print("\n--- Testing All Markdown Relative Links ---")
@@ -669,7 +705,10 @@ class VerificationSuite:
             )
             self.assert_true(res_enable.returncode == 0, "doctor.py --enable-hooks executed successfully")
             doc_data_act = json.loads(res_enable.stdout)
-            self.assert_true(doc_data_act["claude_hook"]["status"] == "LOCAL_TEST_PASSED", "doctor reports only a successful local hook simulation after --enable-hooks")
+            self.assert_true(
+                doc_data_act["claude_hook"]["status"] == "LOCAL_TEST_PASSED",
+                "doctor reports only a successful local hook simulation after --enable-hooks",
+            )
 
             # 8b. Simulate user modifying an installed prompt to test conflict preservation (P0-01, P0-05, T05)
             codex_backend = codex_prompts / "sad-backend.md"
