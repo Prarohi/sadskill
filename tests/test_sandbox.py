@@ -71,6 +71,62 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
 
+class SandboxWritableRootTests(unittest.TestCase):
+    """Validation must work without any real Bubblewrap privileges."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.workspace = self.root / "project"
+        self.workspace.mkdir()
+        self.capture = self.root / "args.txt"
+        fake_dir = self.root / "fakebin"
+        fake_dir.mkdir()
+        fake = fake_dir / "bwrap"
+        fake.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$BWRAP_ARGS_CAPTURE"\n')
+        fake.chmod(0o755)
+        self.env = dict(os.environ)
+        self.env["PATH"] = str(fake_dir) + os.pathsep + self.env.get("PATH", "")
+        self.env["BWRAP_ARGS_CAPTURE"] = str(self.capture)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def sandbox(self, project):
+        return subprocess.run(
+            ["/bin/bash", str(SANDBOX_SH), "--project-dir", str(project), "--", "/bin/true"],
+            cwd=str(self.workspace), env=self.env, capture_output=True, text=True,
+        )
+
+    def test_broad_system_roots_are_refused(self):
+        for root in ("/", "/etc", "/usr", "/tmp", "/home"):
+            with self.subTest(root=root):
+                self.capture.unlink(missing_ok=True)
+                result = self.sandbox(root)
+                self.assertEqual(result.returncode, 78, result.stderr)
+                self.assertIn("refusing", result.stderr)
+                self.assertFalse(self.capture.exists())
+
+    def test_symlink_to_root_is_refused(self):
+        alias = self.root / "root-link"
+        alias.symlink_to("/", target_is_directory=True)
+        result = self.sandbox(alias)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_narrow_workspace_is_writable(self):
+        result = self.sandbox(self.workspace)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--bind", self.capture.read_text())
+
+    def test_git_worktree_pointer_is_read_only(self):
+        (self.workspace / ".git").write_text("gitdir: /tmp/external-gitdir\n")
+        result = self.sandbox(self.workspace)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = self.capture.read_text().splitlines()
+        self.assertEqual(arguments.count(str(self.workspace / ".git")), 2)
+
+
 class SandboxMissingBwrapTests(unittest.TestCase):
     """Fail-closed behavior must be tested even on CI machines without bwrap."""
 
