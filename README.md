@@ -38,6 +38,8 @@ Sadskill supplies task-routing instructions, engineering checklists and optional
 
 ## 📊 Capabilities and verification limits
 
+Platform-specific guidance loads only for relevant tasks: [Supabase](skills/sadskill/references/supabase.md), [Vercel](skills/sadskill/references/vercel.md), and [Bklit UI charts](skills/sadskill/references/bklit-ui.md). These guides preserve the project's selected stack and authorization boundaries; they do not configure hosted services or install UI dependencies by themselves.
+
 | Capability | Sadskill workflow | Verification limit |
 |---|---|---|
 | **Verification** | Record commands, exit codes and evidence; retest through trusted recipes | An agent-written record does not prove execution; independent retest or trusted CI is stronger evidence |

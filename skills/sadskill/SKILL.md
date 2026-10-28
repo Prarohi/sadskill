@@ -97,6 +97,14 @@ Regardless of the active mode, every agent turn must honor these core invariants
 
 ## 📚 Ecosystem & Vendor References
 
+Read platform guidance only when the task involves that platform. Detect the existing stack and project decisions before choosing tools; these references do not select a provider or authorize account changes.
+
+| Task | Focused guidance |
+|---|---|
+| Supabase Auth, Data API, RLS, migrations, Storage, or MCP | [Supabase](references/supabase.md) |
+| Vercel builds, environments, previews, promotion, or rollback | [Vercel](references/vercel.md) |
+| Charts and data visualization using Bklit UI | [Bklit UI](references/bklit-ui.md) |
+
 `sadskill` integrates curated best practices mapped in the [vendor index](vendor/INDEX.md):
 - **Planning & Architecture**: Matt Pocock deep modules, Superpowers, Karpathy guidelines.
 - **Design & UI**: Impeccable craft floor, Taste taxonomy, Shadcn/Radix primitives, Vercel design guidelines.

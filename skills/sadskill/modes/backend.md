@@ -88,6 +88,8 @@ Backend mode enforces schema-first engineering, engine-aware migrations, zero-tr
 ---
 
 ## 🔗 Vendor Synergies
+- **Supabase-specific work**: Load [Supabase guidance](../references/supabase.md) for Auth, API grants, RLS, migrations, or connected project operations.
+- **Vercel-hosted backend work**: Load [Vercel guidance](../references/vercel.md) for runtime/environment/deployment decisions; detect the actual framework first.
 - **Supabase & Postgres**: [supabase/postgres-best-practices.ref.md](../vendor/supabase/postgres-best-practices.ref.md) and [supabase/rls-and-migrations.ref.md](../vendor/supabase/rls-and-migrations.ref.md).
 - **Edge Infrastructure**: [cloudflare/edge-workers-d1.ref.md](../vendor/cloudflare/edge-workers-d1.ref.md).
 - **Architecture & TDD**: [mattpocock/codebase-design.ref.md](../vendor/mattpocock/codebase-design.ref.md) and [mattpocock/tdd.ref.md](../vendor/mattpocock/tdd.ref.md).

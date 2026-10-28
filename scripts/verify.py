@@ -584,6 +584,7 @@ class VerificationSuite:
             SKILL_DIR / "protocols" / "research.md",
             SKILL_DIR / "protocols" / "memory.md",
         ]
+        files_to_check.extend(sorted((SKILL_DIR / "references").glob("*.md")))
 
         for doc in files_to_check:
             if not doc.exists():
