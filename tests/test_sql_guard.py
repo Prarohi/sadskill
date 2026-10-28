@@ -111,7 +111,7 @@ class SQLGuardTests(unittest.TestCase):
     def test_strings_and_comments_are_not_sql_commands(self):
         safe = [
             "SELECT 'DROP TABLE users; DELETE FROM accounts';",
-            "SELECT $TRUNCATE TABLE users;$;",
+            "SELECT " + chr(36) * 2 + "TRUNCATE TABLE users;" + chr(36) * 2 + ";",
             "SELECT $tag$DELETE FROM users;$tag$;",
             'SELECT "DROP TABLE" FROM users;',
             "SELECT 'it''s DROP TABLE users';",
