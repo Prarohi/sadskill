@@ -13,7 +13,7 @@ import tarfile
 import threading
 import time
 
-REPO = "sadafbabu/sadskill"
+REPO = "Prarohi/sadskill"
 
 SKILL_V031 = """---
 name: sadskill

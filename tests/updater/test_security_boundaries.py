@@ -58,9 +58,9 @@ class RedirectCredentialTests(SandboxCase):
         self.foreign_authorization = []
         release = {
             "tag_name": "v0.3.1",
-            "url": "https://api.github.com/repos/sadafbabu/sadskill/releases/1",
-            "html_url": "https://github.com/sadafbabu/sadskill/releases/tag/v0.3.1",
-            "tarball_url": "https://api.github.com/repos/sadafbabu/sadskill/tarball/v0.3.1",
+            "url": "https://api.github.com/repos/Prarohi/sadskill/releases/1",
+            "html_url": "https://github.com/Prarohi/sadskill/releases/tag/v0.3.1",
+            "tarball_url": "https://api.github.com/repos/Prarohi/sadskill/tarball/v0.3.1",
             "assets": [],
         }
 
@@ -124,11 +124,11 @@ class ReleaseIdentityTests(SandboxCase):
         self.env["SADSKILL_UPDATE_API_BASE"] = self.base
 
     def test_repository_string_in_body_does_not_prove_release_identity(self):
-        self.stub._routes["/repos/sadafbabu/sadskill/releases/latest"] = (
+        self.stub._routes["/repos/Prarohi/sadskill/releases/latest"] = (
             200,
             json.dumps({
                 "tag_name": "v9.9.9",
-                "body": "unrelated text /repos/sadafbabu/sadskill/releases",
+                "body": "unrelated text /repos/Prarohi/sadskill/releases",
                 "url": "https://api.github.com/repos/attacker/other/releases/1",
                 "html_url": "https://evil.example/releases/tag/v9.9.9",
                 "tarball_url": "https://evil.example/archive.tar.gz",
@@ -139,12 +139,12 @@ class ReleaseIdentityTests(SandboxCase):
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
 
     def test_official_release_identity_with_untrusted_artifact_url_is_rejected(self):
-        self.stub._routes["/repos/sadafbabu/sadskill/releases/latest"] = (
+        self.stub._routes["/repos/Prarohi/sadskill/releases/latest"] = (
             200,
             json.dumps({
                 "tag_name": "v0.3.1",
-                "url": "https://api.github.com/repos/sadafbabu/sadskill/releases/1",
-                "html_url": "https://github.com/sadafbabu/sadskill/releases/tag/v0.3.1",
+                "url": "https://api.github.com/repos/Prarohi/sadskill/releases/1",
+                "html_url": "https://github.com/Prarohi/sadskill/releases/tag/v0.3.1",
                 "tarball_url": "https://evil.example/archive.tar.gz",
                 "assets": [],
             }).encode(),

@@ -19,7 +19,7 @@ Commands:
 Channels: stable (GitHub latest release), beta (latest incl. prereleases),
 pinned (explicit --version required; never auto-updates).
 
-Trust model: pinned repo identity sadafbabu/sadskill, HTTPS with timeouts,
+Trust model: pinned repo identity Prarohi/sadskill, HTTPS with timeouts,
 bounded redirects and sizes, SHA-256 verification when a SHA256SUMS asset is
 published, strict archive validation (no traversal/symlinks/devices/abs paths/
 duplicate entries), and no downloaded code is ever executed.
@@ -58,7 +58,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import sadskill_core as core  # noqa: E402
 
-REPO = "sadafbabu/sadskill"
+REPO = "Prarohi/sadskill"
 REPO_OWNER, REPO_NAME = REPO.split("/", 1)
 MANIFEST_FILE = Path.home() / ".sadskill" / "install-manifest.json"
 STATE_DIR = Path.home() / ".sadskill"

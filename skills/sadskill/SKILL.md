@@ -28,7 +28,7 @@ Inspect the incoming user prompt or slash command. Route immediately to the targ
 | `$sadskill analyze` | `/sad-analyze` | "analyze codebase", "module depth", "find dead code" | **Analyze** | [modes/analyze.md](modes/analyze.md) |
 
 ### Invocation Architecture:
-- **Standard (`skills.sh`)**: When installed via `npx skills add sadafbabu/sadskill`, invoke via `$sadskill <mode>` or natural language prompts.
+- **Standard (`skills.sh`)**: When installed via `npx skills add Prarohi/sadskill`, invoke via `$sadskill <mode>` or natural language prompts.
 - **Companion (`install.sh`)**: When installed via `./install.sh`, native slash commands (`/sad-*`) are registered directly into Claude Code commands (`~/.claude/commands/`), OpenAI Codex prompts (`~/.codex/prompts/`), and Cursor rules (`.cursor/rules/`).
 
 ---

@@ -17,7 +17,7 @@ Security is a foundational pillar of `sadskill`. If you discover a vulnerability
 
 1. **Do NOT open a public GitHub issue.**
 2. Send an advisory report via GitHub Private Security Advisories:
-   - Navigate to the [Security Advisories](https://github.com/sadafbabu/sadskill/security/advisories) tab on GitHub.
+   - Navigate to the [Security Advisories](https://github.com/Prarohi/sadskill/security/advisories) tab on GitHub.
    - Click **"Report a vulnerability"**.
 3. Include:
    - A description of the issue and affected files/protocols.

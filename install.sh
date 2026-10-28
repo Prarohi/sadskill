@@ -23,7 +23,7 @@ Options:
   -h, --help             Show this help message and exit
 
 Primary Recommended Installation (Universal):
-  npx skills add sadafbabu/sadskill
+  npx skills add Prarohi/sadskill
 EOF
   exit "$exit_code"
 }

@@ -6,7 +6,7 @@
 
 > *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
-[![CI](https://github.com/sadafbabu/sadskill/actions/workflows/ci.yml/badge.svg)](https://github.com/sadafbabu/sadskill/actions/workflows/ci.yml)
+[![CI](https://github.com/Prarohi/sadskill/actions/workflows/ci.yml/badge.svg)](https://github.com/Prarohi/sadskill/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://img.shields.io/badge/skills.sh-sadskill-success.svg)](https://skills.sh)
 
@@ -19,7 +19,7 @@
 Install `sadskill` into any supported agent using the universal standard:
 
 ```bash
-npx skills add sadafbabu/sadskill
+npx skills add Prarohi/sadskill
 ```
 
 ---
@@ -87,7 +87,7 @@ flowchart TD
 For deep local host integrations (Claude Code commands, Cursor `.mdc` rules, non-destructive backups):
 
 ```bash
-git clone https://github.com/sadafbabu/sadskill.git
+git clone https://github.com/Prarohi/sadskill.git
 cd sadskill
 ./install.sh
 ```
