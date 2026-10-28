@@ -73,3 +73,28 @@ turn unrun checks into passing checks.
 If your GitHub connector cannot update the ruleset, do not alter the branch
 through an alternate destructive ref operation. Explain the permissions
 blocker and keep the PR reviewable.
+
+## Pinned web installer: intentionally breaking security change
+
+The former scripts/web-install.sh fetched a mutable main branch archive and
+executed it without integrity checking. That behavior is now refused.
+Both the exact 40-character commit SHA and a trusted, independently verified
+archive SHA-256 digest are mandatory before any download or execution.
+
+Run the script from an inspected checkout, or verify the bootstrap script
+separately before using it. The following command requires real values:
+
+```bash
+bash scripts/web-install.sh --commit YOUR_40_HEX_COMMIT --sha256 YOUR_64_HEX_ARCHIVE_DIGEST -- --agent codex
+```
+
+The archive is fetched via HTTPS from the pinned codeload commit. The script
+checks SHA-256 before unpacking, rejects traversal, duplicate paths, links,
+special files, excessive size/count/depth, and executes the installer only
+after these checks. Its code is not a substitute for a *trusted digest
+distribution channel*. Do NOT calculate the checksum from the same untrusted
+download and claim that this independently authenticates the release.
+
+Tests: tests/test_web_install_security.py runs offline with a fake downloader.
+Until signed/published release digests, comprehensive platform checks and
+independent review are complete, issue #10 remains open.
