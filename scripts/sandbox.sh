@@ -25,6 +25,10 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --project-dir)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "ERROR: --project-dir needs a directory" >&2
+        exit 78
+      fi
       PROJECT_DIR="$2"
       shift 2
       ;;
@@ -46,6 +50,23 @@ fi
 if [[ -z "$PROJECT_DIR" ]]; then
   PROJECT_DIR="$(pwd -P)"
 fi
+
+# Resolve links before mounting; never permit a broad or protected writable root.
+if [[ ! -d "$PROJECT_DIR" ]]; then
+  echo "ERROR: missing sandbox project directory: $PROJECT_DIR" >&2
+  exit 78
+fi
+PROJECT_DIR="$(cd -- "$PROJECT_DIR" && pwd -P)"
+case "$PROJECT_DIR" in
+  /|/home|/tmp|/var|/mnt|/media|/opt|/workspace|/workspaces|/Users|/etc|/usr|/bin|/sbin|/lib|/lib64|/boot|/dev|/proc|/sys|/run|/root|/snap|/srv)
+    echo "ERROR: refusing broad writable sandbox mount: $PROJECT_DIR" >&2
+    exit 78
+    ;;
+  /etc/*|/usr/*|/bin/*|/sbin/*|/lib/*|/lib64/*|/boot/*|/dev/*|/proc/*|/sys/*|/run/*|/snap/*)
+    echo "ERROR: refusing protected system workspace: $PROJECT_DIR" >&2
+    exit 78
+    ;;
+esac
 
 if ! command -v bwrap >/dev/null 2>&1; then
   if [[ "$ALLOW_UNSANDBOXED" != "true" ]]; then
@@ -70,7 +91,7 @@ BWRAP_ARGS=(
   --die-with-parent
 )
 
-if [[ "$RO_GIT" == "true" && -d "$PROJECT_DIR/.git" ]]; then
+if [[ "$RO_GIT" == "true" && -e "$PROJECT_DIR/.git" ]]; then
   BWRAP_ARGS+=(--ro-bind "$PROJECT_DIR/.git" "$PROJECT_DIR/.git")
 fi
 
