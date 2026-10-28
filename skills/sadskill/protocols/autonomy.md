@@ -2,6 +2,8 @@
 
 > Bounded Autonomy, Four Predictable Execution Modes, Hard Stop Triggers, and Bounded Retries
 
+Follow the canonical [cross-mode workflow contract](workflow.md) when selecting permission gates, staged modes, and proportional verification. No execution contract grants the ability to bypass host policy or required GitHub reviews.
+
 ## 1. The Four Execution Contracts
 
 Every task operates under an explicit execution contract derived from user intent:
@@ -53,8 +55,8 @@ DISCOVER -> UNDERSTAND -> PLAN_PROPORTIONALLY -> EXECUTE -> TEST -> REVISE -> VE
 
 ## 4. Pre-Existing Failure Segregation
 
-1. **Baseline Discovery**:
-   - Before applying modifications, run the project's test suite to establish the baseline health.
+1. **Proportional Baseline Discovery**:
+   - Before implementation, run the smallest relevant existing tests or diagnostics when possible; scale up to the broader suite for architectural, security-sensitive, or cross-module changes. A full-suite preflight is not mandatory for T0 documentation or one-line cosmetic work. Read-only review must not use tooling that writes into the repository. If no test can run, record `NOT_EXECUTED` rather than inventing a clean baseline.
 2. **Failure Segregation**:
    - If pre-existing tests fail prior to any edits, record them in the task notes:
      ```text

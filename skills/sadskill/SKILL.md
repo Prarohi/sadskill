@@ -17,7 +17,7 @@ metadata:
 
 ## 🧭 Step 1: Command & Intent Router
 
-Inspect the incoming user prompt or slash command. Route immediately to the target mode:
+Determine the user's **execution contract and permissions first**, then route to the primary mode. For multi-domain tasks, run bounded phases under [protocols/workflow.md](protocols/workflow.md); a slash command chooses a domain, not extra write authority:
 
 | Universal Trigger (`skills.sh`) | Native Slash Command (`install.sh`) | Natural Language Intent | Target Mode | Mode Specification |
 |---|---|---|---|---|
@@ -26,6 +26,11 @@ Inspect the incoming user prompt or slash command. Route immediately to the targ
 | `$sadskill backend` | `/sad-backend` | "write schema", "database migration", "RLS policy" | **Backend** | [modes/backend.md](modes/backend.md) |
 | `$sadskill sec` | `/sad-sec` | "audit security", "find secret leaks", "check OWASP" | **Security** | [modes/security.md](modes/security.md) |
 | `$sadskill analyze` | `/sad-analyze` | "analyze codebase", "module depth", "find dead code" | **Analyze** | [modes/analyze.md](modes/analyze.md) |
+
+### Multi-Mode and Scope Contract
+- Load [protocols/workflow.md](protocols/workflow.md) when a task spans modes, requests autonomy or a merge, or mixes auditing with implementation. Apply its permission gates before edits.
+- Risk is not file-count-only: migrations, authentication, tenancy, payments, secrets, and external side effects are **T2** even for a one-file change.
+- A requested read-only audit never writes to disk, including `.sad/`, even when a vulnerability is discovered. A later authorized fix is a separate implementation phase.
 
 ### Invocation Architecture:
 - **Standard (`skills.sh`)**: When installed via `npx skills add Prarohi/sadskill`, invoke via `$sadskill <mode>` or natural language prompts.
@@ -66,9 +71,10 @@ Regardless of the active mode, every agent turn must honor these core invariants
 - Read protocol details in [protocols/safety.md](protocols/safety.md).
 
 ### 2. Verification Evidence Standard
-- Never claim a task, fix, or feature is complete without executing the test or build command and verifying exit code 0.
-- Record structured verification metadata in `.sad/evidence/<timestamp>-<slug>.json`.
-- Output a 3-line terminal execution proof in chat displaying command, exit code, and passed assertions.
+- For executable changes, **run relevant checks** and report exact commands, exit codes, and failures; never claim passing tests that did not run.
+- For non-runnable analysis, documentation-only, or host-limited tasks, report `SKIPPED_WITH_REASON` or `NOT_EXECUTED`. Do not manufacture green test runs.
+- Record structured evidence in `.sad/evidence/<timestamp>-<slug>.json` **only if the execution contract permits writes**; `REVIEW_ONLY` writes nothing.
+- Show a 3-line execution proof in chat only when commands actually ran; distinguish agent-reported output from independent CI/retest.
 - Read protocol details in [protocols/evidence.md](protocols/evidence.md).
 
 ### 3. Context & Project Memory (`.sad/`)
