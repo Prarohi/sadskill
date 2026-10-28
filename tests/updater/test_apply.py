@@ -1,11 +1,13 @@
 """Updater apply/rollback transaction tests."""
 
 import importlib.util
+import io
 import json
 import os
 import shutil
 import stat
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,6 +142,41 @@ class ApplyRollbackTests(SandboxCase):
         self.assertIn("unsupported special permission bits", applied.stdout)
         self.assertEqual(target.read_bytes(), original)
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o4755)
+        self.assertFalse(
+            (Path(self.home) / ".sadskill" / "update-journal.json").exists()
+        )
+
+    def test_nested_duplicate_command_destination_is_rejected_before_journal(self):
+        files = {
+            "release/skills/sadskill/SKILL.md": (
+                b"---\nname: sadskill\nversion: 0.3.1\n---\nupdated\n"
+            ),
+            "release/skills/sadskill/hooks/git-guardrail.sh": (
+                b"#!/usr/bin/env bash\nexit 0\n"
+            ),
+            "release/commands/claude/sad-analyze.md": b"direct update\n",
+            "release/commands/claude/nested/sad-analyze.md": b"nested update\n",
+        }
+        archive_bytes = io.BytesIO()
+        with tarfile.open(fileobj=archive_bytes, mode="w:gz") as archive:
+            for name, data in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        self.stub.serve_release("v0.3.1", archive_bytes.getvalue())
+
+        skill = Path(self.skill_md())
+        command = Path(self.home) / ".claude" / "commands" / "sad-analyze.md"
+        skill_before = skill.read_bytes()
+        command_before = command.read_bytes()
+        home_before = self.home_snapshot()
+        applied = self.run_update("apply", "--json", "--force")
+
+        self.assertEqual(applied.returncode, 4, applied.stdout + applied.stderr)
+        self.assertIn("not a direct Markdown file", applied.stdout)
+        self.assertEqual(skill.read_bytes(), skill_before)
+        self.assertEqual(command.read_bytes(), command_before)
+        self.assertEqual(self.home_snapshot(), home_before)
         self.assertFalse(
             (Path(self.home) / ".sadskill" / "update-journal.json").exists()
         )
