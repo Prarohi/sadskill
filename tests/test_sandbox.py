@@ -4,6 +4,7 @@ and offline network isolation.
 """
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -68,6 +69,48 @@ class SandboxTests(unittest.TestCase):
             cwd=str(self.proj),
         )
         self.assertEqual(res.returncode, 0)
+
+
+class SandboxMissingBwrapTests(unittest.TestCase):
+    """Fail-closed behavior must be tested even on CI machines without bwrap."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.fake_path = self.root / "empty-path"
+        self.fake_path.mkdir()
+        self.env = dict(os.environ, PATH=str(self.fake_path))
+        self.target = self.root / "must-not-run"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_sandbox(self, *options):
+        return subprocess.run(
+            ["/bin/bash", str(SANDBOX_SH), *options, "--", "/usr/bin/touch", str(self.target)],
+            cwd=str(self.root),
+            env=self.env,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_missing_bwrap_fails_closed(self):
+        result = self.run_sandbox()
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertFalse(self.target.exists())
+        self.assertIn("NOT executed", result.stderr)
+
+    def test_explicit_unsandboxed_opt_in(self):
+        result = self.run_sandbox("--allow-unsandboxed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target.exists())
+        self.assertIn("WITHOUT containment", result.stderr)
+
+    def test_offline_refuses_unsandboxed_fallback(self):
+        result = self.run_sandbox("--offline", "--allow-unsandboxed")
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertFalse(self.target.exists())
+        self.assertIn("cannot be honored", result.stderr)
 
 
 if __name__ == "__main__":

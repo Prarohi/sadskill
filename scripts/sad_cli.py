@@ -181,6 +181,8 @@ def cmd_sandbox(args, extra_args) -> int:
         cmd.append("--offline")
     if args.allow_git:
         cmd.append("--allow-git")
+    if args.allow_unsandboxed:
+        cmd.append("--allow-unsandboxed")
     cmd.append("--")
     cmd.extend(extra_args)
     return subprocess.run(cmd).returncode
@@ -228,6 +230,7 @@ def main():
     sandbox_p = subparsers.add_parser("sandbox", help="Run command inside Bubblewrap OS containment sandbox")
     sandbox_p.add_argument("--offline", action="store_true", help="Unshare network namespace")
     sandbox_p.add_argument("--allow-git", action="store_true", help="Allow write access to .git")
+    sandbox_p.add_argument("--allow-unsandboxed", action="store_true", help="Explicitly execute without containment if bwrap is unavailable (unsafe; incompatible with --offline)")
 
     args, extra = parser.parse_known_args()
 

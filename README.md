@@ -110,6 +110,8 @@ cd sadskill
 
 > **Safe by Design**: `install.sh` uses a transactional manager (`scripts/manifest.py`) to record installed file digests in `~/.sadskill/install-manifest.json` and preserves preexisting files in timestamped `.bak.<timestamp>` archives.
 
+> **Sandbox safety**: `sad sandbox -- <command>` requires Linux `bwrap` and refuses to run if unavailable (exit 78). Only `--allow-unsandboxed` permits an explicit unsafe fallback, and `--offline` always refuses that fallback. The sandbox is supplemental isolation, not a guarantee against every exploit.
+
 ---
 
 ## 🛡️ Core Protocols & Security Model

@@ -7,6 +7,7 @@ set -euo pipefail
 
 OFFLINE=false
 RO_GIT=true
+ALLOW_UNSANDBOXED=false
 PROJECT_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -17,6 +18,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-git)
       RO_GIT=false
+      shift
+      ;;
+    --allow-unsandboxed)
+      ALLOW_UNSANDBOXED=true
       shift
       ;;
     --project-dir)
@@ -34,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ $# -eq 0 ]]; then
-  echo "Usage: $0 [--offline] [--allow-git] [--project-dir <path>] -- <command> [args...]" >&2
+  echo "Usage: $0 [--offline] [--allow-git] [--allow-unsandboxed] [--project-dir <path>] -- <command> [args...]" >&2
   exit 1
 fi
 
@@ -43,7 +48,15 @@ if [[ -z "$PROJECT_DIR" ]]; then
 fi
 
 if ! command -v bwrap >/dev/null 2>&1; then
-  echo "WARN: bubblewrap ('bwrap') is not installed. Running command without OS sandbox containment." >&2
+  if [[ "$ALLOW_UNSANDBOXED" != "true" ]]; then
+    echo "ERROR: bubblewrap ('bwrap') is unavailable; command NOT executed. Install bwrap or explicitly choose --allow-unsandboxed (unsafe)." >&2
+    exit 78
+  fi
+  if [[ "$OFFLINE" == "true" ]]; then
+    echo "ERROR: --offline cannot be honored without bwrap; refusing unsandboxed execution." >&2
+    exit 78
+  fi
+  echo "WARNING: --allow-unsandboxed explicitly selected; command will execute WITHOUT containment." >&2
   exec "$@"
 fi
 

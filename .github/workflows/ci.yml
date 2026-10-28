@@ -60,7 +60,7 @@ jobs:
       - name: Check Python and Bash syntax and patch whitespace
         run: |
           python3 -m compileall -q scripts benchmarks tests
-          bash -n install.sh uninstall.sh scripts/git-guardrail.sh skills/sadskill/hooks/git-guardrail.sh
+          bash -n install.sh uninstall.sh scripts/git-guardrail.sh skills/sadskill/hooks/git-guardrail.sh scripts/sandbox.sh scripts/web-install.sh
           git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}"...HEAD
 
       - name: Run Python regression tests

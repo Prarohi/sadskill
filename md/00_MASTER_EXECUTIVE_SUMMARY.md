@@ -1,7 +1,7 @@
 # Sadskill 10/10 World-Class Master Plan: Executive Summary
 
-> **Current State Score**: **8.9 / 10** (Up from 6.4 in `main` and 7.8 in PR #4)  
-> **Target Milestone**: **10.0 / 10** (Defensible Global Category Leader)  
+> **Current State Score**: **8.9 / 10** (Up from 6.4 in `main` and 7.8 in PR #4)
+> **Target Milestone**: **10.0 / 10** (Defensible Global Category Leader)
 > **Core Value Thesis**: *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
 ---
