@@ -1,8 +1,8 @@
 # Comprehensive Product & Codebase Audit: `sadskill`
 
-**Audit Date:** 28 October 2026  
-**Audited Base Commit:** `0711f806529bc2164161d898d03561435c9d573f`  
-**Auditor Role:** Principal Product Architect & AI Agent Workflow Designer
+- **Audit Date:** 28 October 2026
+- **Audited Base Commit:** `0711f806529bc2164161d898d03561435c9d573f`
+- **Auditor Role:** Principal Product Architect & AI Agent Workflow Designer
 
 ---
 

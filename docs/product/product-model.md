@@ -1,6 +1,7 @@
 # The `sadskill` Product Model & Architecture Thesis
 
-> **Product Thesis**:  
+> **Product Thesis**:
+>
 > *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
 ---

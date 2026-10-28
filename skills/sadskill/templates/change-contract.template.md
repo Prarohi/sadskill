@@ -1,7 +1,8 @@
 # Change Contract: `{{CONTRACT_ID}}`
 
-> **Status:** `{{STATUS}}` (planned | executing | verified | partial | blocked)  
-> **Risk Tier:** `{{RISK_TIER}}` (T0 | T1 | T2) — {{RISK_RATIONALE}}  
+> **Status:** `{{STATUS}}` (planned | executing | verified | partial | blocked)
+>
+> **Risk Tier:** `{{RISK_TIER}}` (T0 | T1 | T2) — {{RISK_RATIONALE}}
 > **Created At:** `{{CREATED_AT}}`
 
 ---
