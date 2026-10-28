@@ -25,12 +25,15 @@ FORBIDDEN_ARG_TOKENS = {";", "&&", "||", "|", "`", "$(", ">", "<", "\n", "\r"}
 # Dangerous inline code flags rejected in unattended safe retest
 DISALLOWED_INLINE_FLAGS = {"-c", "-e", "--eval"}
 MAX_EVIDENCE_FILE_BYTES = 1024 * 1024
+MAX_SUBMODULE_DEPTH = 16
 _IGNORED_TEST_CONFIGS = {
     "cargo.toml", "cargo.lock", "build.rs", "conftest.py", "pytest.ini",
     "pyproject.toml", "setup.cfg", "tox.ini", "go.mod", "go.sum", "go.work",
-    "go.work.sum",
+    "go.work.sum", "config", "config.toml",
 }
-_IGNORED_TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__", "fixtures"}
+_IGNORED_TEST_DIRS = {
+    "test", "tests", "spec", "specs", "__tests__", "fixtures", "testdata",
+}
 _IGNORED_GENERATED_DIRS = {
     ".git", ".venv", "venv", "node_modules", ".tox", ".pytest_cache",
     "target", "build", "dist",
@@ -89,14 +92,31 @@ def _is_relevant_ignored_test_input(relative):
     """Select ignored source, config, and fixture files used by fixed recipes."""
     path = Path(os.fsdecode(relative))
     parts = [part.lower() for part in path.parts]
-    if any(part in _IGNORED_GENERATED_DIRS for part in parts):
+    test_index = next(
+        (index for index, part in enumerate(parts[:-1])
+         if part in _IGNORED_TEST_DIRS),
+        None,
+    )
+    generated_index = next(
+        (index for index, part in enumerate(parts)
+         if part in _IGNORED_GENERATED_DIRS),
+        None,
+    )
+    if (generated_index is not None
+            and (test_index is None or generated_index < test_index)):
         return False
+    if test_index is not None:
+        return True
     basename = path.name.lower()
     if basename in _IGNORED_TEST_CONFIGS:
         return True
+    if len(parts) >= 2 and parts[-2] == ".cargo" and parts[-1] in {
+            "config", "config.toml"}:
+        return True
     if path.suffix.lower() in {".py", ".rs", ".go"}:
         return True
-    return any(part in _IGNORED_TEST_DIRS for part in parts[:-1])
+    return (basename.startswith(("test_", "test-", "fixture_", "fixture-"))
+            or basename.endswith("_test.json"))
 
 
 def _ignored_test_paths(project_root):
@@ -116,17 +136,55 @@ def _ignored_test_paths(project_root):
     ]
 
 
-def worktree_snapshot(project_root: Path):
+def _configured_submodule_paths(project_root):
+    """Read safe relative submodule paths from the local .gitmodules file."""
+    config = project_root / ".gitmodules"
+    if config.is_symlink():
+        return None
+    if not config.exists():
+        return []
+    result = subprocess.run(
+        ["git", "config", "--null", "--file", str(config), "--get-regexp",
+         r"^submodule\..*\.path$"],
+        cwd=str(project_root), capture_output=True, check=False,
+    )
+    if result.returncode == 1 and not result.stdout:
+        return []
+    if result.returncode != 0:
+        return None
+    paths = []
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        key, separator, value = record.partition(b"\n")
+        if (not separator or not key.lower().startswith(b"submodule.")
+                or not key.lower().endswith(b".path") or not value):
+            return None
+        relative = Path(os.fsdecode(value))
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            return None
+        paths.append(relative)
+    if len({path.as_posix() for path in paths}) != len(paths):
+        return None
+    return paths
+
+
+def worktree_snapshot(project_root: Path, _submodule_depth=0):
     """Digest tracked, untracked, and relevant ignored test inputs."""
+    if _submodule_depth > MAX_SUBMODULE_DEPTH:
+        return None
     status = subprocess.run(
         [
-            "git", "status", "--porcelain", "-z", "--untracked-files=all", "--",
+            "git", "status", "--porcelain", "-z", "--untracked-files=all",
+            "--ignore-submodules=none", "--",
             ".", ":(exclude).sad/evidence", ":(exclude).sad/evidence/**",
         ], cwd=str(project_root), capture_output=True, check=False,
     )
     paths = _untracked_paths(project_root)
     ignored_paths = _ignored_test_paths(project_root)
-    if status.returncode != 0 or paths is None or ignored_paths is None:
+    submodule_paths = _configured_submodule_paths(project_root)
+    if (status.returncode != 0 or paths is None or ignored_paths is None
+            or submodule_paths is None):
         return None
 
     digest = hashlib.sha256()
@@ -175,8 +233,45 @@ def worktree_snapshot(project_root: Path):
         except OSError:
             return None
 
+    submodule_dirty = False
+    for relative in sorted(submodule_paths, key=lambda item: item.as_posix()):
+        submodule = project_root / relative
+        cursor = project_root
+        for part in relative.parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                return None
+        if not submodule.is_dir():
+            # An uninitialized submodule cannot provide a complete test-input
+            # snapshot, so evidence from this checkout is not verifiable.
+            return None
+        resolved = submodule.resolve(strict=True)
+        if not is_within(resolved, project_root):
+            return None
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=str(resolved),
+            capture_output=True, text=True, check=False,
+        )
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(resolved),
+            capture_output=True, text=True, check=False,
+        )
+        if (top.returncode != 0 or head.returncode != 0
+                or Path(top.stdout.strip()).resolve() != resolved):
+            return None
+        nested = worktree_snapshot(resolved, _submodule_depth + 1)
+        if nested is None:
+            return None
+        relative_bytes = os.fsencode(relative.as_posix())
+        digest.update(b"submodule\0")
+        digest.update(len(relative_bytes).to_bytes(8, "big"))
+        digest.update(relative_bytes)
+        digest.update(head.stdout.strip().encode("ascii", errors="strict"))
+        digest.update(nested["worktree_digest"].encode("ascii"))
+        submodule_dirty = submodule_dirty or nested["worktree_dirty"]
+
     return {
-        "worktree_dirty": bool(status.stdout or ignored_paths),
+        "worktree_dirty": bool(status.stdout or ignored_paths or submodule_dirty),
         "worktree_digest": digest.hexdigest(),
     }
 

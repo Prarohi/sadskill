@@ -201,6 +201,94 @@ class EvidenceVerifierTests(unittest.TestCase):
             captured["worktree_digest"], current["worktree_digest"]
         )
 
+    def test_ignored_go_fixtures_and_cargo_config_change_bound_snapshot(self):
+        gitignore = self.root / ".gitignore"
+        gitignore.write_text(
+            ".cargo/config.toml\ntestdata/case.json\n"
+            "tests/build/test_local.py\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(self.root), "add", ".gitignore"],
+                       check=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Sadskill Tests",
+             "-c", "user.email=tests@example.invalid", "commit", "-q",
+             "-m", "ignore local test inputs"],
+            check=True,
+        )
+        captured = VERIFIER.git_context(self.root)
+        for relative, content in (
+                (".cargo/config.toml", "[build]\njobs = 1\n"),
+                ("testdata/case.json", '{"case":1}\n'),
+                ("tests/build/test_local.py", "def test_nested_build_path(): pass\n")):
+            with self.subTest(path=relative):
+                path = self.root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                current = VERIFIER.git_context(self.root)
+                self.assertIsNotNone(current)
+                self.assertTrue(current["worktree_dirty"])
+                self.assertNotEqual(
+                    captured["worktree_digest"], current["worktree_digest"]
+                )
+
+    def test_dirty_submodule_worktree_changes_bound_snapshot(self):
+        submodule_source = Path(self.temp.name) / "submodule-source"
+        submodule_source.mkdir()
+        (submodule_source / "test_local.py").write_text(
+            "def test_submodule_input():\n    assert True\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "init", "-q", str(submodule_source)], check=True)
+        subprocess.run(
+            ["git", "-C", str(submodule_source), "add", "test_local.py"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(submodule_source), "-c", "user.name=Sadskill Tests",
+             "-c", "user.email=tests@example.invalid", "commit", "-q",
+             "-m", "submodule fixture"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-c", "protocol.file.allow=always", "-C", str(self.root),
+             "submodule", "add", str(submodule_source), "test-submodule"],
+            check=True, capture_output=True, text=True,
+        )
+        subprocess.run(["git", "-C", str(self.root), "add", ".gitmodules",
+                        "test-submodule"], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.root), "-c", "user.name=Sadskill Tests",
+             "-c", "user.email=tests@example.invalid", "commit", "-q",
+             "-m", "add test submodule"],
+            check=True,
+        )
+
+        captured = VERIFIER.git_context(self.root)
+        self.assertIsNotNone(captured)
+        self.assertFalse(captured["worktree_dirty"])
+        test_file = self.root / "test-submodule" / "test_local.py"
+        test_file.write_text(
+            "def test_submodule_input():\n    assert False\n", encoding="utf-8"
+        )
+        current = VERIFIER.git_context(self.root)
+        self.assertIsNotNone(current)
+        self.assertTrue(current["worktree_dirty"])
+        self.assertNotEqual(
+            captured["worktree_digest"], current["worktree_digest"]
+        )
+
+        self.write_record(**captured)
+        (exit_code, records), output = self.verify()
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(records[0]["status"], "DIRTY_WORKTREE")
+        self.assertIn("dirty-state does not match", output)
+
+    def test_dangling_gitmodules_symlink_makes_snapshot_unavailable(self):
+        (self.root / ".gitmodules").symlink_to(
+            self.root.parent / "missing-gitmodules-target"
+        )
+        self.assertIsNone(VERIFIER.worktree_snapshot(self.root))
+
     def test_invalid_calendar_timestamp_fails(self):
         self.write_record(timestamp="2026-02-31T04:00:00Z")
         (exit_code, records), output = self.verify()
