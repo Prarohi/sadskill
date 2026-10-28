@@ -45,6 +45,30 @@ class SadCLITests(unittest.TestCase):
         self.assertIn("[✕ FAIL]", res.stdout)
         self.assertIn("BLOCKED", res.stdout)
 
+    def test_bench_mock_is_explicitly_synthetic(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "mock.jsonl"
+            res = subprocess.run(
+                [str(SAD_BIN), "bench", "--provider", "mock", "--task", "C1-01", "--output", str(output)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("SIMULATED", res.stdout)
+            self.assertIn("MOCK fixture checks completed", res.stdout)
+            self.assertNotIn("Benchmark run completed successfully!", res.stdout)
+            self.assertTrue(output.exists())
+
+    def test_bench_real_provider_fails_closed_without_adapter(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "real.jsonl"
+            res = subprocess.run(
+                [str(SAD_BIN), "bench", "--provider", "codex", "--task", "C1-01", "--output", str(output)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(res.returncode, 2, res.stdout + res.stderr)
+            self.assertIn("NOT EXECUTED", res.stderr)
+            self.assertNotIn("Live-agent execution completed", res.stdout)
+
     def test_init_subcommand(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_root = Path(tmp_dir)

@@ -95,6 +95,8 @@ def cmd_bench(args, extra_args) -> int:
     cmd = [
         sys.executable,
         str(runner_script),
+        "--provider",
+        args.provider,
         "--condition",
         args.condition,
         "--task",
@@ -105,7 +107,7 @@ def cmd_bench(args, extra_args) -> int:
         str(output_file),
     ] + extra_args
 
-    print(f"{BADGE_INFO} Running C1 fixture harness (provider defaults to MOCK; not a live-agent benchmark)...")
+    print(f"{BADGE_INFO} Running C1 harness (provider={args.provider}; mock runs are SIMULATED, not real-agent performance)...")
     ret = subprocess.run(cmd).returncode
 
     if ret == 0 and output_file.exists():
@@ -118,8 +120,14 @@ def cmd_bench(args, extra_args) -> int:
             "--output-markdown",
             str(summary_md),
         ]
-        subprocess.run(viz_cmd, capture_output=True)
-        print(f"\n{BADGE_PASS} Benchmark run completed successfully!")
+        viz_result = subprocess.run(viz_cmd, capture_output=True, text=True)
+        if viz_result.returncode != 0:
+            print(f"{BADGE_FAIL} Report generation failed: {viz_result.stderr.strip()}", file=sys.stderr)
+            return viz_result.returncode
+        if args.provider == "mock":
+            print(f"\n{BADGE_INFO} Offline MOCK fixture checks completed (SIMULATED; no model performance measured).")
+        else:
+            print(f"\n{BADGE_PASS} Live-agent execution completed; inspect independent graders before making performance claims.")
         print(f"  Artifacts saved to: {output_file.relative_to(REPO_ROOT) if output_file.is_relative_to(REPO_ROOT) else output_file}")
         if summary_md.exists():
             print(f"  Summary table:      {summary_md.relative_to(REPO_ROOT) if summary_md.is_relative_to(REPO_ROOT) else summary_md}")
@@ -164,7 +172,7 @@ def cmd_guard(args) -> int:
         text=True,
     )
     if res.returncode == 0:
-        print(f"{BADGE_SAFE} Permitted: Command passed all security guardrails.")
+        print(f"{BADGE_SAFE} No known blocked pattern detected (heuristic only; NOT a security guarantee).")
         return 0
     else:
         print(f"{BADGE_FAIL} BLOCKED: Destructive operation intercepted!")
@@ -206,7 +214,8 @@ def main():
     subparsers.add_parser("doctor", help="Inspect multi-agent installation and hook health")
 
     # sad bench
-    bench_p = subparsers.add_parser("bench", help="Run C1 comparative agent benchmarks")
+    bench_p = subparsers.add_parser("bench", help="Run C1 synthetic fixtures; live providers currently fail closed")
+    bench_p.add_argument("--provider", choices=["mock", "codex", "claude", "gemini"], default="mock", help="Execution provider; mock is SIMULATED, real adapters are not yet implemented")
     bench_p.add_argument("--condition", choices=["sadskill", "plain", "competitor", "all"], default="sadskill")
     bench_p.add_argument("--task", default="C1-01", help="Task ID or 'all'")
     bench_p.add_argument("--repetitions", type=int, default=1)
