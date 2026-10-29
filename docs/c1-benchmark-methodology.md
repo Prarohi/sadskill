@@ -69,16 +69,13 @@ Only real, authenticated, executed agent runs with measured usage may count.
 Even those require independently verified paired setup and adequate sample size
 before causal/superiority claims.
 
-### Real Agent Execution (Codex / Claude)
-The live adapters are not yet implemented. Without credentials the result is `NOT_EXECUTED_NO_AUTH`; with credentials it is `NOT_EXECUTED_NOT_IMPLEMENTED`. In both cases the runner exits nonzero and no measured result exists:
-```bash
-python3 benchmarks/harness/runner.py \
-  --provider codex \
-  --condition sadskill \
-  --task C1-01 \
-  --repetitions 1 \
-  --output .sad/benchmark-codex.jsonl
-```
+### Real-agent adapters and evidence boundary
+
+The opt-in Codex, Claude and Gemini CLI adapters exist, but CI does not
+invoke them and no completed, independent paired comparative evaluation has
+been published. A successful synthetic run cannot be used as measured agent
+performance. See the opt-in examples below; a disposable externally isolated
+runner and explicit model/version are required.
 
 ## Optional live CLI benchmarking (not executed in CI)
 
