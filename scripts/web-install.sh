@@ -34,8 +34,8 @@ WORKDIR="$(mktemp -d /tmp/sadskill-verified-install.XXXXXXXX)"
 trap 'rm -rf -- "$WORKDIR"' EXIT
 ARCHIVE="$WORKDIR/source.tar.gz"
 URL="https://codeload.github.com/Prarohi/sadskill/tar.gz/$COMMIT"
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
-  --fail --location --silent --show-error --max-time 45 \
+curl --disable --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  --fail --location --max-redirs 0 --silent --show-error --max-time 45 \
   --max-filesize 33554432 -o "$ARCHIVE" "$URL"
 
 python3 - "$ARCHIVE" "$WORKDIR/verified" "$EXPECTED" <<'PY'

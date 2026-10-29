@@ -42,8 +42,19 @@ class VerifiedWebInstallTests(unittest.TestCase):
         curl.write_text(
             "#!/usr/bin/env python3\n"
             "import os, shutil, sys\n"
-            "shutil.copyfile(os.environ['WEB_TEST_TARBALL'],"
-            "sys.argv[sys.argv.index('-o')+1])\n",
+            "from pathlib import Path\n"
+            "args = sys.argv[1:]\n"
+            "output = Path(args[args.index('-o') + 1])\n"
+            "Path(os.environ['WEB_TEST_CURL_CALLED']).write_text('called')\n"
+            "Path(os.environ['WEB_TEST_WORKDIR_MARKER']).write_text(str(output.parent))\n"
+            "Path(os.environ['WEB_TEST_CURL_ARGS']).write_text('\\n'.join(args))\n"
+            "if os.environ.get('WEB_TEST_CURL_FAIL') == '1':\n"
+            "    output.write_bytes(b'partial archive')\n"
+            "    sys.exit(22)\n"
+            "if os.environ.get('WEB_TEST_CURL_REDIRECT') == '1':\n"
+            "    limit = args.index('--max-redirs') + 1\n"
+            "    sys.exit(47 if args[limit] == '0' else 0)\n"
+            "shutil.copyfile(os.environ['WEB_TEST_TARBALL'], output)\n",
             encoding="utf-8",
         )
         curl.chmod(0o755)
@@ -51,6 +62,9 @@ class VerifiedWebInstallTests(unittest.TestCase):
         self.env["PATH"] = str(fake) + os.pathsep + self.env.get("PATH", "")
         self.env["WEB_TEST_TARBALL"] = str(self.archive)
         self.env["WEB_TEST_MARKER"] = str(self.marker)
+        self.env["WEB_TEST_CURL_CALLED"] = str(self.dir / "curl-called")
+        self.env["WEB_TEST_WORKDIR_MARKER"] = str(self.dir / "workdir-path")
+        self.env["WEB_TEST_CURL_ARGS"] = str(self.dir / "curl-args")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -71,6 +85,11 @@ class VerifiedWebInstallTests(unittest.TestCase):
             env=self.env, text=True, capture_output=True, timeout=20,
         )
 
+    def assert_workdir_removed(self):
+        marker = Path(self.env["WEB_TEST_WORKDIR_MARKER"])
+        workdir = Path(marker.read_text(encoding="utf-8"))
+        self.assertFalse(workdir.exists(), f"temporary download directory leaked: {workdir}")
+
     def test_missing_sha_does_not_download_or_execute(self):
         run = subprocess.run(["/bin/bash", str(WEB)], env=self.env, capture_output=True, text=True)
         self.assertEqual(run.returncode, 2)
@@ -82,6 +101,13 @@ class VerifiedWebInstallTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.marker.read_text(), "--agent codex")
         self.assertIn("safe extraction verified", result.stdout)
+        curl_args = self.env["WEB_TEST_CURL_ARGS"]
+        args = Path(curl_args).read_text(encoding="utf-8").splitlines()
+        self.assertIn("--max-redirs", args)
+        self.assertEqual(args[args.index("--max-redirs") + 1], "0")
+        self.assertEqual(args[0], "--disable")
+        self.assertIn(f"https://codeload.github.com/Prarohi/sadskill/tar.gz/{SHA}", args)
+        self.assert_workdir_removed()
 
     def test_verified_helper_retains_executable_permission(self):
         digest = self.prepare({
@@ -99,6 +125,33 @@ class VerifiedWebInstallTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("mismatch", result.stderr)
         self.assertFalse(self.marker.exists())
+        self.assert_workdir_removed()
+
+    def test_invalid_digest_is_rejected_before_download(self):
+        self.prepare()
+        result = self.call("not-a-digest")
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(Path(self.env["WEB_TEST_CURL_CALLED"]).exists())
+        self.assertFalse(self.marker.exists())
+
+    def test_download_failure_cleans_partial_archive_and_never_executes(self):
+        self.prepare()
+        self.env["WEB_TEST_CURL_FAIL"] = "1"
+        result = self.call(hashlib.sha256(self.archive.read_bytes()).hexdigest())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(Path(self.env["WEB_TEST_CURL_CALLED"]).exists())
+        self.assertFalse(self.marker.exists())
+        self.assert_workdir_removed()
+
+    def test_redirect_is_refused_without_following_it(self):
+        self.prepare()
+        self.env["WEB_TEST_CURL_REDIRECT"] = "1"
+        digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        result = self.call(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.marker.exists())
+        self.assertIn("--max-redirs\n0", Path(self.env["WEB_TEST_CURL_ARGS"]).read_text())
+        self.assert_workdir_removed()
 
     def test_path_traversal_rejected_after_digest_verification(self):
         digest = self.prepare({
@@ -121,6 +174,27 @@ class VerifiedWebInstallTests(unittest.TestCase):
         self.assertIn("link or special file", result.stderr)
         self.assertFalse(self.marker.exists())
 
+    def test_hardlink_rejected_even_if_digest_matches(self):
+        entry = tarfile.TarInfo(ROOT + "/hardlink")
+        entry.type = tarfile.LNKTYPE
+        entry.linkname = ROOT + "/VERSION"
+        digest = self.prepare(special=entry)
+        result = self.call(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("link or special file", result.stderr)
+        self.assertFalse(self.marker.exists())
+
+    def test_device_member_rejected_even_if_digest_matches(self):
+        entry = tarfile.TarInfo(ROOT + "/device")
+        entry.type = tarfile.CHRTYPE
+        entry.devmajor = 1
+        entry.devminor = 3
+        digest = self.prepare(special=entry)
+        result = self.call(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("link or special file", result.stderr)
+        self.assertFalse(self.marker.exists())
+
     def test_duplicate_archive_path_rejected(self):
         entry = tarfile.TarInfo(ROOT + "/VERSION")
         entry.size = 0
@@ -129,6 +203,57 @@ class VerifiedWebInstallTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("duplicate", result.stderr)
         self.assertFalse(self.marker.exists())
+
+    def test_single_oversized_member_rejected(self):
+        files = {
+            "VERSION": "0.5.0\n",
+            "install.sh": "exit 0\n",
+            "large.bin": "x" * (16 * 1024 * 1024 + 1),
+        }
+        digest = self.prepare(files)
+        result = self.call(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("file exceeds size limit", result.stderr)
+        self.assertFalse(self.marker.exists())
+
+    def test_total_expanded_size_limit_rejected(self):
+        files = {"VERSION": "0.5.0\n", "install.sh": "exit 0\n"}
+        files.update({f"payload-{index}.bin": "z" * (13 * 1024 * 1024) for index in range(5)})
+        digest = self.prepare(files)
+        result = self.call(digest)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("total extracted size exceeds limit", result.stderr)
+        self.assertFalse(self.marker.exists())
+
+    def test_missing_installer_or_version_is_rejected(self):
+        cases = (
+            {"VERSION": "0.5.0\n", "README.md": "no installer"},
+            {"install.sh": 'printf executed > "$WEB_TEST_MARKER"\n'},
+        )
+        for files in cases:
+            with self.subTest(files=sorted(files)):
+                digest = self.prepare(files)
+                result = self.call(digest)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("no installer or VERSION", result.stderr)
+                self.assertFalse(self.marker.exists())
+
+    def test_unicode_and_spaced_archive_paths_are_preserved_safely(self):
+        helper = "helpers/with space/বাংলা-helper.sh"
+        installer = (
+            "#!/bin/bash\n"
+            'base="$(cd -- "$(dirname -- "$0")" && pwd -P)"\n'
+            f'test -x "$base/{helper}" && printf ok > "$WEB_TEST_MARKER"\n'
+        )
+        digest = self.prepare({
+            "VERSION": "0.5.0\n",
+            "install.sh": installer,
+            helper: "#!/bin/bash\nexit 0\n",
+        })
+        result = self.call(digest)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.marker.read_text(), "ok")
+        self.assert_workdir_removed()
 
 
 if __name__ == "__main__":
