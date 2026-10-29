@@ -434,14 +434,29 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
             continue
 
         if dest_p.exists():
-            # Safety check: if user modified the installed file since installation, preserve it unless forced
+            # Never silently discard user edits, including when --force is used.
             installed_hash = entry.get("content_hash")
             curr_hash = compute_sha256(dest_p)
-            if installed_hash and curr_hash and curr_hash != installed_hash and not force:
+            modified = bool(curr_hash) and curr_hash != installed_hash
+            if modified and not force:
                 print(f"   [CONFLICT] Destination modified since install: {dest_p}")
                 print(f"   [PRESERVE-MODIFIED] Refusing to overwrite modified file without --force. Backup preserved at {bak_p}")
                 had_conflict = True
                 continue
+            if modified and force:
+                conflict_p = dest_p.with_name(dest_p.name + f".bak.conflict.{time.time_ns()}.{os.getpid()}")
+                if conflict_p.exists() or conflict_p.is_symlink():
+                    raise ManifestError(f"Refusing to overwrite an existing conflict archive: {conflict_p}")
+                print(f"   [PRESERVE-USER-EDITS] Archiving modified destination before force restore: {conflict_p}")
+                if not dry_run:
+                    shutil.move(str(dest_p), str(conflict_p))
+                    conflicts = entry.get("conflict_backups")
+                    if not isinstance(conflicts, list):
+                        conflicts = []
+                    conflicts.append({"path": str(conflict_p), "hash": curr_hash, "created_at": _now_iso()})
+                    entry["conflict_backups"] = conflicts
+                    # Persist the ownership ledger before proceeding to restoration.
+                    save_manifest_atomic(manifest_path, data)
 
         print(f"   [RESTORE] Restoring {dest_p} from {bak_p}")
         if not dry_run:
@@ -572,7 +587,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
         # becomes an untracked orphan.
         def _resolved(entry):
             if entry.get("restored"):
-                return True
+                # Keep ledger entries while user-authored conflict archives survive.
+                return not _entry_has_preserved_content(entry)
             destination = entry.get("destination", "")
             if destination and Path(destination).exists():
                 return False
