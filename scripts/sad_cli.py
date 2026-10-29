@@ -5,7 +5,9 @@ evidence verification, project memory, and guardrail inspection.
 """
 
 import argparse
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -47,15 +49,78 @@ def configure_color(enabled: bool) -> None:
     BADGE_INFO = colored("[ℹ INFO]", "97;1")
 
 
-def cmd_init(args) -> int:
-    """Initialize .sad/ without following pre-existing untrusted symlinks.
+def _safe_directory_flags() -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory or os.open not in getattr(os, "supports_dir_fd", set()):
+        raise OSError("safe initialization is unavailable on this platform")
+    return os.O_RDONLY | nofollow | directory | getattr(os, "O_CLOEXEC", 0)
 
-    This is a best-effort safeguard for ordinary workspace init, not
-    containment against adversarial concurrent filesystem modifications.
-    """
+
+def _open_or_create_directory_at(parent_fd: int, basename: str) -> int:
+    created = False
+    try:
+        os.mkdir(basename, mode=0o700, dir_fd=parent_fd)
+    except FileExistsError:
+        pass
+    else:
+        created = True
+    if created:
+        os.fsync(parent_fd)
+    try:
+        fd = os.open(basename, _safe_directory_flags(), dir_fd=parent_fd)
+    except OSError as exc:
+        raise OSError(f"refusing symlinked or non-directory confidence path: {basename}") from exc
+    if not stat.S_ISDIR(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(f"refusing non-directory confidence path: {basename}")
+    return fd
+
+
+def _ensure_template_at(parent_fd: int, basename: str, content: str) -> None:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(
+            basename,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow | cloexec,
+            0o600,
+            dir_fd=parent_fd,
+        )
+    except FileExistsError:
+        try:
+            fd = os.open(
+                basename,
+                os.O_RDONLY | os.O_NONBLOCK | nofollow | cloexec,
+                dir_fd=parent_fd,
+            )
+        except OSError as exc:
+            raise OSError(f"refusing symlinked or unsafe confidence document: {basename}") from exc
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError(f"existing confidence document is not a file (regular file required): {basename}")
+        finally:
+            os.close(fd)
+        return
+
+    try:
+        remaining = memoryview(content.encode("utf-8"))
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise OSError(f"short write while creating confidence document: {basename}")
+            remaining = remaining[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.fsync(parent_fd)
+
+
+def cmd_init(args) -> int:
+    """Initialize .sad/ through pinned, no-follow directory descriptors."""
     target_root = Path(args.project_root or Path.cwd()).resolve()
     sad_dir = target_root / ".sad"
-    folders = [sad_dir / name for name in ("events", "evidence", "benchmarks")]
+    folder_names = ("events", "evidence", "benchmarks")
     templates = {
         "decisions.md": (
             "# Architectural Decision Records (ADRs)\n\n"
@@ -71,36 +136,23 @@ def cmd_init(args) -> int:
         ),
     }
 
+    opened_fds = []
     try:
-        if sad_dir.is_symlink():
-            raise OSError(f".sad is a symlink: {sad_dir}")
-        sad_dir.mkdir(parents=True, exist_ok=True)
-        for folder in folders:
-            if folder.is_symlink():
-                raise OSError(f"Refusing symlinked confidence directory: {folder}")
-            folder.mkdir(parents=True, exist_ok=True)
-
+        root_fd = os.open(target_root, _safe_directory_flags())
+        opened_fds.append(root_fd)
+        sad_fd = _open_or_create_directory_at(root_fd, ".sad")
+        opened_fds.append(sad_fd)
+        for name in folder_names:
+            folder_fd = _open_or_create_directory_at(sad_fd, name)
+            os.close(folder_fd)
         for basename, content in templates.items():
-            path = sad_dir / basename
-            if path.is_symlink():
-                raise OSError(f"Refusing symlinked confidence document: {path}")
-            if path.exists():
-                if not path.is_file():
-                    raise OSError(f"Existing confidence document is not a file: {path}")
-                continue
-            # Exclusive create prevents races that could overwrite a
-            # pre-existing or newly-created file/symlink at the final path.
-            try:
-                with path.open("x", encoding="utf-8") as stream:
-                    stream.write(content)
-            except FileExistsError:
-                if path.is_symlink():
-                    raise OSError(f"Refusing symlinked confidence document: {path}")
-                if not path.is_file():
-                    raise OSError(f"Existing confidence document is not a file: {path}")
+            _ensure_template_at(sad_fd, basename, content)
     except (OSError, ValueError) as exc:
         print(f"{BADGE_FAIL} Initialization refused: {exc}", file=sys.stderr)
         return 1
+    finally:
+        for fd in reversed(opened_fds):
+            os.close(fd)
 
     print(f"{BADGE_PASS} Initialized sadskill project confidence layer at {sad_dir}")
     print(f"  ├── events/       (process-safe append-only memory)")

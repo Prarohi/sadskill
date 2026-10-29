@@ -5,6 +5,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+from scripts.sad_cli import cmd_init
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "scripts" / "sad_cli.py"
@@ -42,6 +46,33 @@ class CliInitSymlinkTests(unittest.TestCase):
             self.assertNotEqual(res.returncode, 0)
             self.assertIn("symlink", res.stderr)
             self.assertEqual(list(outside.iterdir()), [])
+
+    def test_directory_swap_before_open_does_not_follow_replacement_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project"
+            outside = root / "outside"
+            project.mkdir()
+            outside.mkdir()
+            real_mkdir = os.mkdir
+            swapped = False
+
+            def mkdir_then_swap(path, *args, **kwargs):
+                nonlocal swapped
+                result = real_mkdir(path, *args, **kwargs)
+                if path == ".sad" and kwargs.get("dir_fd") is not None and not swapped:
+                    os.rename(project / ".sad", project / ".sad-original")
+                    (project / ".sad").symlink_to(outside, target_is_directory=True)
+                    swapped = True
+                return result
+
+            with mock.patch("scripts.sad_cli.os.mkdir", side_effect=mkdir_then_swap):
+                result = cmd_init(SimpleNamespace(project_root=str(project)))
+
+            self.assertTrue(swapped)
+            self.assertEqual(result, 1)
+            self.assertEqual(list(outside.iterdir()), [])
+            self.assertTrue((project / ".sad").is_symlink())
 
     def test_dangling_template_symlink_does_not_create_outside_file(self):
         with tempfile.TemporaryDirectory() as temp:
