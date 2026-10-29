@@ -48,41 +48,59 @@ def configure_color(enabled: bool) -> None:
 
 
 def cmd_init(args) -> int:
-    """Initializes the .sad/ directory structure and templates."""
+    """Initialize .sad/ without following pre-existing untrusted symlinks.
+
+    This is a best-effort safeguard for ordinary workspace init, not
+    containment against adversarial concurrent filesystem modifications.
+    """
     target_root = Path(args.project_root or Path.cwd()).resolve()
     sad_dir = target_root / ".sad"
-
-    events_dir = sad_dir / "events"
-    evidence_dir = sad_dir / "evidence"
-    benchmarks_dir = sad_dir / "benchmarks"
-
-    events_dir.mkdir(parents=True, exist_ok=True)
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    benchmarks_dir.mkdir(parents=True, exist_ok=True)
-
-    decisions_file = sad_dir / "decisions.md"
-    if not decisions_file.exists():
-        decisions_file.write_text(
+    folders = [sad_dir / name for name in ("events", "evidence", "benchmarks")]
+    templates = {
+        "decisions.md": (
             "# Architectural Decision Records (ADRs)\n\n"
-            "This document tracks durable architectural choices for the project.\n",
-            encoding="utf-8",
-        )
-
-    history_file = sad_dir / "history.md"
-    if not history_file.exists():
-        history_file.write_text(
+            "This document tracks durable architectural choices for the project.\n"
+        ),
+        "history.md": (
             "# Project Milestones & Execution History\n\n"
-            "Chronological milestone log maintained automatically across agent sessions.\n",
-            encoding="utf-8",
-        )
-
-    design_file = sad_dir / "design-memory.md"
-    if not design_file.exists():
-        design_file.write_text(
+            "Chronological milestone log maintained automatically across agent sessions.\n"
+        ),
+        "design-memory.md": (
             "# Design Tokens & Visual Hierarchy Memory\n\n"
-            "Approved tokens and UI styling decisions.\n",
-            encoding="utf-8",
-        )
+            "Approved tokens and UI styling decisions.\n"
+        ),
+    }
+
+    try:
+        if sad_dir.is_symlink():
+            raise OSError(f".sad is a symlink: {sad_dir}")
+        sad_dir.mkdir(parents=True, exist_ok=True)
+        for folder in folders:
+            if folder.is_symlink():
+                raise OSError(f"Refusing symlinked confidence directory: {folder}")
+            folder.mkdir(parents=True, exist_ok=True)
+
+        for basename, content in templates.items():
+            path = sad_dir / basename
+            if path.is_symlink():
+                raise OSError(f"Refusing symlinked confidence document: {path}")
+            if path.exists():
+                if not path.is_file():
+                    raise OSError(f"Existing confidence document is not a file: {path}")
+                continue
+            # Exclusive create prevents races that could overwrite a
+            # pre-existing or newly-created file/symlink at the final path.
+            try:
+                with path.open("x", encoding="utf-8") as stream:
+                    stream.write(content)
+            except FileExistsError:
+                if path.is_symlink():
+                    raise OSError(f"Refusing symlinked confidence document: {path}")
+                if not path.is_file():
+                    raise OSError(f"Existing confidence document is not a file: {path}")
+    except (OSError, ValueError) as exc:
+        print(f"{BADGE_FAIL} Initialization refused: {exc}", file=sys.stderr)
+        return 1
 
     print(f"{BADGE_PASS} Initialized sadskill project confidence layer at {sad_dir}")
     print(f"  ├── events/       (process-safe append-only memory)")
