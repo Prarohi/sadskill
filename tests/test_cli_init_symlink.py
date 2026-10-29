@@ -21,6 +21,33 @@ class CliInitSymlinkTests(unittest.TestCase):
             cwd=str(ROOT), capture_output=True, text=True, timeout=20,
         )
 
+    def test_refuses_symlinked_explicit_project_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            outside = root / "outside"
+            alias = root / "project-alias"
+            outside.mkdir()
+            alias.symlink_to(outside, target_is_directory=True)
+
+            res = self.invoke(alias)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("symlinked or non-directory project root", res.stderr)
+            self.assertFalse((outside / ".sad").exists())
+
+    def test_refuses_existing_hardlinked_template(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project"
+            (project / ".sad").mkdir(parents=True)
+            outside = root / "private-decisions.md"
+            outside.write_text("preserve me", encoding="utf-8")
+            os.link(outside, project / ".sad" / "decisions.md")
+
+            res = self.invoke(project)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("single-link file", res.stderr)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me")
+
     def test_refuses_symlinked_dot_sad_root(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -24,6 +24,41 @@ class ConcurrentMemoryTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_explicit_symlinked_project_root_fails_closed_for_all_memory_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            alias = Path(temp) / "project-alias"
+            alias.symlink_to(self.root, target_is_directory=True)
+            operations = {
+                "append": lambda: append_event(alias, "custom", {"title": "outside write"}),
+                "list": lambda: list_events(alias),
+                "search": lambda: search_memory(alias, "outside write"),
+                "compact": lambda: compact_memory(alias, keep_latest=0),
+            }
+            for name, operation in operations.items():
+                with self.subTest(operation=name):
+                    with self.assertRaises(OSError):
+                        operation()
+            self.assertFalse((self.root / ".sad" / "events").exists())
+
+    def test_explicit_symlink_project_root_is_not_canonicalized_by_cli_detection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            alias = Path(temp) / "project-alias"
+            alias.symlink_to(self.root, target_is_directory=True)
+            self.assertEqual(sad_memory.find_project_root(alias), alias)
+            repo_root = Path(__file__).resolve().parents[1]
+            program = repo_root / "scripts" / "sad_memory.py"
+            result = subprocess.run(
+                [
+                    sys.executable, str(program), "append-event", "--type", "custom",
+                    "--payload", '{"title":"must not be recorded"}',
+                    "--project-root", str(alias),
+                ],
+                cwd=str(repo_root), capture_output=True, text=True, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("symlinked or non-directory project root", result.stderr)
+            self.assertFalse((self.root / ".sad" / "events").exists())
+
     def test_single_event_recording(self):
         out = append_event(
             self.root,
