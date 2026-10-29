@@ -110,7 +110,7 @@ cd sadskill
 
 > **Safe by Design**: `install.sh` uses a transactional manager (`scripts/manifest.py`) to record installed file digests in `~/.sadskill/install-manifest.json` and preserves preexisting files in timestamped `.bak.<timestamp>` archives.
 
-> **Sandbox safety**: `sad sandbox -- <command>` requires Linux `bwrap` and refuses to run if unavailable (exit 78). Only `--allow-unsandboxed` permits an explicit unsafe fallback, and `--offline` always refuses that fallback. The sandbox is supplemental isolation, not a guarantee against every exploit.
+> **Sandbox safety**: `sad sandbox -- <command>` requires Linux `bwrap` and refuses to run if unavailable (exit 78). With Bubblewrap active, it clears inherited environment variables, uses a temporary `HOME` and `TMPDIR`, hides the host home directory, and binds only the selected project writable. Git metadata stays read-only by default; linked worktrees are mounted only after their Git pointers validate. `--allow-git` permits repository metadata writes. `--allow-unsandboxed` explicitly bypasses sandbox protections and runs the command without containment; `--offline` always refuses that fallback. The sandbox is supplemental isolation, not a guarantee against every exploit; system files remain visible read-only and network access remains enabled unless `--offline` is selected.
 
 ---
 

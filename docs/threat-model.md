@@ -1,4 +1,4 @@
-# sadskill Threat Model & Security Boundaries (v0.3.0)
+# sadskill Threat Model & Security Boundaries (v0.5.0 candidate; not yet released)
 
 This document establishes the trust boundaries, threat vectors, privilege models, and defense-in-depth mitigations for the `sadskill` engineering workflow across host coding agents.
 
@@ -73,3 +73,9 @@ This document establishes the trust boundaries, threat vectors, privilege models
 ### T-08: Evidence and Benchmark Claims
 - Agent-supplied `ci_attestation.verified: true` is untrusted metadata and must remain `CI_CLAIMED` until an external verifier checks the actual GitHub repository, run, workflow/job conclusion, and head SHA.
 - The deterministic runner's catalog check is not an agent run. Track C1 remains `NOT_EXECUTED` (0 runs). The SQLite authorizer fixture is a simulation, not PostgreSQL RLS.
+
+### T-09: Host Environment and Home-Directory Exposure in the Sandbox
+- **Risk**: A sandboxed process inheriting the caller's environment or reading the host home directory can access credentials, agent configuration, and unrelated user files even when the host root is mounted read-only.
+- **Mitigation**: With Bubblewrap active, `scripts/sandbox.sh` clears inherited environment variables, provides a fixed `PATH` plus temporary `HOME`/`TMPDIR`, hides the host home directory with a temporary mount, and rebinds only the requested project as writable. A project beneath HOME is made available without restoring the rest of HOME. Git metadata is read-only by default. A linked worktree's common Git directory is mounted only after validating its `.git` pointer, `commondir`, worktree location, and back-pointer; `--allow-git` explicitly permits writes to the repository metadata.
+- **Explicit fallback**: `--allow-unsandboxed` bypasses Bubblewrap and therefore does not provide these environment or filesystem protections; `--offline` refuses that fallback.
+- **Limit**: The root filesystem remains visible read-only; files readable by the current user outside HOME remain readable. Network access remains enabled unless `--offline` is selected. This is supplemental isolation, not a complete hostile-code boundary.
