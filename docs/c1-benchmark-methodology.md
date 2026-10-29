@@ -21,7 +21,7 @@ The C1 suite *intends* to evaluate coding agents under 3 conditions. **CI execut
 | `C1-08` | Mobile CSS overflow | Frontend Craft | Headless Chromium measures viewport and a long `pre` at 375 CSS pixels |
 | `C1-09` | Accessible dialog behavior | Accessibility | Headless Chromium exercises dialog semantics, initial focus, Tab/Shift+Tab wrap, Escape close and opener focus restore |
 | `C1-10` | Circular dependency removal | Architecture | Local JS import graph cycle check plus Node import and behavior tests |
-| `C1-11` | Guardrail wrapper bypass | Safety Enforcement | Workspace hook is tested against direct/env/command/sudo/recursive-shell inputs with fake commands that prevent execution |
+| `C1-11` | Guardrail wrapper bypass | Safety Enforcement | Workspace hook is tested against direct/env/command/sudo/recursive-shell inputs with fake commands that prevent execution; `test-bypass.sh` must keep exactly the supplied seven-case top-level array/loop structure, with no extra executable lines, and is checked statically, never executed |
 | `C1-12` | Concurrent project memory | Agent Memory | Multiple processes append 202 unique JSONL records; a held advisory lock must block a writer until release |
 
 ---

@@ -1,11 +1,17 @@
 """Adversarial fixtures must not pass C1 merely by containing keywords/files."""
 
-from pathlib import Path
+import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
-from benchmarks.harness.evaluators import EVALUATORS, EvaluationUnavailable
+from benchmarks.harness.evaluators import (
+    EVALUATORS,
+    EvaluationUnavailable,
+    _validate_guardrail_regression_script,
+)
+from benchmarks.harness.tasks import C1_TASKS
 
 
 class C1EvaluatorFalsePositiveTests(unittest.TestCase):
@@ -27,6 +33,7 @@ class C1EvaluatorFalsePositiveTests(unittest.TestCase):
                     self.fail(f"Required {task_id} grader unavailable in CI: {exc}")
                 self.skipTest(f"{task_id} grader unavailable: {exc}")
         self.assertFalse(result[0], f"{task_id} accepted an invalid implementation: {result[3]}")
+        return result
 
     def test_c1_01_missing_required_regression_test_is_not_a_pass(self):
         self.assert_rejected("C1-01", {
@@ -101,6 +108,28 @@ CREATE POLICY tenant_a_only ON documents
 """,
         })
 
+    def test_c1_06_update_that_transfers_ownership_is_rejected(self):
+        result = self.assert_rejected("C1-06", {
+            "migrations/001_rls.sql": """CREATE TABLE documents (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  content text NOT NULL
+);
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_select ON documents FOR SELECT
+  USING (tenant_id = current_setting('sadskill.tenant_id', true)::uuid OR current_query() ILIKE '%SET tenant_id%');
+CREATE POLICY tenant_insert ON documents FOR INSERT
+  WITH CHECK (tenant_id = current_setting('sadskill.tenant_id', true)::uuid);
+CREATE POLICY tenant_update ON documents FOR UPDATE
+  USING (tenant_id = current_setting('sadskill.tenant_id', true)::uuid)
+  WITH CHECK (true);
+CREATE POLICY tenant_delete ON documents FOR DELETE
+  USING (tenant_id = current_setting('sadskill.tenant_id', true)::uuid);
+""",
+        })
+        self.assertIn("transferred its own document", result[3])
+
     def test_c1_07_empty_migration_files_do_not_pass(self):
         self.assert_rejected("C1-07", {
             "migrations/01_expand_up.sql": "-- empty\n",
@@ -166,6 +195,46 @@ pre { white-space: pre; }
         self.assert_rejected("C1-11", {
             "scripts/test-bypass.sh": "#!/bin/sh\nexit 0\n",
         })
+
+    def test_c1_11_keywords_in_comments_do_not_make_a_regression_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            regression = root / "scripts" / "test-bypass.sh"
+            regression.parent.mkdir()
+            regression.write_text(
+                "#!/bin/bash\n# env sudo bash -c git reset --hard\nexit 0\n",
+                encoding="utf-8",
+            )
+            reason = _validate_guardrail_regression_script(regression, root)
+        self.assertIn("reference control-flow shape", reason)
+
+    def test_c1_11_reference_regression_script_matches_the_static_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            regression = root / "scripts" / "test-bypass.sh"
+            regression.parent.mkdir()
+            regression.write_text(
+                C1_TASKS["C1-11"]["setup_files"]["scripts/test-bypass.sh"],
+                encoding="utf-8",
+            )
+            reason = _validate_guardrail_regression_script(regression, root)
+        self.assertEqual("", reason)
+
+    def test_c1_11_dead_code_and_quoted_decoys_do_not_satisfy_regression_suite(self):
+        reference = C1_TASKS["C1-11"]["setup_files"]["scripts/test-bypass.sh"]
+        decoys = (
+            f"if false; then\n{reference}\nfi\n",
+            "payload=" + json.dumps(reference) + "\n",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            regression = root / "scripts" / "test-bypass.sh"
+            regression.parent.mkdir()
+            for decoy in decoys:
+                with self.subTest(decoy=decoy[:20]):
+                    regression.write_text(decoy, encoding="utf-8")
+                    reason = _validate_guardrail_regression_script(regression, root)
+                    self.assertIn("control-flow shape", reason)
 
     def test_c1_12_readme_only_is_not_concurrent_memory(self):
         self.assert_rejected("C1-12", {

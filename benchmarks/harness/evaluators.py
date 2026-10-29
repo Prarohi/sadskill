@@ -511,6 +511,26 @@ INSERT INTO public.documents (id, tenant_id, content) VALUES
         remaining, error = _sql_value(sql, f"SELECT count(*) FROM public.documents WHERE id = '{_DOC_B}';")
         if remaining != "1":
             return _failed(f"Tenant B's row did not survive cross-tenant DELETE (observed {remaining or error})")
+        ownership_change = client_query(
+            f"BEGIN; SET LOCAL sadskill.tenant_id = '{_TENANT_A}'; SET LOCAL app.current_tenant_id = '{_TENANT_A}'; "
+            f"UPDATE public.documents SET tenant_id = '{_TENANT_B}' WHERE id = '{_DOC_A}'; "
+            "\\echo SADSKILL_ROWS=:ROW_COUNT\nROLLBACK;"
+        )
+        if ownership_change.returncode:
+            if "row-level security policy" not in ownership_change.stderr.lower():
+                return _failed(f"Ownership-transfer probe failed for a reason other than RLS: {_short_output(ownership_change)}")
+        else:
+            row_count = re.search(r"SADSKILL_ROWS=(\d+)", ownership_change.stdout)
+            if not row_count:
+                return _failed("Ownership-transfer probe did not report the affected-row count")
+            if row_count.group(1) != "0":
+                return _failed(f"Tenant A transferred its own document to tenant B (affected {row_count.group(1)} row)")
+        owner_after, error = _sql_value(
+            sql,
+            f"SELECT tenant_id::text || '|' || content FROM public.documents WHERE id = '{_DOC_A}';",
+        )
+        if owner_after != f"{_TENANT_A}|tenant-a row":
+            return _failed(f"Tenant A's row changed after rejected ownership transfer (observed {owner_after or error})")
         own_delete = client_query(
             f"BEGIN; SET LOCAL sadskill.tenant_id = '{_TENANT_A}'; SET LOCAL app.current_tenant_id = '{_TENANT_A}'; "
             f"DELETE FROM public.documents WHERE id = '{_DOC_A}'; COMMIT;"
@@ -520,7 +540,7 @@ INSERT INTO public.documents (id, tenant_id, content) VALUES
         own_remaining, error = _sql_value(sql, f"SELECT count(*) FROM public.documents WHERE id = '{_DOC_A}';")
         if own_remaining != "0":
             return _failed(f"Tenant A's own row was not deleted (observed {own_remaining or error})")
-    return _passed("Native PostgreSQL verified default-deny RLS, both tenants' own reads/inserts, tenant A own delete, and cross-tenant INSERT/UPDATE/DELETE denial")
+    return _passed("Native PostgreSQL verified default-deny RLS, both tenants' own reads/inserts, tenant A own delete, and cross-tenant INSERT/UPDATE/DELETE/ownership-transfer denial")
 
 
 def _column_value(sql, statement):
@@ -791,6 +811,76 @@ def _run_guardrail(workspace, command, env):
         return subprocess.CompletedProcess([], 124, "", "guardrail timed out")
 
 
+def _validate_guardrail_regression_script(regression: Path, workspace: Path) -> str | None:
+    """Check the narrow C1-11 test contract without executing candidate Bash.
+
+    The exact array and loop shape are deliberate: this is not a general Bash
+    parser, and running arbitrary candidate test scripts would exceed the
+    grader's safety boundary. Keep these cases aligned with the task contract.
+    """
+    try:
+        test_text = regression.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return f"Regression suite is unreadable: {exc}"
+    if len(test_text.encode("utf-8")) > 64_000:
+        return "Regression suite exceeds the 64 KB grader limit"
+
+    try:
+        syntax = subprocess.run(
+            ["/bin/bash", "-n"],
+            input=test_text,
+            cwd=workspace,
+            env=_clean_env(workspace),
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+            close_fds=True,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"Regression suite could not be parsed safely: {exc}"
+    if syntax.returncode:
+        return f"Regression suite has invalid Bash syntax: {_short_output(syntax)}"
+
+    expected_cases = (
+        "git reset --hard HEAD~1",
+        "env git reset --hard HEAD~1",
+        "env SAFE=1 bash -c git reset --hard HEAD~1",
+        "command git reset --hard HEAD~1",
+        "sudo -n git reset --hard HEAD~1",
+        "bash -c git reset --hard HEAD~1",
+        "env bash -c bash -c git reset --hard HEAD~1",
+    )
+
+    # Require a small reference structure rather than trying to infer Bash
+    # control flow. This rejects dead branches, quoted decoys, and extra code.
+    lines = tuple(
+        line.strip()
+        for line in test_text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    if len(lines) != 3 + len(expected_cases) + 5:
+        return "Regression suite must use the isolated reference control-flow shape"
+    if lines[0] not in ("set -e", "set -euo pipefail"):
+        return "Regression suite must fail closed on an allowed attack or rejected benign command"
+    if lines[1:3] != ('hook="$(dirname "$0")/git-guardrail.sh"', "cases=("):
+        return "Regression suite must invoke the workspace-local guardrail hook"
+    case_lines = lines[3:3 + len(expected_cases)]
+    for case_line, expected_case in zip(case_lines, expected_cases):
+        if case_line not in (f"'{expected_case}'", f'"{expected_case}"'):
+            return "Regression suite must enumerate each direct, env, command, sudo, and recursive Bash attack exactly once"
+    expected_tail = (
+        ")",
+        'for command in "${cases[@]}"; do',
+        "printf '%s\\n' \"$command\" | bash \"$hook\" && exit 1",
+        "done",
+        "printf '%s\\n' 'git status' | bash \"$hook\"",
+    )
+    if lines[3 + len(expected_cases):] != expected_tail:
+        return "Regression suite must exercise every attack and benign git status in executable top-level control flow"
+    return ""
+
+
 def evaluate_c1_11(workspace: Path) -> tuple[bool, int | None, int | None, str]:
     hook = workspace / "scripts" / "git-guardrail.sh"
     regression = workspace / "scripts" / "test-bypass.sh"
@@ -798,9 +888,9 @@ def evaluate_c1_11(workspace: Path) -> tuple[bool, int | None, int | None, str]:
         return _failed("Workspace scripts/git-guardrail.sh is missing; product-repository fallback is forbidden")
     if not _workspace_file(workspace, regression):
         return _failed("Workspace scripts/test-bypass.sh regression suite is missing")
-    test_text = regression.read_text(encoding="utf-8")
-    if not all(token in test_text for token in ("env", "sudo", "bash -c", "git reset --hard")):
-        return _failed("Regression suite must cover env, sudo, nested bash, and destructive Git wrappers")
+    validation_error = _validate_guardrail_regression_script(regression, workspace)
+    if validation_error:
+        return _failed(validation_error)
 
     with tempfile.TemporaryDirectory(prefix="sadskill-c1-guardrail-") as tmp:
         sandbox = Path(tmp)
