@@ -13,6 +13,7 @@ Safety in `sadskill` operates as **defense-in-depth**, not an impenetrable OS sa
 
 > [!WARNING]
 > The guardrail hook is a defensive filter against common accident patterns; it does **not** replace containerization, branch protections, or secure database access controls.
+> Its SQL checks are lexical heuristics, not a SQL parser or authorization boundary. Use least-privilege database roles and PostgreSQL RLS to constrain actual data access.
 
 ---
 

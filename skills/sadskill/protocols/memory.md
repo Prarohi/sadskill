@@ -29,7 +29,8 @@
    - **User Profile**: Private local workstation preferences stored in `~/.sadskill/profile.md` (never committed to repository).
 2. **Secret Redaction**:
    - Never persist credentials, tokens, passwords, private keys, or personal identifiers in `.sad/`.
-   - Scan memory payloads before writing; redact matching authorization patterns.
+   - The CLI redacts common secret-named fields, authorization headers, known token formats, private-key blocks, and URL credentials before writing an event or derived view.
+   - This pattern-based filter cannot identify every secret or personal identifier. Do not submit real credentials or personal data to memory, and review generated records before committing them.
 3. **Concurrent Multi-Agent Writers (Immutable Event Log)**:
    - To eliminate silent last-writer-wins overwrite hazards when multiple agents collaborate, write append-only immutable event records to `.sad/events/<timestamp>-<uuid>.json`.
    - Each event record includes: `event_id` (UUID), `timestamp` (ISO 8601), `actor` (agent/human), `base_commit` (Git SHA), `task_id`, `type` (`milestone` | `adr` | `design_token` | `checkpoint`), and `payload`.

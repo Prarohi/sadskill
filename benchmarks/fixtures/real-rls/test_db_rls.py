@@ -47,6 +47,21 @@ class TestDatabaseRLS(unittest.TestCase):
             cur = self.session_a.conn.cursor()
             cur.execute("DROP TABLE projects")
 
+    def test_view_and_trigger_tampering_is_denied(self):
+        import sqlite3
+        for statement in (
+            "DROP VIEW projects",
+            "CREATE TEMP VIEW projects AS SELECT * FROM _projects_data",
+            "DROP TRIGGER rls_projects_insert",
+        ):
+            with self.subTest(statement=statement):
+                with self.assertRaises(sqlite3.DatabaseError):
+                    self.session_b.conn.execute(statement)
+
+    def test_authorizer_cannot_be_disabled_via_public_session(self):
+        with self.assertRaises(DatabaseRLSError):
+            self.session_b.conn.set_authorizer(None)
+
     def test_direct_table_bypass_denied_by_engine_authorizer(self):
         # Database authorizer blocks direct access to underlying raw table
         import sqlite3

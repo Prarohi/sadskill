@@ -70,7 +70,7 @@ Modern AI coding agents generate code quickly, but frequently fail at real softw
 ## 2. Answers to Essential Strategic Questions
 
 ### How do the workflows connect?
-The plan, design, backend, security, and analyze modes share the same project context and evidence rules. A Change Contract can capture intent, scope, risk, verification, and recovery steps. This is guidance: it does not make external host tools run or turn a prompt-level safety rule into technical enforcement.
+The plan, design, backend, security, and analyze modes share the same project context and evidence rules. Their **multi-mode orchestration, authorization boundaries, and risk-based handoffs** are formalized in [the canonical workflow contract](../../skills/sadskill/protocols/workflow.md) and [the engineering architecture guide](../workflow-architecture.md). A Change Contract can capture intent, scope, risk, verification, and recovery steps. This is guidance: it does not make external host tools run or turn a prompt-level safety rule into technical enforcement.
 
 ### What is the smallest valuable workflow a new user experiences?
 Fixing an isolated bug in a single turn:

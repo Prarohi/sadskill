@@ -8,7 +8,7 @@ Autonomous coding agents frequently suffer from confirmation bias and premature 
 
 > *"Don't just claim code works. Prove it with demonstrable execution evidence, and report provenance truthfully."*
 
-A task is **NOT complete** until the verification command has been executed in the environment, returned exit code `0`, and had its proof recorded.
+For **executable implementation**, claim `VERIFIED` only after an actual relevant command exits `0` with meaningful assertions. A read-only review, plan, or docs-only task can finish with `SKIPPED_WITH_REASON` when no runnable check applies. If no tools are available, report `NOT_EXECUTED`. Disk evidence is optional when the execution contract does not allow writes and must **never** be written in `REVIEW_ONLY`.
 
 ---
 
@@ -91,6 +91,6 @@ For verification that actually executed, conclude with this proof block. For ski
 
 ## 🚫 Forbidden Completion Claims
 1. **Never claim tests passed without quoting the terminal command and exit code 0.**
-2. **Never skip running tests because "the change is simple enough".**
+2. **For executable changes, run appropriate tests proportional to risk; never use simplicity to justify invented verification.** Documentation-only, read-only, and tool-unavailable cases must truthfully explain skipped/unexecuted checks.
 3. **If no automated test exists for a bug, write a minimal reproduction test first, verify failure, apply the fix, and verify pass.**
 4. **Never fabricate artificial test passes for docs-only or research tasks; accurately declare `SKIPPED_WITH_REASON` or `NOT_APPLICABLE`.**

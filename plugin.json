@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/agent-plugin.json",
+  "schema_version": "v1",
+  "name_for_human": "sadskill",
+  "name_for_model": "sadskill",
+  "description_for_human": "One engineering workflow. Any coding agent. Turn AI-generated code into verified, maintainable software.",
+  "description_for_model": "Engineering Confidence Layer for AI coding agents. Provides 5 high-leverage workflows: /sad-plan (adaptive planning & spec), /sad-design (UI/UX & polish), /sad-backend (schema & RLS), /sad-sec (security & OWASP audit), and /sad-analyze (architecture & code health). Always verify changes with executable evidence.",
+  "version": "0.5.0",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "none"
+  },
+  "skills": [
+    {
+      "name": "sadskill",
+      "path": "skills/sadskill/SKILL.md",
+      "description": "Engineering Confidence Layer across coding agents."
+    }
+  ],
+  "author": "sadafbabu",
+  "license": "MIT",
+  "homepage": "https://github.com/Prarohi/sadskill"
+}

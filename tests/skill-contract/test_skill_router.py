@@ -15,7 +15,7 @@ class TestSkillRouter(unittest.TestCase):
         text = self.skill_file.read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---"), "SKILL.md must start with YAML frontmatter")
         self.assertIn("name: sadskill", text)
-        self.assertIn("version: 0.3.0", text)
+        self.assertIn("version: " + (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip(), text)
 
     def test_five_modes_registered_and_linked(self):
         text = self.skill_file.read_text(encoding="utf-8")

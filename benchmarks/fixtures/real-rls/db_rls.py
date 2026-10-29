@@ -13,6 +13,17 @@ class DatabaseRLSError(Exception):
     pass
 
 
+class _RestrictedConnectionProxy:
+    """Limited public SQLite fixture interface (not an OS security boundary)."""
+    def __init__(self, raw):
+        object.__setattr__(self, "_raw", raw)
+
+    def __getattr__(self, name):
+        if name in ("set_authorizer", "create_function", "create_collation"):
+            raise DatabaseRLSError("Cannot modify RLS fixture authorization")
+        return getattr(object.__getattribute__(self, "_raw"), name)
+
+
 class TenantDatabaseSession:
     """
     Manages an SQLite database connection with active tenant isolation policies
@@ -27,6 +38,7 @@ class TenantDatabaseSession:
         self._register_functions()
         self._init_schema()
         self._setup_rls_authorizer()
+        self.conn = _RestrictedConnectionProxy(self.conn)
 
     def _register_functions(self):
         """Registers connection-level context functions used by SQL views and policies."""
@@ -88,8 +100,18 @@ class TenantDatabaseSession:
         2. Prohibits destructive schema modifications (DROP TABLE).
         """
         def authorizer(action_code, arg1, arg2, db_name, trigger_name):
-            # Deny DROP TABLE
-            if action_code == sqlite3.SQLITE_DROP_TABLE:
+            # Forbid view replacement, trigger tampering, schema mutations,
+            # and attachment of external databases after initialization.
+            denied = {getattr(sqlite3, key) for key in (
+                "SQLITE_DROP_TABLE", "SQLITE_DROP_TEMP_TABLE",
+                "SQLITE_CREATE_VIEW", "SQLITE_CREATE_TEMP_VIEW",
+                "SQLITE_DROP_VIEW", "SQLITE_DROP_TEMP_VIEW",
+                "SQLITE_CREATE_TRIGGER", "SQLITE_CREATE_TEMP_TRIGGER",
+                "SQLITE_DROP_TRIGGER", "SQLITE_DROP_TEMP_TRIGGER",
+                "SQLITE_ALTER_TABLE", "SQLITE_ATTACH", "SQLITE_DETACH",
+                "SQLITE_CREATE_TABLE", "SQLITE_CREATE_TEMP_TABLE",
+            ) if hasattr(sqlite3, key)}
+            if action_code in denied:
                 return sqlite3.SQLITE_DENY
 
             # Deny direct read/write to internal data tables outside RLS views

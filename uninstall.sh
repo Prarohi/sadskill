@@ -147,6 +147,7 @@ else
   remove_owned_file "${HOME}/.claude/hooks/git-guardrail.sh"
 
   remove_owned_dir "${HOME}/.gemini/antigravity/skills/sadskill"
+  remove_owned_dir "${HOME}/.gemini/skills/sadskill"
 
   remove_owned_file "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
   remove_owned_dir "${TARGET_DIR}/.cursor/skills/sadskill"

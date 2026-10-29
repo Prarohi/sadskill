@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-10-28",
+  "repository": "sadafbabu/sadskill",
+  "base_sha": "0711f806529bc2164161d898d03561435c9d573f",
+  "local_candidate": {
+    "branch": "luna/integration-candidate-2026-10-28",
+    "sha": "8966a243368aedbbd32ffd72030a8401fcd2ca73",
+    "remote_ci": "NOT_RUN",
+    "merged_prs_locally": [
+      1,
+      2,
+      3
+    ],
+    "pushed": false,
+    "internal_review": "PASS",
+    "internal_review_evidence": "Scoped independent review at exact SHA 8966a243368aedbbd32ffd72030a8401fcd2ca73 found no actionable integration findings"
+  },
+  "pull_requests": [
+    {
+      "number": 1,
+      "url": "https://github.com/sadafbabu/sadskill/pull/1",
+      "head": "66231109e63a9148b6a16838ab872020f781177b",
+      "ci_run": "40651587108",
+      "ci_node_20": "PASS",
+      "ci_node_22": "PASS",
+      "internal_review": "PASS",
+      "github_review": "NOT_RUN",
+      "hook_tests": 28,
+      "contract_tests": 18,
+      "verify_passed": 142
+    },
+    {
+      "number": 2,
+      "url": "https://github.com/sadafbabu/sadskill/pull/2",
+      "head": "619bf47a6d091bac3889262cb4baa11d3774d3bb",
+      "python_tests": "PASS",
+      "python_test_count": 85,
+      "verify_passed": 142,
+      "ci_run": "40648870888",
+      "ci_node_20": "PASS",
+      "ci_node_22": "PASS",
+      "internal_review": "PASS",
+      "github_review": "NOT_RUN"
+    },
+    {
+      "number": 3,
+      "url": "https://github.com/sadafbabu/sadskill/pull/3",
+      "head": "c48df79032fb1d52f58adcc1ec526735fe1ec1b3",
+      "python_tests": "PASS",
+      "python_test_count": 25,
+      "verify_passed": 142,
+      "benchmark_a": "PASS",
+      "benchmark_b": "PASS",
+      "benchmark_c0": "PASS",
+      "benchmark_c1": "NOT_RUN",
+      "ci_run": "40650632383",
+      "ci_node_20": "PASS",
+      "ci_node_22": "PASS",
+      "internal_review": "PASS",
+      "github_review": "NOT_RUN"
+    }
+  ],
+  "combined_candidate_validation": {
+    "sha": "8966a243368aedbbd32ffd72030a8401fcd2ca73",
+    "python_tests": "PASS",
+    "python_test_count": 132,
+    "verify_passed": 142,
+    "benchmark_a_passed": 6,
+    "benchmark_b_passed": 2,
+    "benchmark_c0_passed": 24,
+    "benchmark_c1_runs": 0,
+    "benchmark_c1": "NOT_RUN",
+    "compile_and_shell_checks": "PASS",
+    "remote_ci": "NOT_RUN",
+    "internal_review": "PASS"
+  },
+  "release_gates": [
+    {
+      "id": "L-001",
+      "status": "PASS",
+      "evidence": "tests/updater/test_security_boundaries.py cross-origin redirect"
+    },
+    {
+      "id": "L-002",
+      "status": "PASS",
+      "evidence": "tests/updater/test_security_boundaries.py structured release identity"
+    },
+    {
+      "id": "L-003",
+      "status": "PASS",
+      "evidence": "aggregate decompression, directory payload and PAX limit regressions"
+    },
+    {
+      "id": "L-004",
+      "status": "PASS",
+      "evidence": "missing checksum reports transport-only trust"
+    },
+    {
+      "id": "L-005",
+      "status": "PASS",
+      "evidence": "malformed and missing requested checksums fail closed"
+    },
+    {
+      "id": "L-006",
+      "status": "PASS",
+      "evidence": "forced rollback preserves post-apply edits"
+    },
+    {
+      "id": "L-007",
+      "status": "PASS",
+      "evidence": "duplicate skill basenames restore to exact paths"
+    },
+    {
+      "id": "L-008",
+      "status": "NOT_RUN",
+      "evidence": "dedicated whole-directory digest rollback matrix absent"
+    },
+    {
+      "id": "L-009",
+      "status": "NOT_RUN",
+      "evidence": "full apply/apply, apply/rollback and apply/uninstall interleavings absent"
+    },
+    {
+      "id": "L-010",
+      "status": "NOT_RUN",
+      "evidence": "only selected interruption boundary tested, not every replacement"
+    },
+    {
+      "id": "L-011",
+      "status": "PASS",
+      "evidence": "archive symlink, backup parent and canonical target containment regressions"
+    },
+    {
+      "id": "L-012",
+      "status": "PASS",
+      "evidence": "reinstall preserves user edits and original backup"
+    },
+    {
+      "id": "L-013",
+      "status": "PASS",
+      "evidence": "restore conflict backups survive cleanup"
+    },
+    {
+      "id": "L-014",
+      "status": "PASS",
+      "evidence": "legacy/orphan backup preservation and explicit adoption tests"
+    },
+    {
+      "id": "L-015",
+      "status": "PASS",
+      "evidence": "malformed, future, duplicate and symlinked manifest tests"
+    },
+    {
+      "id": "L-016",
+      "status": "PASS",
+      "evidence": "install/uninstall dry-run and updater plan/check no-write tests"
+    },
+    {
+      "id": "L-017",
+      "status": "PASS",
+      "evidence": "external npx skills ownership refusal test"
+    },
+    {
+      "id": "L-018",
+      "status": "NOT_RUN",
+      "evidence": "standalone unmanaged install adoption provenance matrix absent"
+    },
+    {
+      "id": "L-019",
+      "status": "PASS",
+      "evidence": "nested Claude hook schema tests; no host activation claim"
+    },
+    {
+      "id": "L-020",
+      "status": "PASS",
+      "evidence": "packaged hook path and relative-link checks"
+    },
+    {
+      "id": "L-021",
+      "status": "PASS",
+      "evidence": "forged CI verified boolean remains a claim"
+    },
+    {
+      "id": "L-022",
+      "status": "PASS",
+      "evidence": "fixed retest allowlist rejects custom commands"
+    },
+    {
+      "id": "L-023",
+      "status": "NOT_RUN",
+      "evidence": "live agent intent-change proportionality not benchmarked"
+    },
+    {
+      "id": "L-024",
+      "status": "NOT_RUN",
+      "evidence": "exhaustive whole-repository analysis behavior not executed"
+    },
+    {
+      "id": "L-025",
+      "status": "PASS",
+      "evidence": "SQLite explicitly labeled simulation; native PostgreSQL test is separately NOT_RUN"
+    },
+    {
+      "id": "L-026",
+      "status": "PASS",
+      "evidence": "C0 catalog validation 24/24; no claim of agent runs"
+    },
+    {
+      "id": "L-027",
+      "status": "PASS",
+      "evidence": "combined Python suite 132 passed at exact local candidate SHA"
+    },
+    {
+      "id": "L-028",
+      "status": "PASS",
+      "evidence": "PR1/PR2/PR3 current exact-head CI green; local candidate has no remote CI"
+    },
+    {
+      "id": "L-029",
+      "status": "BLOCKED",
+      "evidence": "no eligible independent GitHub reviewer; no merge performed"
+    },
+    {
+      "id": "L-030",
+      "status": "NOT_RUN",
+      "evidence": "restart/reopen persistence recovery not simulated"
+    },
+    {
+      "id": "HIST-63125c4e",
+      "status": "BLOCKED",
+      "evidence": "object absent from local object database, refs and reflogs"
+    },
+    {
+      "id": "HIST-e7d8f2c",
+      "status": "BLOCKED",
+      "evidence": "object absent from local object database, refs and reflogs"
+    },
+    {
+      "id": "HIST-BACKUP",
+      "status": "BLOCKED",
+      "evidence": "not found in Downloads; broader home search incomplete due permission denial"
+    },
+    {
+      "id": "GITHUB-INDEPENDENT-APPROVAL",
+      "status": "BLOCKED",
+      "evidence": "only sadafbabu is an eligible collaborator; PR review lists empty"
+    },
+    {
+      "id": "MAIN-BRANCH-PROTECTION",
+      "status": "FAIL",
+      "evidence": "GitHub API returned 404 Branch not protected"
+    },
+    {
+      "id": "RELEASE-CHECKSUM-ASSETS",
+      "status": "FAIL",
+      "evidence": "v0.3.0 and v0.2.1 have zero assets"
+    },
+    {
+      "id": "POSTGRES-NATIVE-RLS",
+      "status": "NOT_RUN",
+      "evidence": "SQLite authorizer fixture only"
+    },
+    {
+      "id": "REAL-AGENT-C1",
+      "status": "NOT_RUN",
+      "evidence": "zero real-agent benchmark runs"
+    },
+    {
+      "id": "LOCAL-CANDIDATE-REMOTE-CI",
+      "status": "NOT_RUN",
+      "evidence": "candidate branch remains local-only; scoped internal integration review is clear"
+    },
+    {
+      "id": "FULL-SOURCE-LINE-AUDIT",
+      "status": "NOT_RUN",
+      "evidence": "154 tracked paths inventoried; audit focused on PR diffs/security boundaries"
+    },
+    {
+      "id": "LOCAL-CANDIDATE-INTERNAL-REVIEW",
+      "status": "PASS",
+      "evidence": "independent scoped review at exact candidate SHA found no actionable integration findings"
+    }
+  ],
+  "ratings": {
+    "updater_safety": 8,
+    "product_contracts": 7,
+    "evidence_and_c0_benchmark": 8,
+    "real_agent_effectiveness": 0,
+    "release_readiness": 2
+  },
+  "release_decision": "NOT_READY",
+  "github_pr_merge_performed": false
+}

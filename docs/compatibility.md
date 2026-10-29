@@ -14,6 +14,19 @@ This page records paths written by Sadskill's installer and what its local docto
 
 Windsurf, Roo Code, Cline, web chat, and other environments are not installed or host-tested by this repository's current installer. Do not describe them as supported based only on prompt compatibility.
 
+## Platform support matrix
+
+The Markdown skill instructions are portable content. That does not prove that an agent host discovers the skill, accepts every command, or enforces its safety guidance.
+
+| Surface | Linux | macOS | Windows native | Windows with WSL |
+|---|---|---|---|---|
+| Markdown skill instructions | Portable content; host behavior is not certified by this repository. | Same limitation. | Same limitation. | Same limitation. |
+| Companion installer, doctor, manifest, memory, and CLI | Ubuntu regression coverage; companion code uses Bash and POSIX `fcntl`. | Native macOS Codex installer/restore smoke added to CI; broader CLI/agent lifecycle remains unverified. | Unsupported for companion tooling because it requires Bash/POSIX `fcntl`. | Not yet tested; do not infer support from Linux CI. |
+| Bubblewrap sandbox | Linux only; requires `bwrap`. Missing `bwrap` fails closed. | Not supported; Bubblewrap needs Linux namespaces. | Not supported. | Not verified; requires a working Linux `bwrap` inside WSL. |
+| Native PostgreSQL RLS fixture | CI runs on Ubuntu; this is fixture evidence only. | Not run. | Not run. | Not run. |
+
+CI retains comprehensive Ubuntu checks and adds native macOS **Codex-only install/restore smoke** plus Windows **skill-content-only smoke** jobs. Passing the latter does not establish Windows companion CLI/installer support (still unsupported). End-to-end native agent-host behavior, WSL and full macOS compatibility remain open in [issue #12](https://github.com/Prarohi/sadskill/issues/12).
+
 ## Portable evidence helper
 
 The complete skill folder includes `tools/verify-evidence.py`, both when distributed as a skill folder and when copied by the companion installer. Resolve its location relative to the `SKILL.md` loaded by the host; for example, a Codex companion installation places it at `~/.codex/skills/sadskill/tools/verify-evidence.py`. Skill-manager installations may use a different directory.
@@ -34,6 +47,7 @@ Replace the example checkout and helper path with their discovered locations. Th
 - **No browser preview:** Source inspection can identify CSS and markup risks but cannot prove rendered layout or visual behavior. Report that evidence as code-level only.
 - **No live database:** SQL inspection or a deterministic fixture is not a live migration or production RLS test. Say exactly which one ran.
 - **No network:** Local inspection can continue, but dependency advisories and external documentation checks are skipped. Do not call that a complete dependency audit.
+- **Sandbox environment:** With Bubblewrap active, `sad sandbox` clears inherited environment variables, sets a temporary `HOME`/`TMPDIR`, hides the host home directory, and leaves only the chosen project writable. Git metadata is read-only by default; linked-worktree metadata is mounted only after its pointers validate. `--allow-git` enables repository metadata writes, while `--allow-unsandboxed` explicitly bypasses sandbox protections. System files remain visible read-only; use `--offline` for network namespace isolation. This is supplemental process isolation, not a complete defense against hostile code.
 - **No persistent workspace:** Conversation memory is not durable project storage. Export or save a requested artifact before ending the session.
 
 ## Doctor status labels

@@ -50,6 +50,26 @@ class LegacyUninstallTests(SandboxCase):
             "legacy uninstall failed to remove an exactly-owned file",
         )
 
+    def test_gemini_cli_pristine_skill_removed_without_manifest(self):
+        self._no_manifest()
+        import pathlib
+        target = pathlib.Path(self.home) / ".gemini" / "skills" / "sadskill"
+        shutil.copytree(os.path.join(REPO_ROOT, "skills", "sadskill"), target)
+        rc = self.run_uninstall()
+        self.assertEqual(rc.returncode, 0, rc.stderr)
+        self.assertFalse(target.exists(), "Gemini CLI legacy skill was not removed")
+
+    def test_gemini_cli_user_modified_skill_is_preserved(self):
+        self._no_manifest()
+        import pathlib
+        target = pathlib.Path(self.home) / ".gemini" / "skills" / "sadskill"
+        shutil.copytree(os.path.join(REPO_ROOT, "skills", "sadskill"), target)
+        (target / "USER-NOTES.md").write_text("keep this", encoding="utf-8")
+        rc = self.run_uninstall()
+        self.assertEqual(rc.returncode, 0, rc.stderr)
+        self.assertTrue((target / "USER-NOTES.md").is_file(),
+                        "Uninstall removed user-modified Gemini CLI skill")
+
     def test_user_dir_named_sadskill_with_unrelated_content_preserved(self):
         self._no_manifest()
         keep = self.write_file(

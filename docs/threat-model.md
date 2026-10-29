@@ -1,4 +1,4 @@
-# sadskill Threat Model & Security Boundaries (v0.3.0)
+# sadskill Threat Model & Security Boundaries (v0.5.0 candidate; not yet released)
 
 This document establishes the trust boundaries, threat vectors, privilege models, and defense-in-depth mitigations for the `sadskill` engineering workflow across host coding agents.
 
@@ -37,7 +37,7 @@ This document establishes the trust boundaries, threat vectors, privilege models
 
 ### T-01: Destructive Git and Database Execution
 - **Risk**: Agents executing `git reset --hard`, `git push --force`, `git clean -fd`, or SQL `DROP TABLE` destroying uncommitted code or production data.
-- **Mitigation**: Dual-layer guardrail (`scripts/git-guardrail.sh` and PreToolUse hooks) intercepts destructive commands and exits with code 2. Real Git `pre-push` inspection verifies non-fast-forward updates and remote branch deletions.
+- **Mitigation**: Dual-layer guardrail (`scripts/git-guardrail.sh` and PreToolUse hooks) intercepts known destructive command patterns and exits with code 2. SQL matching is a lexical heuristic, not a SQL parser or authorization boundary; database least privilege and PostgreSQL RLS must constrain actual access. Real Git `pre-push` inspection verifies non-fast-forward updates and remote branch deletions.
 
 ### T-02: Data Loss During Installation / Restoration
 - **Risk**: Uninstallation or reinstallation overwriting pre-existing user configurations or deleting restored backup files.
@@ -73,3 +73,9 @@ This document establishes the trust boundaries, threat vectors, privilege models
 ### T-08: Evidence and Benchmark Claims
 - Agent-supplied `ci_attestation.verified: true` is untrusted metadata and must remain `CI_CLAIMED` until an external verifier checks the actual GitHub repository, run, workflow/job conclusion, and head SHA.
 - The deterministic runner's catalog check is not an agent run. Track C1 remains `NOT_EXECUTED` (0 runs). The SQLite authorizer fixture is a simulation, not PostgreSQL RLS.
+
+### T-09: Host Environment and Home-Directory Exposure in the Sandbox
+- **Risk**: A sandboxed process inheriting the caller's environment or reading the host home directory can access credentials, agent configuration, and unrelated user files even when the host root is mounted read-only.
+- **Mitigation**: With Bubblewrap active, `scripts/sandbox.sh` clears inherited environment variables, provides a fixed `PATH` plus temporary `HOME`/`TMPDIR`, hides the host home directory with a temporary mount, and rebinds only the requested project as writable. A project beneath HOME is made available without restoring the rest of HOME. Git metadata is read-only by default. A linked worktree's common Git directory is mounted only after validating its `.git` pointer, `commondir`, worktree location, and back-pointer; `--allow-git` explicitly permits writes to the repository metadata.
+- **Explicit fallback**: `--allow-unsandboxed` bypasses Bubblewrap and therefore does not provide these environment or filesystem protections; `--offline` refuses that fallback.
+- **Limit**: The root filesystem remains visible read-only; files readable by the current user outside HOME remain readable. Network access remains enabled unless `--offline` is selected. This is supplemental isolation, not a complete hostile-code boundary.

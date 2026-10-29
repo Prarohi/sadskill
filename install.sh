@@ -73,6 +73,22 @@ done
 
 echo "=== Installing sadskill (v${SADSKILL_VERSION}) ==="
 
+assert_no_symlink_chain() {
+  local current="$1"
+  local stop="$2"
+  while [[ -n "$current" && "$current" != "/" && "$current" != "." ]]; do
+    if [[ -L "$current" ]]; then
+      echo "ERROR: refusing symlinked install target or ancestor: $current" >&2
+      return 78
+    fi
+    if [[ "$current" == "$stop" ]]; then return 0; fi
+    current="$(dirname -- "$current")"
+  done
+  echo "ERROR: installation destination outside expected root: $1" >&2
+  return 78
+}
+assert_no_symlink_chain "${HOME}/.sadskill" "$HOME"
+
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "   [DRY-RUN MODE] No filesystem modifications will be made."
 fi
@@ -92,7 +108,7 @@ make_backup_path() {
   local ts
   ts="$(date +%Y%m%d%H%M%S)_$$"
   local bak="${target}.bak.${ts}"
-  while [[ -e "$bak" ]]; do
+  while [[ -e "$bak" || -L "$bak" ]]; do
     bak="${target}.bak.${ts}_${RANDOM}"
   done
   echo "$bak"
@@ -124,6 +140,7 @@ backup_and_install_skill() {
   local agent="$1"
   local dest="$2"
   local backup_dest=""
+  assert_no_symlink_chain "$dest" "${3:-$HOME}"
 
   if [[ -d "$dest" ]]; then
     if [[ "$NO_BACKUP" == "true" ]]; then
@@ -158,6 +175,8 @@ install_codex() {
   local prompts_dir="${codex_dir}/prompts"
 
   echo "-> Configuring for OpenAI Codex / ChatGPT Desktop..."
+  assert_no_symlink_chain "${skills_dir}" "$HOME"
+  assert_no_symlink_chain "${prompts_dir}" "$HOME"
   if [[ "$DRY_RUN" != "true" ]]; then
     mkdir -p "${skills_dir}" "${prompts_dir}"
   fi
@@ -168,6 +187,7 @@ install_codex() {
     if [[ -f "$cmd" ]]; then
       local target_cmd="${prompts_dir}/$(basename "$cmd")"
       local cmd_backup=""
+      assert_no_symlink_chain "$target_cmd" "$HOME"
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
         cmd_backup="$(make_backup_path "$target_cmd")"
         if [[ "$DRY_RUN" != "true" ]]; then
@@ -192,6 +212,9 @@ install_claude() {
   local hooks_dir="${claude_dir}/hooks"
 
   echo "-> Configuring for Claude Code..."
+  assert_no_symlink_chain "${skills_dir}" "$HOME"
+  assert_no_symlink_chain "${commands_dir}" "$HOME"
+  assert_no_symlink_chain "${hooks_dir}" "$HOME"
   if [[ "$DRY_RUN" != "true" ]]; then
     mkdir -p "${skills_dir}" "${commands_dir}" "${hooks_dir}"
   fi
@@ -202,6 +225,7 @@ install_claude() {
     if [[ -f "$cmd" ]]; then
       local target_cmd="${commands_dir}/$(basename "$cmd")"
       local cmd_backup=""
+      assert_no_symlink_chain "$target_cmd" "$HOME"
       if [[ -f "$target_cmd" && "$NO_BACKUP" != "true" ]] && ! cmp -s "$cmd" "$target_cmd"; then
         cmd_backup="$(make_backup_path "$target_cmd")"
         if [[ "$DRY_RUN" != "true" ]]; then
@@ -220,6 +244,7 @@ install_claude() {
   # Safe guardrail hook installation with backup
   local guardrail_target="${hooks_dir}/git-guardrail.sh"
   local hook_backup=""
+  assert_no_symlink_chain "$guardrail_target" "$HOME"
   if [[ -f "$guardrail_target" && "$NO_BACKUP" != "true" ]] && ! cmp -s "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh" "$guardrail_target"; then
     hook_backup="$(make_backup_path "$guardrail_target")"
     echo "   [INFO] Preserving existing Claude hook at ${hook_backup}"
@@ -252,6 +277,8 @@ install_cursor() {
   local rules_dir="${target_path}/.cursor/rules"
   local target_skill_dir="${target_path}/.cursor/skills/sadskill"
   echo "-> Configuring for Cursor in: ${target_path}..."
+  assert_no_symlink_chain "$rules_dir" "$target_path"
+  assert_no_symlink_chain "$target_skill_dir" "$target_path"
 
   local skill_backup=""
   if [[ -d "$target_skill_dir" && "$NO_BACKUP" != "true" ]]; then
@@ -276,6 +303,7 @@ install_cursor() {
 
   local rule_file="${rules_dir}/sadskill.mdc"
   local rule_backup=""
+  assert_no_symlink_chain "$rule_file" "$target_path"
   if [[ -f "$rule_file" && "$NO_BACKUP" != "true" ]]; then
     rule_backup="$(make_backup_path "$rule_file")"
     if [[ "$DRY_RUN" != "true" ]]; then
@@ -324,6 +352,7 @@ install_antigravity() {
   local skills_dir="${agy_dir}/skills"
 
   echo "-> Configuring for Google Antigravity..."
+  assert_no_symlink_chain "${skills_dir}" "$HOME"
   if [[ "$DRY_RUN" != "true" ]]; then
     mkdir -p "${skills_dir}"
   fi
@@ -337,6 +366,7 @@ install_gemini() {
   local skills_dir="${gemini_dir}/skills"
 
   echo "-> Configuring for Gemini CLI..."
+  assert_no_symlink_chain "${skills_dir}" "$HOME"
   if [[ "$DRY_RUN" != "true" ]]; then
     mkdir -p "${skills_dir}"
   fi
