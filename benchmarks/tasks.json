@@ -3,7 +3,7 @@
     "id": "task-01-tier1-bugfix",
     "name": "Tier 1 Surgical Bugfix",
     "category": "Planning & Token Efficiency",
-    "prompt": "Fix typo in variable name in math.py",
+    "prompt": "Fix repeated items at a pagination boundary in the existing helper and add a focused regression test",
     "expected_mode": "Plan (Tier 1)",
     "evaluation_criteria": {
       "plan_tier": "Tier 1 (Surgical)",

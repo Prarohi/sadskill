@@ -1,23 +1,11 @@
 # `/sad-plan`
 
-Execute the `plan` workflow of `sadskill` on target scope: $ARGUMENTS
+Execute the `plan` workflow of `sadskill` on the requested scope: $ARGUMENTS
 *(Invocation: `/sad-plan` or `/prompts:sad-plan`)*
 
 ## Instructions
-1. **Locate sadskill Configuration**:
-   - Check local workspace: `./skills/sadskill/SKILL.md` (if vendored in project).
-   - Check global agent path: `~/.codex/skills/sadskill/SKILL.md` (or `~/.claude/skills/sadskill/SKILL.md`).
-   - Check developer profile: `~/.sadskill/profile.md` for local style or tooling preferences.
-2. **Global Invariants**:
-   - Check `.sad/` project memory (`.sad/history.md`, `.sad/decisions.md`, `.sad/plans/`).
-   - Enforce Human-Voice: deliver answers first, strip AI filler words ("delve", "seamless", "testament").
-   - Grill on Ambiguity: batch questions with recommended defaults so the user can approve with `yes`.
-3. **Adaptive Planning Pipeline**:
-   - **Tier 1 (Surgical Plan)** for <= 2 files, bugfixes, visual CSS/HTML tweaks, or typos:
-     Generate a concise plan (Goal, Mutation Table, Verification Test Command). Skip diagrams.
-   - **Tier 2 (Deep Architectural Spec)** for new features, multi-file refactors, schema migrations, or APIs:
-     Pre-declare Contract-First AST signatures, Mermaid data flow, boundary/failure modes, and test-first harness.
-4. **Progressive Disclosure**:
-   - Write exhaustive plan to `.sad/plans/<YYYY-MM-DD>-<slug>.md`.
-   - Output a 5-10 line executive summary in chat with file link.
-   - Await user approval before writing production code.
+
+1. Locate the `SKILL.md` loaded for this task. Check the project-vendored `./skills/sadskill/SKILL.md`, the companion path `~/.codex/skills/sadskill/SKILL.md`, or the host's configured skill directory (which may be `~/.agents/skills/sadskill`).
+2. Read that `SKILL.md`, then load `modes/plan.md` relative to its containing skill directory. Resolve linked protocols, references, templates and tools against that same installed directory. The canonical mode supplies the workflow; this adapter does not replace it.
+3. Follow current user instructions, scope and execution permissions. Load only the relevant linked guidance and project memory; report unavailable tools or checks without claiming they ran.
+4. Use the canonical risk tiers and execution-mode handoff; a small mechanical edit may be T0, and file count alone does not determine risk.

@@ -1,90 +1,84 @@
 # Mode: `/sad-plan`
 
-Plan mode conducts **intense upfront specification** and creates deterministic, zero-waste implementation plans. A rigorous, deep plan eliminates guesswork, prevents hallucinated APIs, and minimizes debugging loops—the single largest source of token waste in autonomous agent engineering.
+Plan mode conducts **proportional, risk-aware upfront specification** and creates deterministic, zero-waste implementation plans. A rigorous plan eliminates guesswork, prevents hallucinated APIs, and minimizes debugging loops—the single largest source of token waste in autonomous agent engineering.
 
 ---
 
-## ⚡ The Zero-Waste / High-Density Philosophy
+## ⚡ The Zero-Waste & Proportional Planning Philosophy
 
-1. **Intense Upfront Planning Eliminates Downstream Token Waste**:
-   - Speculative code patching is the primary cause of token waste in autonomous agents. When an agent edits code without knowing exact signatures, it enters a multi-turn error cycle fixing imports, type errors, and missing parameters.
-   - Rigorous specification of types, data flows, edge cases, and test assertions upfront prevents circular error loops, repeated patch attempts, and debugging churn.
-2. **Contract-First AST Planning**:
-   - Every modified or created function, method, interface, and type must have its full signature declared before any implementation starts.
-   - Declare exact parameter names, parameter types, return types, generic bounds, and error types.
-   - For external dependencies, inspect their installed definitions (`node_modules`, `venv`, cargo docs) to prevent hallucinated API calls.
-3. **Maximum Information Density**:
-   - Avoid conversational prose, narrative essays, or repetitive summaries. Use structured tables, compact Mermaid graphs, and explicit file:symbol contracts.
-4. **Progressive Disclosure**:
-   - Do not dump all vendor references into context. Inspect [vendor/INDEX.md](../vendor/INDEX.md) and load only the single reference file relevant to the immediate sub-problem.
-   - Extensive plans are written to `.sad/plans/` rather than flooded into chat context. The chat receives only an executive summary and file link.
+1. **Intense Upfront Planning Eliminates Downstream Token Churn**:
+   - Speculative code patching without knowing exact signatures or boundaries triggers multi-turn trial-and-error cycles fixing imports, type errors, and unexpected regressions.
+   - Upfront specification of types, data flows, edge cases, and test assertions prevents circular debugging loops.
+2. **Proportional Risk-Based Tiering (T0 / T1 / T2)**:
+   - File count alone is not a reliable proxy for risk: a 1-line change to a permission check is high-risk, while editing 3 documentation files is trivial.
+   - We evaluate risk across five dimensions: `blast_radius`, `reversibility`, `data_sensitivity`, `unknowns`, and `dependency_change`.
+   - **T0 (Trivial)**: Bypass all plan file overhead for mechanical, low-risk edits.
+   - **T1 (Surgical)**: Lean, single-turn file-mutation table for localized bugfixes.
+   - **T2 (Architectural)**: Full Contract-First specification with AST signatures, Mermaid flows, and rollback plans.
+3. **Contract-First AST Planning (For Nontrivial Tasks)**:
+   - For all newly created or modified functions, declare complete signatures before implementation: argument names, argument types, return types, generic parameters, and error types.
+   - For external packages, verify definitions against installed code (`node_modules/`, `venv/`, Cargo manifests) to prevent hallucinated API calls.
+4. **Architectural Alternative Trade-Offs**:
+   - When consequential design decisions arise (e.g., SQLite vs Postgres, optimistic UI vs server-authoritative, polling vs WebSockets), present 2 distinct alternatives with trade-offs rather than assuming a single path.
+5. **Progressive Disclosure**:
+   - Load the router first, select the mode, and load only the targeted protocol required.
+   - Extensive architectural plans are saved to `.sad/plans/` rather than flooding the conversation context. Chat receives a 5-10 line executive summary and relative file link.
 
 ---
 
 ## 🛠️ Execution Pipeline
 
-### Phase 1: Memory & Codebase Reconnaissance
-1. **Examine Project Memory (`.sad/`)**:
+### Phase 1: Context, Memory & Codebase Discovery
+1. **Interpret Live Conversation**:
+   - Extract intent, user constraints, and execution mode (`REVIEW_ONLY`, `PLAN_ONLY`, `IMPLEMENT`, `CONTINUE_UNTIL_DONE`) per [protocols/context.md](../protocols/context.md).
+   - Check if current user instructions supersede older notes.
+2. **Examine Project Memory (`.sad/`)**:
    - Read `.sad/history.md` for past milestones and dependencies.
    - Read `.sad/decisions.md` to prevent violating established Architecture Decision Records (ADRs).
-   - Check `.sad/plans/` to avoid duplicating past specs.
-2. **Deterministic Codebase Scan**:
+   - Check `.sad/design-memory.md` to avoid previously rejected UI patterns.
+3. **Scoped Codebase Scan**:
    - Identify package manifests (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`).
    - Locate primary entry points and existing module seams.
    - Find the existing test runner and verification commands.
 
-### Phase 2: Grilling on Ambiguity (Single-Round Frontier)
-1. Never ask questions about facts discoverable from the repository.
-2. If real architectural trade-offs exist (e.g. database schema vs document store, library choice, breaking API change):
-   - Group all questions into **one batched round**.
-   - Provide a concise title, context, and an explicit **Recommended Answer**.
-   - Phrase questions so that the user can accept all recommendations by typing `yes`.
+### Phase 2: Risk Classification & Proportional Tiering
 
-### Phase 3: Adaptive Specification (Tier 1 vs. Tier 2)
+Evaluate the task against the Risk Matrix:
 
-Evaluate task scope and execution mode per [context.md](../protocols/context.md) and [autonomy.md](../protocols/autonomy.md) before generating the plan to prevent instruction over-scaffolding and token waste:
+| Risk Tier | Criteria & Examples | Planning Ceremony | Artifact Location |
+|---|---|---|---|
+| **T0: Trivial** | Single-line typo, CSS color/padding tweak, logging addition, documentation edit. Reversible, zero data risk. | **Bypass planning ceremony**. Execute directly if implementation is authorized; verify with standard test/lint. | No plan file written. Inline chat confirmation only. |
+| **Tier 1: Surgical Plan** | Localized bugfix, small UI component adjustment, internal helper refactor (<= 2 files). Low blast radius, known test command. | **Lean Surgical Plan**. Skips Mermaid diagrams and heavy AST formalisms for lean tokens. 1-2 sentence goal, file-symbol mutation table, exact verification command. | Inline in chat (optional `.sad/plans/` record only if requested). |
+| **Tier 2: Deep Architectural Spec** | New full-stack feature, database schema migration, multi-tenant auth, breaking API change, major refactor across >= 3 modules. | **Deep Architectural Change Contract**. Full Contract-First AST signatures, Mermaid architecture and data flow, boundary analysis, rollback plan. | Saved to `.sad/plans/<YYYY-MM-DD>-<slug>.md` following [templates/change-contract.template.md](../templates/change-contract.template.md). |
 
-- **Tiny Task** (typos, single line tweaks, mechanical lint): Minimal 2-5 step internal plan, execute directly without generating an external markdown spec if implementation is already authorized.
+### Phase 3: Architectural Alternative Analysis (T2 Only)
+When an architectural fork exists, present a concise trade-off comparison:
+```text
+Alternative A (Recommended): [Name]
+  - Pros: [Performance, simplicity, aligns with existing conventions]
+  - Cons: [Migration overhead or dependency constraint]
+Alternative B: [Name]
+  - Pros: [Extreme flexibility or separation]
+  - Cons: [Complexity, additional boilerplate]
+Recommended default: Alternative A.
+```
 
-#### ⚡ Tier 1: Surgical Plan (Scope: <= 2 files, bug fixes, visual CSS/HTML tweaks, typos)
-- **Format**:
-  1. **Goal**: 1-2 sentence statement of target fix and user outcome.
-  2. **File Mutation Table**: Target file, action (`MODIFY`), target symbol, and exact replacement diff.
-  3. **Verification Command**: Exact test command and expected exit code 0.
-- **Token Saver**: Skips Mermaid diagrams and extensive AST formalisms. Generates a lean 15-20 line plan in `.sad/plans/<YYYY-MM-DD>-<slug>.md` for rapid single-turn execution.
+### Phase 4: Constructing the Change Contract (T2 Architectural)
+For T2 tasks, write the formal specification to `.sad/plans/<YYYY-MM-DD>-<feature-slug>.md` using [templates/change-contract.template.md](../templates/change-contract.template.md):
+1. **Intent & Concrete Outcome**: Clear statement of developer objective and acceptance criteria.
+2. **Architecture & Data Flow**: Compact Mermaid diagram showing affected components and data boundaries.
+3. **Contract-First AST Signatures**: Explicit TypeScript/Python/Rust type definitions and interfaces for all touched entities.
+4. **File-by-File Mutation Matrix**: Target paths, actions (`CREATE`, `MODIFY`, `DELETE`), exported symbols, and contiguous edit chunks.
+5. **Boundary & Edge Case Analysis**: Empty inputs, nullability, concurrency/races, timeouts, and network failures.
+6. **Test-First Verification Harness**: Exact terminal commands and assertions to prove correctness.
+7. **Rollback & Recovery Plan**: Explicit reversal strategy (`git checkout`, `down.sql`, or feature flag rollback).
 
-#### 🏛️ Tier 2: Deep Architectural Spec (Scope: new features, multi-file refactors, schema migrations, API changes)
-The plan written to `.sad/plans/<YYYY-MM-DD>-<slug>.md` follows [templates/plan.template.md](../templates/plan.template.md) with full rigor:
-1. **User Value & Concrete Outcome**: Single high-density paragraph.
-2. **Architecture & Data Flow**: Compact Mermaid diagram showing components, boundaries, and dependencies.
-3. **Contract-First AST Signatures**:
-   - Explicit TypeScript/Python/Rust type definitions and interfaces for all new and touched entities.
-   - Exact function signatures: arguments, types, return types, throws/errors.
-4. **File-by-File Mutation Matrix**:
-   - Target File Path (absolute or repo-relative).
-   - Action: `CREATE`, `MODIFY`, or `DELETE`.
-   - Exported symbols impacted and contiguous replacement boundaries.
-   - Contiguous chunk strategy: batched edits to avoid piecemeal rewrites.
-5. **Exhaustive Boundary & Edge Case Analysis**:
-   - Zero/empty inputs (`[]`, `""`, `0`, `null`).
-   - Boundary limits, overflow, concurrency, race conditions.
-   - External failure modes: timeouts, network drops, auth token expiration, rate limits.
-6. **Test-First Verification Harness**:
-   - Exact test commands to execute (e.g. `npm test -- <path>`).
-   - Specific assertions proving both the happy path and edge cases.
-7. **Rollback & Recovery Plan**:
-   - Step-by-step instructions to revert code and database migrations cleanly if verification fails.
-
-### Phase 4: Mode-Aware Execution or Approval Gate
-1. Write the completed plan to `.sad/plans/<YYYY-MM-DD>-<feature-slug>.md`.
-2. Output a **compact executive summary** (5-10 lines max) in the chat:
-   - 1-2 sentence summary of goal and approach.
-   - Markdown table of files to create/modify.
-   - Verification command.
-   - Relative link to the plan markdown: `[Read Full Plan (.sad/plans/<filename>.md)]`.
-3. **Execution Mode Hand-off**:
-   - If `execution_mode` is `PLAN_ONLY`: stop and present plan to user.
-   - If `execution_mode` is `CONTINUE_UNTIL_DONE` or `IMPLEMENT`: proceed autonomously with implementation and testing without halting for redundant confirmation.
+### Phase 5: Autonomous Execution or Approval Gate
+1. For T2 plans, output a **compact executive summary** (5-10 lines max) in chat with relative file link: `[Read Full Plan (.sad/plans/<filename>.md)]`.
+2. **Execution Mode Hand-off**:
+   - If `execution_mode == PLAN_ONLY`: Halt and present plan to the user.
+   - If `execution_mode == IMPLEMENT` or `CONTINUE_UNTIL_DONE`: Proceed immediately with safe implementation and test verification without pausing for routine confirmation.
+   - Halt ONLY if a genuine destructive operation, financial API call, or production database migration requires explicit confirmation per [protocols/autonomy.md](../protocols/autonomy.md).
 
 ---
 

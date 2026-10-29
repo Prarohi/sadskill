@@ -2,7 +2,7 @@
 
 - **Audited Baseline Commit**: `b1701a7576c559df0c9294614ad02886d6f5c6b0` (v0.3.0)
 - **Environment**: Linux x86_64, Python 3.10+, Bash 5.2
-- **Test Suite Status**: 142 / 142 verification checks passing (`scripts/verify.py`), 3-Track Benchmark Suite 100% passing (`benchmarks/runner.py`: 6/6 Track A contracts, 2/2 Track B fixtures, 1/1 Track C 24-task suite validation)
+- **Test Suite Status**: 142 / 142 verification checks passing (`scripts/verify.py`). Deterministic benchmark validation: Track A 6/6 contracts, Track B 2/2 fixtures, Track C0 catalog 24/24. Track C1 real-agent runs: **0, NOT_EXECUTED**; these checks do not establish real-agent task performance.
 
 ---
 
@@ -41,7 +41,7 @@
 
 ## 2. P1 Guardrails & Diagnostics
 
-1. **Diagnostic Doctor Utility (`scripts/doctor.py`)**: Added capability scanner reporting hook and agent states: `NOT_INSTALLED`, `AVAILABLE`, `REGISTERED`, `ACTIVE`, and `UNSUPPORTED`. Added `--enable-hooks` for opt-in, idempotent registration of `git-guardrail.sh` in `~/.claude/settings.json`.
+1. **Diagnostic Doctor Utility (`scripts/doctor.py`)**: Added a local capability scanner. It distinguishes `LOCAL_TEST_PASSED` from `HOST_VERIFIED_ACTIVE`; only an explicit operator confirmation can set the latter. Added ownership-aware hook registration and removal using Claude Code's nested settings schema.
 2. **Git Pre-Push Ref-Update Parsing (`scripts/git-guardrail.sh`)**: Added stdin stream inspection for Git pre-push hook protocol, parsing both 4-token streams (`<local_ref> <local_oid> <remote_ref> <remote_oid>`) and 3-token / empty `local_ref` streams (such as `git push origin :main`), blocking remote branch deletions and non-fast-forward force pushes.
 3. **Structured JSON Hook Parsing**: Swapped fragile single-line `sed` regex with robust Python JSON parser handling escaped characters and multi-line commands.
 4. **Lexical Command Parsing & Commit Message Stripping (`scripts/git-guardrail.sh`)**: Replaced naive `tr ';|&' '\n'` with `shlex.shlex(punctuation_chars=True)` lexer to avoid breaking quoted strings containing punctuation. Stripped commit message bodies (`-m`, `--message`) before SQL analysis, eliminating false positives on architectural commit descriptions.
@@ -60,11 +60,13 @@
 3. **Adaptive Advice (`skills/sadskill/protocols/advice.md`)**: Non-intrusive, impact-ranked suggestions; suppressible upon user request.
 4. **Autonomous Continuation (`skills/sadskill/protocols/autonomy.md`)**: Bounded continuation loops and clarification budgets across four execution modes (`REVIEW_ONLY`, `PLAN_ONLY`, `IMPLEMENT`, `CONTINUE_UNTIL_DONE`).
 5. **Approved Web Research (`skills/sadskill/protocols/research.md`)**: User-authorized external documentation research with provenance tracking; protects against untrusted web prompt injection.
-6. **Real Database RLS Behavioral Fixture (`benchmarks/fixtures/real-rls/`)**: Behavioral tests verifying database driver-level tenant isolation using SQLite authorizers.
+6. **SQLite RLS-Simulation Behavioral Fixture (`benchmarks/fixtures/real-rls/`)**: Behavioral tests exercise a SQLite authorizer simulation of tenant isolation. This is not a native PostgreSQL RLS integration test.
 
 ---
 
 ## 4. Implementation Backlog Ledger (S01–S60)
+
+This ledger records implementation scope, not a product-success score. Rows about protocols describe guidance in files; they do not prove an agent followed it. `FIXED` is limited to the stated repository behavior or artifact. Host activation, cross-platform execution and real-agent comparisons require their own observed evidence. The incomplete validation and benchmark work below remains open.
 
 | ID | Priority | Description | Affected Paths | Acceptance Evidence | Status |
 |---|---|---|---|---|---|
@@ -77,32 +79,32 @@
 | S07 | P0 | Stop filename-only uninstall deletion | `uninstall.sh`, `scripts/manifest.py` | Manifest and content-signature verified | **FIXED** |
 | S08 | P0 | Atomic installer transaction / collision | `scripts/manifest.py` | Atomic temp file write + rename with SHA-256 | **FIXED** |
 | S09 | P1 | Correct purge/no-backup user experience | `install.sh`, `uninstall.sh` | Added `--dry-run` and clear warnings | **FIXED** |
-| S10 | P1 | Hook active-state doctor | `scripts/doctor.py` | Reports AVAILABLE, REGISTERED, ACTIVE honestly | **FIXED** |
+| S10 | P1 | Hook active-state doctor | `scripts/doctor.py` | Local simulations never claim host activation; confirmation is explicit | **FIXED** |
 | S11 | P1 | Correct Git pre-push ref handling | `scripts/git-guardrail.sh` | Ref update stream parsed for force push & delete | **FIXED** |
 | S12 | P1 | Structured Claude JSON parser | `scripts/git-guardrail.sh` | Escaped quotes and multi-line payloads parsed | **FIXED** |
 | S13 | P1 | Guardrail classifier hardening | `scripts/git-guardrail.sh` | Dangerous keywords inside `-m` messages allowed | **FIXED** |
 | S14 | P1 | Eliminate duplicate hook drift | `scripts/git-guardrail.sh`, `hooks/` | Byte-for-byte identity enforced in CI verify | **FIXED** |
 | S15 | P1 | Host-specific tool coverage matrix | `docs/compatibility.md` | Documented supported discovery & invocation | **FIXED** |
-| S16 | P1 | Verify 5 workflow invocations per host | `commands/`, `skills/sadskill/SKILL.md` | Slash commands and universal triggers documented | **FIXED** |
+| S16 | P1 | Verify 5 workflow invocations per host | `commands/`, `skills/sadskill/SKILL.md` | Adapters/triggers documented; actual five-workflow execution in every host not performed | **NOT_EXECUTED** |
 | S17 | P1 | Correct Gemini CLI and Antigravity paths | `install.sh`, `docs/compatibility.md` | Discovered at standard `~/.gemini/skills` | **FIXED** |
 | S18 | P1 | Correct auto/all target semantics | `install.sh` | Cursor clearly skipped with note inside repo | **FIXED** |
 | S19 | P1 | Correct CLI error exit codes | `install.sh`, `uninstall.sh` | Invalid options exit 2, `--help` exits 0 | **FIXED** |
-| S20 | P2 | Cross-platform install tests | `tests/`, `scripts/verify.py` | Portable path resolution using Pathlib | **FIXED** |
+| S20 | P2 | Cross-platform install tests | `tests/`, `scripts/verify.py` | Linux sandbox coverage exists; Windows/macOS execution remains unverified | **PARTIAL** |
 | S21 | P1 | Strict evidence schema validation | `scripts/verify-evidence.py` | Non-int exit_code and non-list files rejected | **FIXED** |
-| S22 | P1 | Implement provenance state transitions | `scripts/verify-evidence.py` | REPORTED vs RETESTED vs CI_ATTESTED | **FIXED** |
-| S23 | P1 | Retest recipe registry + sandbox | `scripts/verify-evidence.py` | Trusted recipes only; process group isolation | **FIXED** |
+| S22 | P1 | Implement provenance state transitions | `scripts/verify-evidence.py` | Local schema/retest states supported; external claims stay CI_CLAIMED, not CI_ATTESTED | **PARTIAL** |
+| S23 | P1 | Retest recipe registry + sandbox | `scripts/verify-evidence.py` | Trusted recipes and process-group timeout control exist; no general OS containment for hostile repository code | **PARTIAL** |
 | S24 | P2 | Correct evidence `--json` stdout | `scripts/verify-evidence.py` | Stdout is parseable standalone JSON (logs on stderr) | **FIXED** |
 | S25 | P2 | Bound timeout and process tree killing | `scripts/verify-evidence.py` | 1-300s validation; os.killpg on timeout | **FIXED** |
 | S26 | P2 | Restrict evidence root and symlinks | `scripts/verify-evidence.py` | External symlinks escaping root rejected | **FIXED** |
 | S27 | P2 | Tie evidence to commit/dirty state | `scripts/verify-evidence.py` | Records project git state when available | **FIXED** |
-| S28 | P2 | Optional CI attestation validation | `scripts/verify-evidence.py` | Validates CI attestation dictionary metadata | **FIXED** |
+| S28 | P2 | Optional CI attestation validation | `scripts/verify-evidence.py` | Metadata is treated as a claim; independent trusted GitHub attestation lookup is not implemented | **PARTIAL** |
 | S29 | P1 | Separate contract checks from real benchmarks | `benchmarks/runner.py`, `docs/` | Contract checks clearly distinguished in docs | **FIXED** |
-| S30 | P1 | Build behavioral benchmark fixtures | `benchmarks/fixtures/` | Grader harnesses for real code behavior | **FIXED** |
-| S31 | P1 | Hidden behavioral graders | `benchmarks/fixtures/` | Test suites fail intentionally broken submissions | **FIXED** |
-| S32 | P1 | Plain-agent and control baselines | `docs/benchmark-methodology.md` | Documented methodology for matched comparisons | **FIXED** |
-| S33 | P1 | Record token/cost/time honestly | `docs/benchmark-methodology.md` | Unavailable metrics reported as N/A | **FIXED** |
-| S34 | P2 | Expand benchmark task suite | `benchmarks/tasks.json` | 6 core contract checks + behavioral fixtures | **FIXED** |
-| S35 | P2 | Repeated runs and variance | `docs/benchmark-methodology.md` | Defined repeated evaluation procedures | **FIXED** |
+| S30 | P1 | Build behavioral benchmark fixtures | `benchmarks/fixtures/` | Prebuilt fixtures exercise code behavior; they are not agent repairs of initially broken tasks | **FIXTURE_ONLY** |
+| S31 | P1 | Hidden behavioral graders | `benchmarks/fixtures/` | Existing graders are visible fixture tests; no isolated C1 hidden-grader runner is implemented | **NOT_IMPLEMENTED** |
+| S32 | P1 | Plain-agent and control baselines | `docs/benchmark-methodology.md` | Methodology documented; zero matched PLAIN/SADSKILL/SUPERPOWERS agent trials | **NOT_EXECUTED** |
+| S33 | P1 | Record token/cost/time honestly | `docs/benchmark-methodology.md` | Reporting policy exists; no C1 telemetry has been collected | **PARTIAL** |
+| S34 | P2 | Expand benchmark task suite | `benchmarks/tasks.json`, `benchmarks/tasks/suite_24.json` | Six contract checks and 24 catalog entries; 24 runnable broken snapshots/graders are absent | **PARTIAL** |
+| S35 | P2 | Repeated runs and variance | `docs/benchmark-methodology.md` | Method defined; repeated trials and variance measurements not performed | **NOT_EXECUTED** |
 | S36 | P1 | Conversation-aware intent model | `skills/sadskill/protocols/context.md` | TaskContext and instruction precedence rules | **FIXED** |
 | S37 | P1 | Whole-codebase discovery | `skills/sadskill/protocols/coverage.md` | Repository mapping and entry point discovery | **FIXED** |
 | S38 | P1 | Coverage ledger with exclusions | `templates/coverage-ledger.template.json` | Explicit tracked vs excluded path accounting | **FIXED** |
@@ -117,7 +119,7 @@
 | S47 | P2 | Concurrent memory writers handling | `skills/sadskill/protocols/memory.md` | Atomic append and superseding decision tracking | **FIXED** |
 | S48 | P2 | Proportional planning overhead | `skills/sadskill/modes/plan.md` | Tiny tasks vs Tier 1 vs Tier 2 plans | **FIXED** |
 | S49 | P2 | Adaptive frontend design requirements | `skills/sadskill/modes/design.md` | WCAG 2.2 SC 2.5.8 nuance & Zero-Lift style rule | **FIXED** |
-| S50 | P1 | Real database RLS tests | `benchmarks/fixtures/real-rls/` | SQLite authorizer driver-level tenant tests | **FIXED** |
+| S50 | P1 | SQLite RLS-simulation tests | `benchmarks/fixtures/real-rls/` | Fixture is labeled SQLite simulation; native PostgreSQL RLS is not claimed | **FIXED** |
 | S51 | P2 | Migration/backfill safety rules | `skills/sadskill/modes/backend.md` | Irreversible migrations and backup requirements | **FIXED** |
 | S52 | P2 | Update OWASP Top 10 to 2025 | `vendor/owasp/owasp-top-10.ref.md` | Updated to official OWASP Top 10:2025 standard | **FIXED** |
 | S53 | P2 | Vendor provenance + license audit | `skills/sadskill/vendor/manifest.json` | 40 references tracked with licenses and hashes | **FIXED** |

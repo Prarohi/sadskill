@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SADSKILL_VERSION="$(<"${SCRIPT_DIR}/VERSION")"
 TARGET_DIR="${PWD}"
 PURGE="false"
 CLEAN_BACKUPS="false"
@@ -69,7 +70,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "=== Uninstalling sadskill (v0.3.0) ==="
+echo "=== Uninstalling sadskill (v${SADSKILL_VERSION}) ==="
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "   [DRY-RUN MODE] No files will be removed or modified."
@@ -95,50 +96,92 @@ if [[ -f "$MANIFEST_FILE" ]]; then
   python3 "${SCRIPT_DIR}/scripts/manifest.py" uninstall "${opts[@]}"
 else
   # Fallback for unmanaged/legacy installs without a manifest:
-  # Check and remove only verified sadskill installations without deleting restored or unrelated files.
+  # Removal is ownership-verified: a file is sadskill's only when it is
+  # byte-identical to a file shipped in this repository; a directory is
+  # sadskill's only when its entire tree matches the shipped skill tree.
+  # Anything else is user content and is preserved.
   echo "-> Notice: Manifest ledger not found. Running safe fallback uninstallation..."
 
-  remove_safe_file() {
+  remove_owned_file() {
     local file="$1"
-    if [[ -f "$file" ]]; then
-      if grep -q "sadskill" "$file" 2>/dev/null; then
-        echo "   [REMOVE] Removing verified sadskill file: $file"
+    [[ -f "$file" ]] || return 0
+    local shipped
+    for shipped in "${SCRIPT_DIR}/commands/claude/"*.md \
+                   "${SCRIPT_DIR}/commands/codex/"*.md \
+                   "${SCRIPT_DIR}/skills/sadskill/hooks/git-guardrail.sh"; do
+      [[ -f "$shipped" ]] || continue
+      if cmp -s "$file" "$shipped"; then
+        echo "   [REMOVE] Removing sadskill-owned file (content-verified): $file"
         if [[ "$DRY_RUN" != "true" ]]; then
           rm -f "$file"
         fi
-      else
-        echo "   [PRESERVE] Skipping file without sadskill signature: $file"
+        return 0
       fi
-    fi
+    done
+    echo "   [PRESERVE] File is not byte-identical to any shipped sadskill file, keeping: $file"
   }
 
-  remove_safe_dir() {
+  remove_owned_dir() {
     local dir="$1"
-    if [[ -d "$dir" && "$(basename "$dir")" == "sadskill" ]]; then
-      echo "   [REMOVE] Removing sadskill directory: $dir"
+    [[ -d "$dir" && "$(basename "$dir")" == "sadskill" ]] || return 0
+    if diff -r "$dir" "${SCRIPT_DIR}/skills/sadskill" >/dev/null 2>&1; then
+      echo "   [REMOVE] Removing sadskill-owned directory (content-verified): $dir"
       if [[ "$DRY_RUN" != "true" ]]; then
         rm -rf "$dir"
       fi
+    else
+      echo "   [PRESERVE] Directory differs from shipped sadskill skill tree, keeping: $dir"
+      echo "            (contains user modifications or a different version; remove manually if unwanted)"
     fi
   }
 
-  remove_safe_dir "${HOME}/.codex/skills/sadskill"
+  remove_owned_dir "${HOME}/.codex/skills/sadskill"
   for f in "${HOME}/.codex/prompts/sad-"*.md; do
-    remove_safe_file "$f"
+    remove_owned_file "$f"
   done
 
-  remove_safe_dir "${HOME}/.claude/skills/sadskill"
+  remove_owned_dir "${HOME}/.claude/skills/sadskill"
   for f in "${HOME}/.claude/commands/sad-"*.md; do
-    remove_safe_file "$f"
+    remove_owned_file "$f"
   done
-  remove_safe_file "${HOME}/.claude/hooks/git-guardrail.sh"
+  remove_owned_file "${HOME}/.claude/hooks/git-guardrail.sh"
 
-  remove_safe_dir "${HOME}/.gemini/antigravity/skills/sadskill"
+  remove_owned_dir "${HOME}/.gemini/antigravity/skills/sadskill"
 
-  remove_safe_file "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
-  remove_safe_dir "${TARGET_DIR}/.cursor/skills/sadskill"
+  remove_owned_file "${TARGET_DIR}/.cursor/rules/sadskill.mdc"
+  remove_owned_dir "${TARGET_DIR}/.cursor/skills/sadskill"
 fi
 
+if [[ "$PURGE" == "true" && -f "$MANIFEST_FILE" ]]; then
+  # Unresolved backups may contain user edits. Never lose their manifest
+  # provenance even when purge is explicitly requested.
+  if python3 - "$MANIFEST_FILE" <<'PY'
+import json
+from pathlib import Path
+import sys
+try:
+    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    entries = data.get("entries", [])
+    if not isinstance(entries, list):
+        raise ValueError("invalid entries")
+    unresolved = any(
+        isinstance(entry, dict) and (
+            any(
+                isinstance(record, dict) and isinstance(record.get("path"), str)
+                and Path(record["path"]).exists()
+                for record in (entry.get("conflict_backups") or [])
+            ) or (entry.get("backup") and Path(entry["backup"]).exists())
+        ) for entry in entries
+    )
+except (OSError, ValueError, TypeError, KeyError):
+    unresolved = True  # Corrupt manifest: refuse destructive purge
+sys.exit(0 if unresolved else 1)
+PY
+  then
+    echo "ERROR: --purge refused; unresolved user backups are still recorded in install-manifest.json." >&2
+    exit 5
+  fi
+fi
 if [[ "$PURGE" == "true" ]]; then
   echo "-> Purging ~/.sadskill user profile directory..."
   if [[ "$DRY_RUN" != "true" ]]; then

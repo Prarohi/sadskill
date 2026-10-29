@@ -5,7 +5,7 @@ Evaluates specification contracts, architectural requirements, and policy invari
 defined in benchmarks/tasks.json.
 
 Note: This suite performs deterministic contract and policy verification.
-For end-to-end multi-agent performance evaluations, see benchmarks/fixtures/.
+This local runner does not execute agents. Track C1 agent runs remain NOT_EXECUTED.
 """
 
 import argparse
@@ -212,38 +212,38 @@ def run_track_b_fixtures():
     print("\n--- Track B: Behavioral Fixture Graders ---")
     fixtures = [
         ("Tenant Isolation Fixture", REPO_ROOT / "benchmarks" / "fixtures" / "tenant-isolation" / "grader.py"),
-        ("Database RLS Fixture", REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"),
+        ("SQLite RLS Simulation Fixture", REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"),
     ]
     passed = 0
     results = []
     for name, grader_path in fixtures:
         if not grader_path.exists():
-            print(f"  ❌ FAIL: Grader not found at {grader_path}")
-            results.append({"name": name, "status": "FAIL", "reason": "Missing grader"})
+            print(f"  ❌ FIXTURE_FAIL: Grader not found at {grader_path}")
+            results.append({"name": name, "status": "FIXTURE_FAIL", "reason": "Missing grader"})
             continue
         res = subprocess.run([sys.executable, str(grader_path)], capture_output=True, text=True)
         if res.returncode == 0:
             passed += 1
-            print(f"  ✓ PASS: {name} behavioral checks passed cleanly (exit 0)")
-            results.append({"name": name, "status": "PASS"})
+            print(f"  ✓ FIXTURE_PASS: {name} behavioral checks passed cleanly (exit 0)")
+            results.append({"name": name, "status": "FIXTURE_PASS"})
         else:
-            print(f"  ❌ FAIL: {name} exited with code {res.returncode}")
-            results.append({"name": name, "status": "FAIL", "reason": res.stderr.strip()})
+            print(f"  ❌ FIXTURE_FAIL: {name} exited with code {res.returncode}")
+            results.append({"name": name, "status": "FIXTURE_FAIL", "reason": res.stderr.strip()})
     return passed, len(fixtures), results
 
 
 def run_track_c_suite():
-    print("\n--- Track C: 24-Task Real Evaluation Suite Validation ---")
+    print("\n--- Track C0: Task Catalog Validation (no agent execution) ---")
     suite_file = REPO_ROOT / "benchmarks" / "tasks" / "suite_24.json"
     if not suite_file.exists():
-        print(f"  ❌ FAIL: 24-task benchmark suite file missing: {suite_file}")
-        return 0, 1, [{"status": "FAIL", "reason": "Missing suite_24.json"}]
+        print(f"  ❌ CATALOG_INVALID: task catalog missing: {suite_file}")
+        return 0, 1, [{"status": "CATALOG_INVALID", "reason": "Missing suite_24.json"}]
 
     try:
         tasks = json.loads(suite_file.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"  ❌ FAIL: Invalid JSON in suite_24.json: {e}")
-        return 0, 1, [{"status": "FAIL", "reason": str(e)}]
+        print(f"  ❌ CATALOG_INVALID: invalid JSON in suite_24.json: {e}")
+        return 0, 1, [{"status": "CATALOG_INVALID", "reason": str(e)}]
 
     expected_categories = {
         "Bugfix": 4,
@@ -262,38 +262,68 @@ def run_track_c_suite():
         "evaluation_metadata", "reproduction_procedure",
     ]
 
+    if not isinstance(tasks, list):
+        print("  ❌ CATALOG_INVALID: suite_24.json must contain a JSON array")
+        return 0, 1, [{"status": "CATALOG_INVALID", "reason": "top level is not an array"}]
+
     cat_counts = {}
     schema_errors = []
+    seen_ids = set()
+    c1_harness_available = (REPO_ROOT / "benchmarks" / "harness" / "runner.py").is_file()
 
     for t in tasks:
+        if not isinstance(t, dict):
+            schema_errors.append("Every catalog entry must be an object")
+            continue
         cat = t.get("category", "Unknown")
         cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        task_id = t.get("id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            schema_errors.append("Every task must have a non-empty string id")
+        elif task_id in seen_ids:
+            schema_errors.append(f"Duplicate task id: {task_id}")
+        else:
+            seen_ids.add(task_id)
         for field in required_fields:
             if field not in t:
                 schema_errors.append(f"Task {t.get('id')} missing field: {field}")
+        if not isinstance(t.get("user_prompt"), str) or not t["user_prompt"].strip():
+            schema_errors.append(f"Task {task_id} user_prompt must be a non-empty string")
+        if not isinstance(t.get("tool_requirements"), list):
+            schema_errors.append(f"Task {task_id} tool_requirements must be a list")
+        if not isinstance(t.get("budget"), dict):
+            schema_errors.append(f"Task {task_id} budget must be an object")
+        if not isinstance(t.get("expected_outputs"), list) or not isinstance(t.get("success_metrics"), dict):
+            schema_errors.append(f"Task {task_id} expected_outputs/success_metrics have invalid types")
+        reproduction = t.get("reproduction_procedure")
+        if not isinstance(reproduction, str) or (
+            not c1_harness_available and not reproduction.startswith("NOT_EXECUTED:")
+        ):
+            schema_errors.append(f"Task {task_id} must not claim a runnable C1 procedure until its harness exists")
 
     if schema_errors:
-        print(f"  ❌ FAIL: Schema errors in suite_24.json: {schema_errors[:3]}")
-        return 0, 1, [{"status": "FAIL", "errors": schema_errors}]
+        print(f"  ❌ CATALOG_INVALID: Schema errors in suite_24.json: {schema_errors[:3]}")
+        return 0, len(tasks) or 1, [{"status": "CATALOG_INVALID", "errors": schema_errors}]
 
     all_cats_match = True
     for cat, exp in expected_categories.items():
         actual = cat_counts.get(cat, 0)
-        if actual < exp:
-            print(f"  ❌ FAIL: Category '{cat}' has {actual} tasks, expected {exp}")
+        if actual != exp:
+            print(f"  ❌ CATALOG_INVALID: Category '{cat}' has {actual} entries, expected exactly {exp}")
             all_cats_match = False
         else:
-            print(f"  ✓ PASS: Category '{cat}': {actual}/{exp} tasks fully specified")
+            print(f"  ✓ CATALOG_VALID: Category '{cat}' has {actual} catalog entries")
 
-    if len(tasks) >= 24 and all_cats_match:
-        print(f"  ✓ PASS: Complete 24-task benchmark suite ({len(tasks)} tasks) validated successfully.")
-        return 1, 1, [{"status": "PASS", "total_tasks": len(tasks)}]
-    return 0, 1, [{"status": "FAIL", "reason": "Category count mismatch"}]
+    if len(tasks) == 24 and all_cats_match:
+        print(f"  ✓ CATALOG_VALID: {len(tasks)} task entries pass the catalog schema and category-count checks.")
+        return len(tasks), len(tasks), [{"status": "CATALOG_VALID", "total_tasks": len(tasks)}]
+    return 0, len(tasks) or 1, [{"status": "CATALOG_INVALID", "reason": "expected exactly 24 entries and four per category"}]
 
 
 def run_benchmarks(output_file=None):
     print("==================================================")
-    print("  sadskill Benchmark & Evaluation Suite (v0.3.0)  ")
+    version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    print(f"  sadskill Deterministic Benchmark Validation (v{version})")
     print("==================================================")
 
     if not TASKS_FILE.exists():
@@ -319,8 +349,8 @@ def run_benchmarks(output_file=None):
 
         evaluator = TASK_EVALUATORS.get(tid)
         if evaluator is None:
-            print(f"  ❌ FAIL: No evaluator registered for task ID '{tid}' (UNSUPPORTED_TASK)")
-            results.append({"id": tid, "status": "FAIL", "reason": "UNSUPPORTED_TASK"})
+            print(f"  ❌ STATIC_CHECK_FAIL: No evaluator registered for task ID '{tid}' (UNSUPPORTED_TASK)")
+            results.append({"id": tid, "status": "STATIC_CHECK_FAIL", "reason": "UNSUPPORTED_TASK"})
             continue
 
         try:
@@ -331,43 +361,45 @@ def run_benchmarks(output_file=None):
 
         if ok:
             passed += 1
-            print(f"  ✓ PASS: {notes}")
-            results.append({"id": tid, "status": "PASS", "notes": notes})
+            print(f"  ✓ STATIC_CHECK_PASS: {notes}")
+            results.append({"id": tid, "status": "STATIC_CHECK_PASS", "notes": notes})
         else:
-            print(f"  ❌ FAIL: {notes}")
-            results.append({"id": tid, "status": "FAIL", "reason": notes})
+            print(f"  ❌ STATIC_CHECK_FAIL: {notes}")
+            results.append({"id": tid, "status": "STATIC_CHECK_FAIL", "reason": notes})
 
     pass_rate = (passed / total * 100.0) if total > 0 else 0.0
-    print(f"\nTrack A Results: {passed}/{total} Contract Checks Passed ({pass_rate:.1f}%)")
+    print(f"\nTrack A Static/Contract Results: {passed}/{total} checks passed")
 
     # Track B: Behavioral Fixtures
     b_pass, b_total, b_res = run_track_b_fixtures()
 
-    # Track C: 24-Task Evaluation Suite
+    # Track C0: 24-task catalog validation only (no agent execution)
     c_pass, c_total, c_res = run_track_c_suite()
 
-    all_passed = (passed == total) and (b_pass == b_total) and (c_pass == c_total)
+    local_checks_passed = (passed == total) and (b_pass == b_total) and (c_pass == c_total)
 
     print("\n==================================================")
-    print(f"Overall Benchmark Status: {'ALL PASS (100%)' if all_passed else 'FAILURES DETECTED'}")
-    print(f"  - Track A (Contracts): {passed}/{total}")
-    print(f"  - Track B (Fixtures):  {b_pass}/{b_total}")
-    print(f"  - Track C (24 Tasks):  {c_pass}/{c_total}")
+    print(f"Local validation checks: {'PASS' if local_checks_passed else 'FAIL'}")
+    print(f"  - Track A (Static/contract checks): {passed}/{total}")
+    print(f"  - Track B (Existing fixtures): {b_pass}/{b_total}")
+    print(f"  - Track C0 (Catalog entries): {c_pass}/{c_total}")
+    print("  - Track C1 (Real-agent task runs): 0 (NOT_EXECUTED)")
     print("==================================================")
 
     if output_file:
         out_path = Path(output_file).resolve()
         out_path.parent.mkdir(parents=True, exist_ok=True)
         summary = {
-            "track_a_contracts": {"passed": passed, "total": total, "results": results},
+            "track_a_static_checks": {"passed": passed, "total": total, "results": results},
             "track_b_fixtures": {"passed": b_pass, "total": b_total, "results": b_res},
-            "track_c_suite_24": {"passed": c_pass, "total": c_total, "results": c_res},
-            "overall_success": all_passed,
+            "track_c0_catalog": {"passed": c_pass, "total": c_total, "results": c_res},
+            "track_c1_real_agent_evaluation": {"status": "NOT_EXECUTED", "run_count": 0},
+            "local_validation_checks_passed": local_checks_passed,
         }
         out_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
         print(f"Saved verification summary to: {out_path}")
 
-    return 0 if all_passed else 1
+    return 0 if local_checks_passed else 1
 
 
 def main():

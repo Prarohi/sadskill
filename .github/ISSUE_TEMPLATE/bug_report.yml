@@ -41,7 +41,7 @@ body:
       label: Steps to Reproduce
       description: Describe the steps taken before the error occurred.
       placeholder: |
-        1. Run `npx skills add sadafbabu/sadskill`
+        1. Run `npx skills add Prarohi/sadskill`
         2. Trigger `/sad-plan src/auth`
         3. Observe error output...
     validations:

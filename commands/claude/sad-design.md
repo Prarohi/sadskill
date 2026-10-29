@@ -1,18 +1,10 @@
 # sad-design
 
-Execute the `design` workflow of `sadskill` on target UI surface: $ARGUMENTS
+Execute the `design` workflow of `sadskill` on the requested scope: $ARGUMENTS
 
 ## Instructions
-1. **Locate sadskill Configuration**:
-   - Check local workspace: `./skills/sadskill/SKILL.md` (or global `~/.claude/skills/sadskill/SKILL.md`).
-   - Check `.sad/design-memory.md` to prevent repeating rejected aesthetic anti-patterns.
-   - Check local profile `~/.sadskill/profile.md` for personal design preferences.
-2. **Design Craft Floor & Anti-Slop Rules**:
-   - Touch targets >= 44×44px, zero layout shift (CLS < 0.1), WCAG AA contrast (4.5:1 text, 3:1 UI).
-   - Zero-Lift Hover Rule: `translateY(-...)` on card/button hover is banned (preventing generic floating-card jitter); use `scale(0.97)` micro-compression on click. (Legitimate positioning and entrance transitions like slide-in drawers, sheets, toasts, and tooltips remain permitted).
-   - Preserve natural image aspect ratios; never crop avatars or products into distorted shapes.
-   - Classify surface mode: *Persuade* (landing), *Operate* (dashboard/settings), *Read* (docs), or *Experience* (creative).
-3. **Execution & Polish**:
-   - Compose accessible primitives (Radix/Shadcn style) with CSS variables.
-   - Critique against 20 UI polish tips (layout, typography, contrast, motion safety).
-   - Record approved palettes, typography, and lessons in `.sad/design-memory.md`.
+
+1. Locate the `SKILL.md` loaded for this task. Check the project-vendored `./skills/sadskill/SKILL.md`, the companion path `~/.claude/skills/sadskill/SKILL.md`, or the host's configured skill directory (which may be `~/.agents/skills/sadskill`).
+2. Read that `SKILL.md`, then load `modes/design.md` relative to its containing skill directory. Resolve linked protocols, references, templates and tools against that same installed directory. The canonical mode supplies the workflow; this adapter does not replace it.
+3. Follow current user instructions, scope and execution permissions. Load only the relevant linked guidance and project memory; report unavailable tools or checks without claiming they ran.
+4. Preserve the existing stack and approved design tokens. Use the canonical accessibility requirements and distinguish rendered evidence from source inspection.

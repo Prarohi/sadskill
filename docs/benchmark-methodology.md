@@ -1,58 +1,30 @@
-# sadskill Benchmark & Evaluation Methodology (v0.3.0)
+# sadskill Benchmark Methodology (v0.3.0)
 
-This document describes the two-track evaluation methodology used to measure `sadskill` instruction compliance, safety invariants, and real-world behavioral improvements.
+This page separates repository checks from actual coding-agent evaluations. Passing this repository's deterministic checks is not evidence of agent task success or superiority.
 
----
+## Tracks and allowed status labels
 
-## 1. Two-Track Architecture
+| Track | What runs | Status labels |
+|---|---|---|
+| A — static/contract checks | Deterministic rules over repository files plus a focused local guardrail invocation | `STATIC_CHECK_PASS` / `STATIC_CHECK_FAIL` |
+| B — existing fixtures | Prebuilt tenant-isolation and SQLite authorizer fixture graders; no AI edits a broken project | `FIXTURE_PASS` / `FIXTURE_FAIL` |
+| C0 — task catalog | Validate the 24 JSON entries, required fields, unique IDs, and category counts | `CATALOG_VALID` / `CATALOG_INVALID` |
+| C1 — real-agent evaluation | Agent edits an isolated, initially broken seed repo and independent graders check its diff | `PASS` / `PARTIAL` / `FAIL` / `NOT_EXECUTED` / `INVALID_RUN` |
 
-To ensure both high-speed offline continuous integration and honest empirical evaluation, sadskill separates evaluation into two distinct tracks:
+Run deterministic repository checks with:
 
-```text
-┌────────────────────────────────────────────────────────┐
-│ TRACK A: Deterministic Contract & Policy Verification  │
-│ - Zero API cost, runs offline on every test/PR         │
-│ - Verifies schema contracts, AST declarations, syntax  │
-│ - Tests guardrail interception & installer safety      │
-│ - Runner: python3 benchmarks/runner.py                 │
-└────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────┐
-│ TRACK B: Real Behavioral Fixtures & Agent Evaluations  │
-│ - Executes actual code modifications in sandboxes      │
-│ - Hidden graders evaluate behavior, not keywords       │
-│ - Tenant isolation & database RLS fixtures             │
-│ - Graders: python3 benchmarks/fixtures/*/grader.py     │
-└────────────────────────────────────────────────────────┘
+```bash
+python3 benchmarks/runner.py
 ```
 
----
+The runner reports A, B, and C0 independently. It records C1 as `NOT_EXECUTED` with run count zero. It never combines those outcomes into an agent-success percentage.
 
-## 2. Track A — Contract & Policy Verification Suite
+The fixture at `benchmarks/fixtures/real-rls/` uses SQLite authorizer hooks to simulate database-level isolation. It is **not PostgreSQL RLS** and provides no evidence about PostgreSQL roles or policies.
 
-Run via `python3 benchmarks/runner.py`. Evaluates:
-1. `task-01-tier1-bugfix`: Verifies Tier 1 plan definitions, Mermaid diagram omission for token efficiency, and 2-file threshold rules.
-2. `task-02-zero-lift-ui`: Verifies preferred touch target requirements, Zero-Lift hover rule documentation, and micro-compression `scale(0.97)` specification.
-3. `task-03-schema-migration`: Verifies paired `up.sql` / `down.sql` migrations, Row Level Security baseline commands, and `timestamptz` enforcement.
-4. `task-04-owasp-sec-audit`: Verifies strictly read-only security audit contracts, OWASP Top 10 coverage, and secret leak detection.
-5. `task-05-tier2-ast-contract`: Verifies Tier 2 Contract-First AST signature declarations and Mermaid data flow specifications.
-6. `task-06-safety-guardrail`: Verifies real execution blocking of `git reset --hard` (exit code 2) and pass-through of `git status` (exit code 0).
+The opt-in [native PostgreSQL fixture](../benchmarks/fixtures/postgres-rls/README.md) separately exercises actual PostgreSQL 15 roles, policies, grants, writes, and invoker views in a disposable container. Its explicit CI job also requires a failing negative control with RLS disabled. It remains Track B fixture evidence; it does not validate a hosted service or count as a C1 agent run. The default runner above does not silently add Docker requirements.
 
----
+## C1 requirements before reporting agent outcomes
 
-## 3. Track B — Behavioral Fixtures
+Each runnable task must have an immutable seed snapshot with a known failing baseline, independent grader, reset procedure, expected permissions, and explicit safety scope. The runner must keep the agent worktree away from grader files, inspect the diff for unauthorized changes, and record repository/grader/skill/model IDs, environment, budget, time, and available token/cost telemetry. Unavailable telemetry is `N/A`; failed or incomplete runs remain visible.
 
-1. **Tenant Isolation Fixture (`benchmarks/fixtures/tenant-isolation/`)**:
-   - Tests in-memory service isolation.
-   - Grader executes unit tests asserting that cross-tenant read/list requests raise `AuthorizationError`.
-2. **Database Row Level Security Fixture (`benchmarks/fixtures/real-rls/`)**:
-   - Tests database engine-level isolation using SQLite authorizer hooks.
-   - Grader executes queries asserting that cross-tenant database fetches fail and destructive schema drops are denied at the driver level.
-
----
-
-## 4. Evaluation Rubric & Honest Reporting
-
-- **Keyword Checks vs True Agent Superiority**: Static keyword matching verifies instruction presence, not agent capability. Claims of model superiority must be backed by real model task runs.
-- **Unavailable Metrics**: If token consumption or provider execution cost is not exposed by the host CLI, record as `N/A`.
-- **Reproducibility**: All benchmark fixtures provide runnable `grader.py` harnesses that exit 0 on clean verification or 1 on behavioral failure.
+Comparisons among PLAIN, SADSKILL, and SUPERPOWERS require the same model/version, task prompt, start SHA, tools, permissions, time/token budget, response policy, and repeated randomized trials. No paid provider calls are made by the deterministic runner. Real-agent runs require explicit provider authorization and must publish run count and uncertainty; no such run is claimed here.

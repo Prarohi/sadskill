@@ -3,12 +3,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SADSKILL_VERSION="$(<"${SCRIPT_DIR}/VERSION")"
 TARGET_AGENT="auto"
 TARGET_DIR="${PWD}"
 TARGET_DIR_EXPLICIT="false"
 NO_BACKUP="false"
 DRY_RUN="false"
 MANIFEST_FILE="${HOME}/.sadskill/install-manifest.json"
+INSTALL_ARGUMENTS=("$@")
 
 show_help() {
   local exit_code="${1:-0}"
@@ -23,7 +25,7 @@ Options:
   -h, --help             Show this help message and exit
 
 Primary Recommended Installation (Universal):
-  npx skills add sadafbabu/sadskill
+  npx skills add Prarohi/sadskill
 EOF
   exit "$exit_code"
 }
@@ -69,13 +71,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "=== Installing sadskill (v0.3.0) ==="
+echo "=== Installing sadskill (v${SADSKILL_VERSION}) ==="
 
 if [[ "$DRY_RUN" == "true" ]]; then
   echo "   [DRY-RUN MODE] No filesystem modifications will be made."
 fi
 
-mkdir -p "${HOME}/.sadskill"
+if [[ "$DRY_RUN" == "true" ]]; then
+  python3 "${SCRIPT_DIR}/scripts/manifest.py" validate --manifest "$MANIFEST_FILE" --target "$TARGET_DIR" --dry-run
+elif [[ -z "${SADSKILL_INSTALL_LOCK_FD:-}" ]]; then
+  # One lock spans file replacement and every ledger write in the child.
+  exec python3 "${SCRIPT_DIR}/scripts/manifest.py" install --manifest "$MANIFEST_FILE" --target "$TARGET_DIR" -- "${INSTALL_ARGUMENTS[@]}"
+else
+  python3 "${SCRIPT_DIR}/scripts/manifest.py" validate --manifest "$MANIFEST_FILE" --target "$TARGET_DIR"
+fi
 
 # Generate collision-safe backup paths with PID and timestamp
 make_backup_path() {
@@ -337,7 +346,9 @@ install_gemini() {
 }
 
 # Ensure workstation profile template is discoverable
-mkdir -p "${HOME}/.sadskill"
+if [[ "$DRY_RUN" != "true" ]]; then
+  mkdir -p "${HOME}/.sadskill"
+fi
 if [[ ! -f "${HOME}/.sadskill/profile.md" && -f "${SCRIPT_DIR}/skills/sadskill/templates/profile.template.md" ]]; then
   echo "-> Tip: You can customize your local workstation profile by editing ~/.sadskill/profile.md"
 fi

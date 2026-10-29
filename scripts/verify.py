@@ -30,6 +30,28 @@ REPO_ROOT = find_repo_root()
 SKILL_DIR = REPO_ROOT / "skills" / "sadskill"
 
 
+def prepare_evidence_fixture(project_dir):
+    """Initialize a clean Git identity for evidence verifier sandbox tests."""
+    root = Path(project_dir).resolve()
+    readme = root / "README.md"
+    if not readme.exists():
+        readme.write_text("# Evidence verifier fixture\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "--all"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Sadskill Tests",
+         "-c", "user.email=tests@example.invalid", "commit", "-q",
+         "--allow-empty", "-m", "fixture baseline"],
+        check=True,
+    )
+    context = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "verify-evidence.py"),
+         "--project-root", str(root), "--print-context"],
+        capture_output=True, text=True, check=True,
+    )
+    return json.loads(context.stdout)
+
+
 class VerificationSuite:
     def __init__(self):
         self.errors = []
@@ -87,6 +109,9 @@ class VerificationSuite:
         ]
 
         for cmd in expected_commands:
+            mode = cmd.removeprefix("sad-").removesuffix(".md")
+            mode = "security" if mode == "sec" else mode
+            mode_reference = f"modes/{mode}.md"
             codex_cmd = REPO_ROOT / "commands" / "codex" / cmd
             claude_cmd = REPO_ROOT / "commands" / "claude" / cmd
             self.assert_true(codex_cmd.exists(), f"Codex command exists: commands/codex/{cmd}")
@@ -98,12 +123,20 @@ class VerificationSuite:
                     "$ARGUMENTS" in text,
                     f"Codex command commands/codex/{cmd} supports $ARGUMENTS",
                 )
+                self.assert_true(
+                    mode_reference in text and (SKILL_DIR / mode_reference).is_file(),
+                    f"Codex command {cmd} loads its packaged canonical mode",
+                )
 
             if claude_cmd.exists():
                 text = claude_cmd.read_text(encoding="utf-8")
                 self.assert_true(
                     "$ARGUMENTS" in text,
                     f"Claude command commands/claude/{cmd} supports $ARGUMENTS",
+                )
+                self.assert_true(
+                    mode_reference in text and (SKILL_DIR / mode_reference).is_file(),
+                    f"Claude command {cmd} loads its packaged canonical mode",
                 )
 
     def test_modes_and_protocols(self):
@@ -213,9 +246,16 @@ class VerificationSuite:
             self.assert_true(guardrail_script.read_bytes() == skill_hook.read_bytes(), "Guardrail root script and packaged hook are byte-identical")
 
         evidence_verifier = REPO_ROOT / "scripts" / "verify-evidence.py"
+        packaged_verifier = SKILL_DIR / "tools" / "verify-evidence.py"
         self.assert_true(evidence_verifier.exists(), "Evidence verifier exists at scripts/verify-evidence.py")
+        self.assert_true(packaged_verifier.is_file(), "Evidence verifier is packaged at tools/verify-evidence.py")
         if evidence_verifier.exists():
             self.assert_true(os.access(evidence_verifier, os.X_OK), "scripts/verify-evidence.py is marked executable")
+            if packaged_verifier.is_file():
+                self.assert_true(
+                    evidence_verifier.read_bytes() == packaged_verifier.read_bytes(),
+                    "Root evidence verifier and packaged helper are byte-identical",
+                )
 
         manifest_script = REPO_ROOT / "scripts" / "manifest.py"
         self.assert_true(manifest_script.exists(), "Manifest manager exists at scripts/manifest.py")
@@ -277,9 +317,18 @@ class VerificationSuite:
         print("\n--- Testing Reproducible Benchmark Suite ---")
         runner = REPO_ROOT / "benchmarks" / "runner.py"
         res = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True)
-        self.assert_true(res.returncode == 0, f"Reproducible benchmarks passed 100% (exit code {res.returncode})")
+        self.assert_true(
+            res.returncode == 0,
+            "Deterministic benchmark validation passed; C0 validates catalog "
+            "metadata only and C1 real-agent runs are NOT_EXECUTED "
+            f"(runner exit code {res.returncode})",
+        )
         suite_24 = REPO_ROOT / "benchmarks" / "tasks" / "suite_24.json"
-        self.assert_true(suite_24.exists(), "24-task benchmark evaluation suite exists at benchmarks/tasks/suite_24.json")
+        self.assert_true(
+            suite_24.exists(),
+            "24-task benchmark catalog exists at benchmarks/tasks/suite_24.json; "
+            "catalog validation is not an agent execution",
+        )
 
     def test_version_consistency(self):
         print("\n--- Testing Version Consistency Across Files ---")
@@ -287,13 +336,12 @@ class VerificationSuite:
         readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         install_text = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
         uninstall_text = (REPO_ROOT / "uninstall.sh").read_text(encoding="utf-8")
-        guardrail_text = (REPO_ROOT / "scripts" / "git-guardrail.sh").read_text(encoding="utf-8")
-
-        self.assert_true("version: 0.3.0" in skill_text, "SKILL.md defines version: 0.3.0")
-        self.assert_true("v0.3.0" in readme_text, "README.md references v0.3.0")
-        self.assert_true("v0.3.0" in install_text, "install.sh references v0.3.0")
-        self.assert_true("v0.3.0" in uninstall_text, "uninstall.sh references v0.3.0")
-        self.assert_true("v0.3.0" in guardrail_text, "git-guardrail.sh references v0.3.0")
+        version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assert_true(bool(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version)), "VERSION contains a release version")
+        self.assert_true(f"version: {version}" in skill_text, "SKILL.md matches VERSION")
+        self.assert_true(f"v{version}" in readme_text, "README.md matches VERSION")
+        self.assert_true('SCRIPT_DIR}/VERSION' in install_text, "install.sh reads release VERSION")
+        self.assert_true('SCRIPT_DIR}/VERSION' in uninstall_text, "uninstall.sh reads release VERSION")
 
     def test_evidence_verifier_safety(self):
         print("\n--- Testing Evidence Verifier Hardening & Safety ---")
@@ -315,7 +363,9 @@ class VerificationSuite:
         with tempfile.TemporaryDirectory() as proj_dir:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
+            context = prepare_evidence_fixture(proj_dir)
             bad_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "traversal-test",
                 "command": "python3 test.py",
@@ -340,8 +390,10 @@ class VerificationSuite:
             ev_dir.mkdir(parents=True)
             test_file = Path(proj_dir) / "test.py"
             test_file.write_text("print('ok')", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
 
             chained_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "chained-test",
                 "command": "python3 test.py && echo pwned",
@@ -364,7 +416,9 @@ class VerificationSuite:
         with tempfile.TemporaryDirectory() as proj_dir:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
+            context = prepare_evidence_fixture(proj_dir)
             bool_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "bool-test",
                 "command": "python3 test.py",
@@ -387,7 +441,9 @@ class VerificationSuite:
         with tempfile.TemporaryDirectory() as proj_dir:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
+            context = prepare_evidence_fixture(proj_dir)
             untrusted_cmd_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "untrusted-eval",
                 "command": "python3 -c 'print(1)'",
@@ -412,7 +468,9 @@ class VerificationSuite:
             ev_dir.mkdir(parents=True)
             arbitrary_script = Path(proj_dir) / "evil.py"
             arbitrary_script.write_text("print('pwned')", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
             evil_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "arbitrary-script",
                 "command": "python3 evil.py",
@@ -436,7 +494,9 @@ class VerificationSuite:
             ev_dir = Path(proj_dir) / ".sad" / "evidence"
             ev_dir.mkdir(parents=True)
             (Path(proj_dir) / "test_sample.py").write_text("import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
             recipe_record = {
+                **context,
                 "schema_version": "1.0.0",
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "trusted-recipe-test",
@@ -463,7 +523,9 @@ class VerificationSuite:
             ev_dir.mkdir(parents=True)
             doc_file = Path(proj_dir) / "README.md"
             doc_file.write_text("# Doc update", encoding="utf-8")
+            context = prepare_evidence_fixture(proj_dir)
             docs_record = {
+                **context,
                 "timestamp": "2026-10-28T04:00:00Z",
                 "task_slug": "doc-update-task",
                 "command": "NONE",
@@ -506,12 +568,18 @@ class VerificationSuite:
             res = subprocess.run([sys.executable, str(fixture_grader)], capture_output=True, text=True)
             self.assert_true(res.returncode == 0, f"Tenant isolation behavioral tests passed cleanly (exit {res.returncode})")
 
-        # 2. Real database RLS fixture
+        # 2. SQLite authorizer RLS-simulation fixture (not PostgreSQL RLS)
         rls_grader = REPO_ROOT / "benchmarks" / "fixtures" / "real-rls" / "grader.py"
-        self.assert_true(rls_grader.exists(), "Real database RLS fixture grader exists")
+        self.assert_true(
+            rls_grader.exists(), "SQLite RLS-simulation fixture grader exists"
+        )
         if rls_grader.exists():
             res_rls = subprocess.run([sys.executable, str(rls_grader)], capture_output=True, text=True)
-            self.assert_true(res_rls.returncode == 0, f"Real database RLS behavioral tests passed cleanly (exit {res_rls.returncode})")
+            self.assert_true(
+                res_rls.returncode == 0,
+                "SQLite authorizer RLS-simulation checks passed "
+                f"(exit {res_rls.returncode}); PostgreSQL-native RLS is NOT_RUN",
+            )
 
     def test_markdown_relative_links(self):
         print("\n--- Testing All Markdown Relative Links ---")
@@ -533,6 +601,7 @@ class VerificationSuite:
             SKILL_DIR / "protocols" / "research.md",
             SKILL_DIR / "protocols" / "memory.md",
         ]
+        files_to_check.extend(sorted((SKILL_DIR / "references").glob("*.md")))
 
         for doc in files_to_check:
             if not doc.exists():
@@ -669,7 +738,10 @@ class VerificationSuite:
             )
             self.assert_true(res_enable.returncode == 0, "doctor.py --enable-hooks executed successfully")
             doc_data_act = json.loads(res_enable.stdout)
-            self.assert_true(doc_data_act["claude_hook"]["status"] == "ACTIVE", "doctor correctly diagnosed Claude hook as ACTIVE after --enable-hooks")
+            self.assert_true(
+                doc_data_act["claude_hook"]["status"] == "LOCAL_TEST_PASSED",
+                "doctor reports only a successful local hook simulation after --enable-hooks",
+            )
 
             # 8b. Simulate user modifying an installed prompt to test conflict preservation (P0-01, P0-05, T05)
             codex_backend = codex_prompts / "sad-backend.md"

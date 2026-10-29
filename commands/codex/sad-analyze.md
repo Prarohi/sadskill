@@ -1,21 +1,11 @@
 # `/sad-analyze`
 
-Execute the `analyze` workflow of `sadskill` on target scope: $ARGUMENTS
+Execute the `analyze` workflow of `sadskill` on the requested scope: $ARGUMENTS
 *(Invocation: `/sad-analyze` or `/prompts:sad-analyze`)*
 
 ## Instructions
-1. **Locate sadskill Configuration**:
-   - Check local workspace: `./skills/sadskill/SKILL.md` (or global `~/.codex/skills/sadskill/SKILL.md`).
-   - Check `.sad/decisions.md` and past reports in `.sad/reports/`.
-2. **Determine Analysis Scope**:
-   - Scoped: If a specific path or module is passed in `$ARGUMENTS` (e.g. `/sad-analyze src/auth`).
-   - Full: If invoked without arguments or with `all`.
-3. **Multi-Vector Architecture Scan**:
-   - John Ousterhout Deep Module Philosophy: Identify shallow modules (bloated interfaces hiding minimal logic) and find seams for deepening.
-   - Coupling & Cycles: Detect circular dependencies and monolithic god-files.
-   - Code Health & Dead Code: Find unused exports, redundant dependencies, and unreachable code paths.
-   - Verification Gaps: Identify critical workflows lacking automated test assertions.
-   - Mermaid Architecture Diagram: Generate visual component flow.
-4. **Collision-Proof Reporting**:
-   - Write report to `.sad/reports/analysis-<YYYY-MM-DD>-<HHMMSS>.md`.
-   - Output high-impact prioritization matrix and recommend next command (`/sad-plan` or `/sad-sec`).
+
+1. Locate the `SKILL.md` loaded for this task. Check the project-vendored `./skills/sadskill/SKILL.md`, the companion path `~/.codex/skills/sadskill/SKILL.md`, or the host's configured skill directory (which may be `~/.agents/skills/sadskill`).
+2. Read that `SKILL.md`, then load `modes/analyze.md` relative to its containing skill directory. Resolve linked protocols, references, templates and tools against that same installed directory. The canonical mode supplies the workflow; this adapter does not replace it.
+3. Follow current user instructions, scope and execution permissions. Load only the relevant linked guidance and project memory; report unavailable tools or checks without claiming they ran.
+4. Keep the requested scope, account for inspected and excluded files, and report partial coverage truthfully. An analysis request does not authorize source changes.

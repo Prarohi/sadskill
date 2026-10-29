@@ -20,9 +20,10 @@ Evidence records distinguish between self-reported logs and independently verifi
 |---|---|---|
 | `not_run` | No verification command attempted | Not verified |
 | `reported` | Agent claims execution in conversation | Agent-reported result |
-| `schema_valid` | Evidence JSON format and project-relative file paths valid | Evidence format verified (unexecuted) |
+| `schema_valid` | Required types, timestamp, project identity, current commit, dirty state, and contained paths match | Evidence format verified (unexecuted; does not prove the command ran) |
 | `retested` | Independently executed by authorized verifier (`verify-evidence.py --retest`) | Retest passed in target environment |
-| `ci_attested` | Linked to immutable CI run SHA/URL | CI check passed for commit X |
+| `ci_claimed` | Evidence includes self-reported CI metadata | CI claim recorded but not independently verified |
+| `ci_attested` | Independent trusted verifier fetched and validated repository, workflow, run/job conclusion, and exact head SHA | CI check passed for commit X |
 | `skipped_with_reason` | Non-test task (docs-only, research, read-only analysis) | Documented non-runnable task |
 | `failed` | Non-zero exit code or broken test assertion | Verification failed |
 
@@ -41,9 +42,25 @@ Evidence records distinguish between self-reported logs and independently verifi
 ### 2. Capture Structured Evidence
 Record the verification event in `.sad/evidence/<YYYYMMDD-HHMMSS>-<slug>.json`:
 
+The verifier ships inside the skill at [tools/verify-evidence.py](../tools/verify-evidence.py). Resolve the installed skill directory from the location of the `SKILL.md` loaded for this task; host and installer paths vary. Set the two example paths below to those discovered locations, then pass the consumer project's Git checkout root explicitly:
+
+```bash
+sadskill_dir="/absolute/path/to/loaded/sadskill"
+consumer_root="/absolute/path/to/consumer-project"
+python3 "$sadskill_dir/tools/verify-evidence.py" --project-root "$consumer_root" --print-context
+```
+
+This helper works from the installed skill without a Sadskill source checkout or a `scripts/` directory in the consumer project. Use the same helper path and `--project-root` for later validation or an authorized `--retest`. If Python, Git, the helper, or a readable checkout snapshot is unavailable, report that limit and keep the actual test results separate; do not invent context fields or claim `SCHEMA_VALID`/`RETESTED`. In a prompt-only host, provide instructions without claiming execution. A read-only task's no-write constraint also applies to evidence records.
+
+Copy the helper's `project_id`, exact `commit_sha`, `worktree_dirty`, and `worktree_digest` fields into the record. The project identity is a SHA-256 digest of the canonical local checkout path; records are bound to that checkout's tracked and untracked content plus relevant ignored test sources, configs (including Rust toolchain pins), and fixtures outside `.sad/evidence/`. Initialized submodule worktrees are included recursively; Gitlinks in `HEAD` and the index must match `.gitmodules`, and a mismatch, unmerged index, uninitialized or unsafe submodule makes the snapshot unavailable. Standard generated dependency/build directories are excluded unless nested below an explicit test or fixture directory. The verifier excludes `.sad/evidence/` itself when comparing dirty state.
+
 ```json
 {
   "timestamp": "2026-10-28T03:12:00Z",
+  "project_id": "<copy project_id from --print-context>",
+  "commit_sha": "<copy commit_sha from --print-context>",
+  "worktree_dirty": false,
+  "worktree_digest": "<copy worktree_digest from --print-context>",
   "task_slug": "feature-or-fix-slug",
   "command": "npm test -- tests/target.test.ts",
   "exit_code": 0,
@@ -57,10 +74,12 @@ Record the verification event in `.sad/evidence/<YYYYMMDD-HHMMSS>-<slug>.json`:
 
 #### Strict Path Containment:
 - All entries in `files_touched` must be relative to the project root.
-- Absolute paths (e.g. `/etc/...`, `/tmp/...`) and path traversal segments (`..`) are strictly prohibited and will be rejected by `scripts/verify-evidence.py`.
+- Absolute paths (e.g. `/etc/...`, `/tmp/...`) and path traversal segments (`..`) are strictly prohibited and will be rejected by the evidence verifier.
+
+Evidence retests can select only registered recipes. Raw command strings must exactly match a fixed recipe; caller-supplied paths, selectors, manifests, and test names are rejected. There is no `--allow-custom-retest` escape hatch because checking that a script is inside the repository is not a sandbox for executing it.
 
 ### 3. Output 3-Line Terminal Execution Proof in Chat
-Every mode completion must conclude with this dense, scanable proof block:
+For verification that actually executed, conclude with this proof block. For skipped or unavailable checks, state the reason and actual status instead of displaying a successful execution:
 
 ```text
 ✓ Command: <exact-command-run> (exit code 0)
