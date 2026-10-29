@@ -1,10 +1,12 @@
-"""Unit tests for sadskill Linux Bubblewrap Sandbox (scripts/sandbox.sh).
-Validates workspace containment, protected .git read-only mounts,
-and offline network isolation.
+"""Unit tests for Sadskill's Linux Bubblewrap sandbox.
+
+Validates workspace containment, home/environment isolation, protected .git
+mounts, and fail-closed behavior when Bubblewrap is unavailable.
 """
 
 from pathlib import Path
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -20,10 +22,33 @@ class SandboxTests(unittest.TestCase):
             self.skipTest("bubblewrap ('bwrap') binary not available on host system")
         self.tmp = tempfile.TemporaryDirectory()
         self.proj = Path(self.tmp.name)
+        self.home_tmp = tempfile.TemporaryDirectory(prefix="sadskill-sandbox-home-", dir="/var/tmp")
+        self.worktree_tmp = None
+        self.host_home = Path(self.home_tmp.name)
+        (self.host_home / "private-canary").write_text("synthetic test data", encoding="utf-8")
+        self.env = dict(os.environ)
+        self.env["HOME"] = str(self.host_home)
         subprocess.run(["git", "init"], cwd=str(self.proj), capture_output=True, check=True)
 
     def tearDown(self):
+        if self.worktree_tmp is not None:
+            self.worktree_tmp.cleanup()
+        self.home_tmp.cleanup()
         self.tmp.cleanup()
+
+    def create_linked_worktree(self):
+        subprocess.run(
+            ["git", "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.invalid",
+             "commit", "--allow-empty", "-m", "sandbox base"],
+            cwd=str(self.proj), env=self.env, capture_output=True, check=True,
+        )
+        self.worktree_tmp = tempfile.TemporaryDirectory(prefix="sadskill-linked-worktree-", dir="/var/tmp")
+        worktree = Path(self.worktree_tmp.name) / "checkout"
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
+            cwd=str(self.proj), env=self.env, capture_output=True, check=True,
+        )
+        return worktree
 
     def test_benign_command_in_sandbox(self):
         res = subprocess.run(
@@ -32,6 +57,7 @@ class SandboxTests(unittest.TestCase):
             text=True,
             check=False,
             cwd=str(self.proj),
+            env=self.env,
         )
         self.assertEqual(res.returncode, 0)
         self.assertIn("sandbox_active", res.stdout)
@@ -44,6 +70,7 @@ class SandboxTests(unittest.TestCase):
             text=True,
             check=False,
             cwd=str(self.proj),
+            env=self.env,
         )
         self.assertNotEqual(res.returncode, 0)
         self.assertTrue(
@@ -67,8 +94,67 @@ class SandboxTests(unittest.TestCase):
             text=True,
             check=False,
             cwd=str(self.proj),
+            env=self.env,
         )
         self.assertEqual(res.returncode, 0)
+
+    def test_host_home_and_inherited_environment_are_hidden(self):
+        env = dict(self.env)
+        env["SADSKILL_SANDBOX_SECRET_CANARY"] = "synthetic-only"
+        command = (
+            'test -z "${SADSKILL_SANDBOX_SECRET_CANARY:-}" '
+            '&& test "$HOME" = /tmp/sadskill-home '
+            f"&& test ! -e {shlex.quote(str(self.host_home / 'private-canary'))}"
+        )
+        result = subprocess.run(
+            [str(SANDBOX_SH), "--project-dir", str(self.proj), "--", "bash", "-c", command],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(self.proj),
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_linked_worktree_git_status_works_with_read_only_metadata(self):
+        worktree = self.create_linked_worktree()
+        result = subprocess.run(
+            [str(SANDBOX_SH), "--project-dir", str(worktree), "--", "git", "status", "--short", "--branch"],
+            capture_output=True, text=True, check=False, cwd=str(worktree), env=self.env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("## HEAD (no branch)", result.stdout)
+
+        mutation = subprocess.run(
+            [str(SANDBOX_SH), "--project-dir", str(worktree), "--", "git", "update-ref",
+             "refs/heads/sandbox-read-only-check", "HEAD"],
+            capture_output=True, text=True, check=False, cwd=str(worktree), env=self.env,
+        )
+        self.assertNotEqual(mutation.returncode, 0, mutation.stderr)
+        absent_ref = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", "refs/heads/sandbox-read-only-check"],
+            capture_output=True, cwd=str(self.proj), env=self.env, check=False,
+        )
+        self.assertNotEqual(absent_ref.returncode, 0)
+
+    def test_allow_git_allows_linked_worktree_metadata_writes(self):
+        worktree = self.create_linked_worktree()
+        original_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(worktree), env=self.env,
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        result = subprocess.run(
+            [str(SANDBOX_SH), "--project-dir", str(worktree), "--allow-git", "--", "git",
+             "-c", "user.name=Sandbox Test", "-c", "user.email=sandbox@example.invalid",
+             "commit", "--allow-empty", "-m", "sandbox writable metadata"],
+            capture_output=True, text=True, check=False, cwd=str(worktree), env=self.env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        new_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(worktree), env=self.env,
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        self.assertNotEqual(new_head, original_head)
 
 
 class SandboxWritableRootTests(unittest.TestCase):
@@ -87,9 +173,12 @@ class SandboxWritableRootTests(unittest.TestCase):
         fake.chmod(0o755)
         self.env = dict(os.environ)
         self.env["PATH"] = str(fake_dir) + os.pathsep + self.env.get("PATH", "")
+        self.home_tmp = tempfile.TemporaryDirectory(prefix="sadskill-sandbox-home-", dir="/var/tmp")
+        self.env["HOME"] = self.home_tmp.name
         self.env["BWRAP_ARGS_CAPTURE"] = str(self.capture)
 
     def tearDown(self):
+        self.home_tmp.cleanup()
         self.tmp.cleanup()
 
     def sandbox(self, project):
@@ -126,12 +215,56 @@ class SandboxWritableRootTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--bind", self.capture.read_text())
 
-    def test_git_worktree_pointer_is_read_only(self):
-        (self.workspace / ".git").write_text("gitdir: /tmp/external-gitdir\n")
+    def test_home_and_environment_are_isolated(self):
         result = self.sandbox(self.workspace)
         self.assertEqual(result.returncode, 0, result.stderr)
         arguments = self.capture.read_text().splitlines()
+        self.assertIn("--clearenv", arguments)
+        self.assertIn("--tmpfs", arguments)
+        self.assertIn(self.env["HOME"], arguments)
+        home_index = arguments.index("--setenv")
+        self.assertEqual(arguments[home_index + 1], "PATH")
+        self.assertEqual(arguments[home_index + 3], "--setenv")
+        self.assertEqual(arguments[home_index + 4], "HOME")
+        self.assertEqual(arguments[home_index + 5], "/tmp/sadskill-home")
+        self.assertEqual(arguments[home_index + 6], "--setenv")
+        self.assertEqual(arguments[home_index + 7], "TMPDIR")
+
+    def test_workspace_below_home_is_recreated_then_bound(self):
+        project = Path(self.env["HOME"]) / "work" / "sample"
+        project.mkdir(parents=True)
+        result = self.sandbox(project)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = self.capture.read_text().splitlines()
+        directory_targets = [
+            arguments[index + 1]
+            for index, argument in enumerate(arguments[:-1])
+            if argument == "--dir"
+        ]
+        self.assertIn(str(project.parent), arguments)
+        self.assertIn(str(project), directory_targets)
+        bind_index = arguments.index("--bind")
+        self.assertEqual(arguments[bind_index + 1 : bind_index + 3], [str(project), str(project)])
+
+    def test_unverified_git_worktree_pointer_is_not_mounted(self):
+        (self.workspace / ".git").write_text("gitdir: /tmp/external-gitdir\n")
+        result = self.sandbox(self.workspace)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("failed validation", result.stderr)
+        arguments = self.capture.read_text().splitlines()
         self.assertEqual(arguments.count(str(self.workspace / ".git")), 2)
+        self.assertNotIn("/tmp/external-gitdir", arguments)
+
+    def test_allow_git_rejects_unverified_worktree_pointer_before_bwrap(self):
+        (self.workspace / ".git").write_text("gitdir: /tmp/external-gitdir\n")
+        result = subprocess.run(
+            ["/bin/bash", str(SANDBOX_SH), "--project-dir", str(self.workspace), "--allow-git",
+             "--", "/bin/true"],
+            cwd=str(self.workspace), env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("requires validated repository metadata", result.stderr)
+        self.assertFalse(self.capture.exists())
 
 
 class SandboxMissingBwrapTests(unittest.TestCase):
