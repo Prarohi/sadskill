@@ -105,7 +105,7 @@ class ReleaseGateTests(unittest.TestCase):
 
     def test_reproducible_real_git_archives_and_checksums(self):
         seed(self.root, status="2026-10-30")
-        (self.root / "README.md").write_text("> Version: `v0.5.0` · MIT\\n".replace("\\\\n", "\\n"))
+        (self.root / "README.md").write_text("> Version: `v0.5.0` · MIT\n")
         commands = [
             ["git", "init", "-q"],
             ["git", "config", "user.name", "Release Gate Test"],
