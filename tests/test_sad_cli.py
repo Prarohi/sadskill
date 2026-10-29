@@ -2,6 +2,8 @@
 """
 
 from pathlib import Path
+import os
+import pty
 import shutil
 import subprocess
 import sys
@@ -34,6 +36,30 @@ class SadCLITests(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0)
         self.assertIn("[🛡️ SAFE]", res.stdout)
+
+    def test_no_color_disables_ansi_on_a_tty(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            master, slave = pty.openpty()
+            process = subprocess.Popen(
+                [str(SAD_BIN), "--no-color", "init", "--project-root", tmp_dir],
+                stdout=slave, stderr=slave, close_fds=True,
+            )
+            os.close(slave)
+            chunks = []
+            while True:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            result = process.wait()
+            os.close(master)
+
+        output = b"".join(chunks)
+        self.assertEqual(result, 0, output.decode(errors="replace"))
+        self.assertNotIn(b"\x1b[", output)
 
     def test_guard_subcommand_destructive(self):
         res = subprocess.run(

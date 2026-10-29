@@ -33,6 +33,20 @@ BADGE_MEM = colored("[🧠 MEMORY]", "94;1")
 BADGE_INFO = colored("[ℹ INFO]", "97;1")
 
 
+def configure_color(enabled: bool) -> None:
+    """Refresh cached badges when output color changes after argument parsing."""
+    global USE_COLOR, BADGE_PASS, BADGE_FAIL, BADGE_WARN, BADGE_SAFE
+    global BADGE_EVID, BADGE_MEM, BADGE_INFO
+    USE_COLOR = enabled
+    BADGE_PASS = colored("[✓ PASS]", "92;1")
+    BADGE_FAIL = colored("[✕ FAIL]", "91;1")
+    BADGE_WARN = colored("[! WARN]", "93;1")
+    BADGE_SAFE = colored("[🛡️ SAFE]", "96;1")
+    BADGE_EVID = colored("[📦 EVIDENCE]", "95;1")
+    BADGE_MEM = colored("[🧠 MEMORY]", "94;1")
+    BADGE_INFO = colored("[ℹ INFO]", "97;1")
+
+
 def cmd_init(args) -> int:
     """Initializes the .sad/ directory structure and templates."""
     target_root = Path(args.project_root or Path.cwd()).resolve()
@@ -245,7 +259,7 @@ def main():
 
     global USE_COLOR
     if args.no_color:
-        USE_COLOR = False
+        configure_color(False)
 
     if not args.subcommand:
         parser.print_help()
