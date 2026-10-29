@@ -54,6 +54,13 @@ total_vendors=0
 total_ref_files=0
 violations=0
 
+# Do not trust nested or unlisted symlinks inside the vendor tree.
+first_symlink="$(find "$VENDOR_DIR" -type l -print -quit)"
+if [[ -n "$first_symlink" ]]; then
+  echo "ERROR: Vendor tree contains a symlink: $first_symlink" >&2
+  exit 1
+fi
+
 for dir in "${VENDOR_DIR}"/*/; do
   if [[ -d "$dir" ]]; then
     vendor_name="$(basename "$dir")"
@@ -64,7 +71,10 @@ for dir in "${VENDOR_DIR}"/*/; do
 
     # Verify that each ref file has neutralized frontmatter
     for f in $ref_files; do
-      if head -n 5 "$f" | grep -qE '^name:[[:space:]]+'; then
+      # Detect active YAML name: anywhere in the opening frontmatter block,
+      # not only in the first five lines of a reference document.
+      if head -n 5 "$f" | grep -qE '^name:[[:space:]]+' ||
+         ! awk 'NR == 1 && $0 != "---" { exit 0 } NR > 1 && $0 == "---" { exit 0 } NR > 1 && /^[[:space:]]*name:[[:space:]]*/ { exit 11 }' "$f"; then
         echo "  [FAIL] Unneutralized frontmatter in $f"
         violations=$((violations + 1))
       fi
