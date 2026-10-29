@@ -32,10 +32,17 @@ class CLIMemoryWorkflowContractTests(unittest.TestCase):
         self.assertIn("-p 'test_concurrent_memory.py'", self.workflow)
         self.assertIn("-p 'test_memory_search.py'", self.workflow)
 
+    def test_compatibility_matrix_describes_native_platform_evidence(self):
+        compatibility = (WORKFLOW.parents[2] / "docs" / "compatibility.md").read_text(encoding="utf-8")
+        self.assertIn("memory filesystem/search regressions", compatibility)
+        self.assertIn("fails closed before creating `.sad/`", compatibility)
+
     def test_windows_companion_memory_is_explicitly_unsupported_and_non_mutating(self):
         self.assertIn("Native Windows memory CLI fails closed", self.workflow)
         self.assertIn("runs-on: windows-2025", self.workflow)
         self.assertIn("scripts/sad_memory.py append-event --type custom", self.workflow)
+        self.assertIn("$PSNativeCommandUseErrorActionPreference = $false", self.workflow)
+        self.assertIn("Get-Content -Raw -Path $outputPath", self.workflow)
         self.assertIn("unavailable on this platform", self.workflow)
         self.assertIn("Unsupported Windows memory CLI created a project memory directory", self.workflow)
 

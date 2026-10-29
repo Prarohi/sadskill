@@ -66,10 +66,14 @@ jobs:
       - name: Verify unsupported memory CLI fails closed without writing
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           $project = Join-Path $env:RUNNER_TEMP 'sadskill-memory-unsupported-smoke'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'sadskill-memory-unsupported-output.txt'
           New-Item -ItemType Directory -Force -Path $project | Out-Null
-          $output = & python scripts/sad_memory.py append-event --type custom --payload '{"title":"windows smoke"}' --project-root $project 2>&1
+          & python scripts/sad_memory.py append-event --type custom --payload '{}' --project-root $project 1> $outputPath 2>&1
           $exitCode = $LASTEXITCODE
+          $output = Get-Content -Raw -Path $outputPath
+          Write-Host $output
           if ($exitCode -eq 0) { throw 'Windows memory CLI unexpectedly succeeded' }
           if (($output -join "`n") -notmatch 'safe project-memory .* unavailable on this platform') {
             throw "Windows memory CLI did not report its unsupported platform boundary: $output"
