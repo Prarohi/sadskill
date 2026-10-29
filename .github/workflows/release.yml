@@ -99,7 +99,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             "dist/sadskill-${RELEASE_TAG#v}.tar.gz" \
             "dist/sadskill-${RELEASE_TAG#v}.zip" \
-            dist/SHA256SUMS.txt dist/SOURCE_COMMIT.txt \
+            dist/SHA256SUMS.txt dist/SOURCE_COMMIT.txt dist/RELEASE_NOTES.md \
             --repo "$GITHUB_REPOSITORY" \
             --title "Sadskill $RELEASE_TAG" \
             --notes-file dist/RELEASE_NOTES.md \
