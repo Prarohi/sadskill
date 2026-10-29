@@ -43,6 +43,7 @@ class CLIMemoryWorkflowContractTests(unittest.TestCase):
         self.assertIn("scripts/sad_memory.py append-event --type custom", self.workflow)
         self.assertIn("$PSNativeCommandUseErrorActionPreference = $false", self.workflow)
         self.assertIn("Get-Content -Raw -Path $outputPath", self.workflow)
+        self.assertIn("$global:LASTEXITCODE = 0", self.workflow)
         self.assertIn("unavailable on this platform", self.workflow)
         self.assertIn("Unsupported Windows memory CLI created a project memory directory", self.workflow)
 

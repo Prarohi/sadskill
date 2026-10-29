@@ -81,3 +81,4 @@ jobs:
           if (Test-Path (Join-Path $project '.sad')) {
             throw 'Unsupported Windows memory CLI created a project memory directory'
           }
+          $global:LASTEXITCODE = 0
