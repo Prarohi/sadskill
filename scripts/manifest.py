@@ -413,6 +413,47 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
     print(f"   [MANIFEST] Recorded {agent} -> {dest_p}")
 
 
+def _archive_forced_destination(dest_p: Path, entry: dict, manifest_path: Path,
+                                data: dict, allowed_roots, dry_run: bool = False):
+    """Move modified destination content to a recorded sibling before restore."""
+    current_hash = compute_sha256(dest_p)
+    installed_hash = entry.get("content_hash", "")
+    if installed_hash and current_hash == installed_hash:
+        return
+
+    stamp = f"{time.time_ns()}_{os.getpid()}"
+    archive = dest_p.with_name(f"{dest_p.name}.bak.{stamp}")
+    suffix = 0
+    while archive.exists() or archive.is_symlink():
+        suffix += 1
+        archive = dest_p.with_name(f"{dest_p.name}.bak.{stamp}_{suffix}")
+    if not is_path_contained_in_roots(archive, allowed_roots):
+        raise ManifestError(f"conflict backup is outside allowed roots: {archive}")
+    if dry_run:
+        print(f"   [DRY-RUN] Would preserve modified destination at: {archive}")
+        return
+
+    # The backup lives beside the destination, so rename preserves its exact
+    # bytes/tree atomically and never deletes user data to make room for restore.
+    try:
+        os.rename(dest_p, archive)
+    except OSError as exc:
+        raise ManifestError(f"cannot preserve modified destination {dest_p}: {exc}") from exc
+
+    archive_hash = compute_sha256(archive)
+    conflicts = entry.get("conflict_backups")
+    if not isinstance(conflicts, list):
+        conflicts = []
+    conflicts.append({"path": str(archive), "hash": archive_hash, "created_at": _now_iso()})
+    entry["conflict_backups"] = conflicts
+    # Persist provenance before replacing the destination with the older backup.
+    # If persistence fails, the user's bytes remain in the sibling archive.
+    save_manifest_atomic(manifest_path, data)
+    print(f"   [PRESERVE-MODIFIED] Archived user content at: {archive}")
+    if not archive_hash or archive_hash != current_hash:
+        raise ManifestError(f"conflict backup verification failed for {dest_p}")
+
+
 def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = False, dry_run: bool = False):
     """Restore backed up files without deleting them afterwards."""
     if not manifest_path.exists():
@@ -459,6 +500,10 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
                 print(f"   [PRESERVE-MODIFIED] Refusing to overwrite modified file without --force. Backup preserved at {bak_p}")
                 had_conflict = True
                 continue
+            if force and (not installed_hash or not curr_hash or curr_hash != installed_hash):
+                _archive_forced_destination(
+                    dest_p, entry, manifest_path, data, entry_roots, dry_run=dry_run
+                )
 
         print(f"   [RESTORE] Restoring {dest_p} from {bak_p}")
         if not dry_run:
@@ -591,7 +636,7 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
         # becomes an untracked orphan.
         def _resolved(entry):
             if entry.get("restored"):
-                return True
+                return not _entry_has_preserved_content(entry)
             destination = entry.get("destination", "")
             if destination and Path(destination).exists():
                 return False
