@@ -71,6 +71,9 @@ jobs:
           bash -n bin/sad install.sh uninstall.sh scripts/git-guardrail.sh skills/sadskill/hooks/git-guardrail.sh scripts/sandbox.sh scripts/web-install.sh
           git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}"...HEAD
 
+      - name: Verify vendored reference hashes
+        run: bash scripts/update-vendor.sh --check
+
       - name: Run Python regression tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 
