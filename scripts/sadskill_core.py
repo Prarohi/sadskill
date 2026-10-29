@@ -58,8 +58,8 @@ _VERSION_RE = re.compile(
 def parse_version(text):
     """Parse 'v?MAJOR.MINOR.PATCH[-pre]' into a comparable tuple.
 
-    Returns (major, minor, patch, pre_tuple) where a release beats any
-    prerelease of the same numeric version (empty pre_tuple sorts highest).
+    Returns (major, minor, patch, is_release, pre_tuple) where a release beats
+    any prerelease of the same numeric version.
     Raises ValueError for anything unparseable.
     """
     if not isinstance(text, str):
@@ -74,19 +74,20 @@ def parse_version(text):
         # Each dot-segment: numeric segments compare numerically and always
         # rank BELOW release; non-numeric segments compare as strings.
         pre = tuple(
-            (1, "", int(seg)) if seg.isdigit() else (0, seg, 0)
+            (0, "", int(seg)) if seg.isdigit() else (1, seg, 0)
             for seg in pre_raw.split(".")
         )
     return (
         int(m.group("major")),
         int(m.group("minor")),
         int(m.group("patch")),
+        not bool(pre),
         pre,
     )
 
 
 def version_text(t):
-    major, minor, patch, pre = t
+    major, minor, patch, _is_release, pre = t
     out = f"{major}.{minor}.{patch}"
     if pre:
         out += "-" + ".".join(seg[1] or str(seg[2]) for seg in pre)
