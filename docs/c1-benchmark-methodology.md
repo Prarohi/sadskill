@@ -78,10 +78,10 @@ adequate sample size.
 
 The hidden graders execute candidate code and require Node.js for C1-01–05 and
 C1-10, the pinned cached PostgreSQL Docker image for C1-06/07, Chromium for
-C1-08/09, Bash for C1-11, and Python with `fcntl` for C1-12. A missing runtime
-produces `FAILED_UNVERIFIABLE_GRADER` with unknown (`null`) result counts; the
-harness must not score an unevaluated task as either a pass or a measured model
-failure. PostgreSQL fixtures use only a uniquely named, network-disabled,
+C1-08/09, Bash for C1-11, and Python with `fcntl` for C1-12. A missing runtime,
+browser timeout, or incomplete browser probe produces `FAILED_UNVERIFIABLE_GRADER`
+with unknown (`null`) result counts; the harness must not score an unevaluated
+task as either a pass or a measured model failure. PostgreSQL fixtures use only a uniquely named, network-disabled,
 read-only-root container. All capabilities are dropped except `CHOWN`,
 `SETUID`, and `SETGID` required by the pinned image entrypoint; cleanup targets
 only the container created by that grader invocation.

@@ -111,7 +111,7 @@ def _grade_node(workspace: Path, source: str, note: str):
     return _failed(f"{note} behavior failed: {_short_output(result)}")
 
 
-def _run_chromium(workspace: Path, html: str, *, viewport=(375, 812)):
+def _run_chromium(workspace: Path, html: str, *, viewport=(375, 812), timeout=30):
     browser = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
     if not browser:
         raise EvaluationUnavailable("Chromium browser runtime is unavailable")
@@ -162,17 +162,22 @@ def _run_chromium(workspace: Path, html: str, *, viewport=(375, 812)):
         except OSError as exc:
             raise EvaluationUnavailable(f"Chromium grader could not be launched: {type(exc).__name__}") from exc
         try:
-            stdout, stderr = process.communicate(timeout=20)
+            stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             stdout, stderr = process.communicate()
-            return subprocess.CompletedProcess(command, 124, stdout, stderr or "Chromium grader timed out")
+            timed_out = subprocess.CompletedProcess(command, 124, stdout, stderr)
+            raise EvaluationUnavailable(
+                f"Chromium grader timed out after {timeout}s: {_short_output(timed_out)}"
+            )
         result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
         if result.returncode:
-            raise EvaluationUnavailable(f"Chromium grader could not start: {_short_output(result)}")
+            raise EvaluationUnavailable(
+                f"Chromium grader exited with status {result.returncode}: {_short_output(result)}"
+            )
         return result
     finally:
         if html_path is not None:
@@ -627,21 +632,28 @@ const pre=document.querySelector('pre'); const overflow=root.scrollWidth > root.
 document.documentElement.dataset.grader=overflow ? 'fail' : 'pass';
 document.body.dataset.result=JSON.stringify({width:root.clientWidth,scrollWidth:root.scrollWidth,containerRight:box.getBoundingClientRect().right,preScroll:pre.scrollWidth,preClient:pre.clientWidth}); });</script>
 </body></html>"""
-    result = _run_chromium(workspace, page)
-    if 'data-grader="pass"' in result.stdout:
-        return _passed("Chromium at 375px verified no viewport overflow with long preformatted content")
-    detail = re.search(r'<body[^>]*data-result="([^"]*)"', result.stdout)
-    if detail:
-        diagnostic = detail.group(1)
-    else:
+    for attempt in range(2):
+        try:
+            result = _run_chromium(workspace, page, timeout=30)
+        except EvaluationUnavailable as exc:
+            reason = str(exc).lower()
+            if attempt == 0 and ("timed out" in reason or "exited with status" in reason):
+                continue
+            raise
+        if 'data-grader="pass"' in result.stdout:
+            return _passed("Chromium at 375px verified no viewport overflow with long preformatted content")
+        detail = re.search(r'<body[^>]*data-result="([^"]*)"', result.stdout)
+        if detail:
+            return _failed(f"Chromium mobile layout overflowed: {detail.group(1)}")
+        if attempt == 0:
+            continue
         lowered = result.stdout.lower()
-        diagnostic = (
-            "DOM probe missing "
+        raise EvaluationUnavailable(
+            "Chromium layout probe was incomplete after two attempts "
             f"(html={'<html' in lowered}, body={'<body' in lowered}, "
             f"grader={'data-grader' in lowered}, result={'data-result' in lowered}, "
             f"bytes={len(result.stdout)})"
         )
-    return _failed(f"Chromium mobile layout overflowed or the page did not complete its layout probe: {diagnostic}")
 
 
 def evaluate_c1_09(workspace: Path) -> tuple[bool, int | None, int | None, str]:
