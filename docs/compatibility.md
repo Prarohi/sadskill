@@ -21,7 +21,7 @@ The Markdown skill instructions are portable content. That does not prove that a
 | Surface | Linux | macOS | Windows native | Windows with WSL |
 |---|---|---|---|---|
 | Markdown skill instructions | Portable content; host behavior is not certified by this repository. | Same limitation. | Same limitation. | Same limitation. |
-| Companion installer, doctor, manifest, memory, and CLI | Ubuntu regression coverage; companion code uses Bash and POSIX `fcntl`. | Native macOS Codex installer/restore smoke and memory filesystem/search regressions run in CI; broader CLI/agent lifecycle remains unverified. | Companion tooling is unsupported. A native CI smoke verifies the project-memory CLI fails closed before creating `.sad/` when its required filesystem primitives are unavailable. | Not yet tested; do not infer support from Linux CI. |
+| Companion installer, doctor, manifest, memory, and CLI | Ubuntu regression coverage; companion code uses Bash and POSIX `fcntl`. | Native macOS Codex installer/restore smoke and memory filesystem/search regressions run in CI; broader CLI/agent lifecycle remains unverified. | Unsupported for native Windows companion tooling. A native CI smoke verifies the project-memory CLI fails closed before creating `.sad/` when its required filesystem primitives are unavailable. | Not yet tested; do not infer support from Linux CI. |
 | Bubblewrap sandbox | Linux only; requires `bwrap`. Missing `bwrap` fails closed. | Not supported; Bubblewrap needs Linux namespaces. | Not supported. | Not verified; requires a working Linux `bwrap` inside WSL. |
 | Native PostgreSQL RLS fixture | CI runs on Ubuntu; this is fixture evidence only. | Not run. | Not run. | Not run. |
 
