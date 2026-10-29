@@ -37,7 +37,7 @@ This document establishes the trust boundaries, threat vectors, privilege models
 
 ### T-01: Destructive Git and Database Execution
 - **Risk**: Agents executing `git reset --hard`, `git push --force`, `git clean -fd`, or SQL `DROP TABLE` destroying uncommitted code or production data.
-- **Mitigation**: Dual-layer guardrail (`scripts/git-guardrail.sh` and PreToolUse hooks) intercepts destructive commands and exits with code 2. Real Git `pre-push` inspection verifies non-fast-forward updates and remote branch deletions.
+- **Mitigation**: Dual-layer guardrail (`scripts/git-guardrail.sh` and PreToolUse hooks) intercepts known destructive command patterns and exits with code 2. SQL matching is a lexical heuristic, not a SQL parser or authorization boundary; database least privilege and PostgreSQL RLS must constrain actual access. Real Git `pre-push` inspection verifies non-fast-forward updates and remote branch deletions.
 
 ### T-02: Data Loss During Installation / Restoration
 - **Risk**: Uninstallation or reinstallation overwriting pre-existing user configurations or deleting restored backup files.

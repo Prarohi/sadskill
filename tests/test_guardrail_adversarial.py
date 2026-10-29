@@ -93,7 +93,16 @@ class GuardrailAdversarialTests(unittest.TestCase):
 
     def test_unbounded_sql_deletion(self):
         self.assert_blocked('psql -c "DELETE FROM users;"')
+        self.assert_blocked('psql -c "DELETE FROM users RETURNING id;"')
+        self.assert_blocked('psql -c "WITH cte AS (SELECT 1) DELETE FROM users RETURNING *;"')
+        self.assert_blocked('psql -c "DELETE FROM users WHERE TRUE;"')
+        self.assert_blocked('psql -c "DELETE FROM users WHERE ((1=1)) OR id=5;"')
+        self.assert_blocked('psql -c "DELETE FROM users WHERE id=5 OR (TRUE);"')
+        self.assert_blocked('psql -c "/* outer /* nested */ */ DELETE/**/FROM users;"')
         self.assert_allowed('psql -c "DELETE FROM users WHERE id = 123;"')
+        self.assert_allowed('psql -c "DELETE FROM users WHERE TRUE AND id = 123;"')
+        self.assert_allowed("psql -c 'SELECT $tag$ DROP TABLE users; $tag$;'")
+        self.assert_allowed("psql -c \"SELECT '/* DROP TABLE users; */';\"")
 
     def test_benign_commands_with_wrappers_are_allowed(self):
         self.assert_allowed("env git status")

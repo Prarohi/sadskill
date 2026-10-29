@@ -99,7 +99,13 @@ class SQLGuardTests(unittest.TestCase):
             "DELETE FROM users USING accounts;",
             "WITH cte AS (SELECT 1) DELETE FROM users RETURNING *;",
             "DELETE FROM users WHERE TRUE;",
+            "DELETE FROM users WHERE ((TRUE));",
             "DELETE FROM users WHERE 1=1;",
+            "DELETE FROM users WHERE (1 = 1) OR id = 10;",
+            "DELETE FROM users WHERE id = 10 OR (TRUE);",
+            "DELETE FROM users WHERE TRUE RETURNING id;",
+            "DELETE FROM users WHERE ;",
+            "DELETE/**/FROM users RETURNING id;",
             "SELECT 1; DELETE FROM users RETURNING *;",
             'DELETE FROM "accounts";',
             "ALTER TABLE users DROP CONSTRAINT important;",
@@ -107,6 +113,17 @@ class SQLGuardTests(unittest.TestCase):
         for query in cases:
             with self.subTest(query=query):
                 self.assertTrue(sql_guard.inspect_sql(query)[0])
+
+    def test_bounded_or_predicates_and_literals_remain_allowed(self):
+        cases = [
+            "DELETE FROM users WHERE TRUE AND id = 10;",
+            "DELETE FROM users WHERE id = 10 OR is_active = TRUE;",
+            "SELECT $tag$DELETE FROM users WHERE TRUE;$tag$;",
+            "SELECT 'DELETE FROM users WHERE TRUE;';",
+        ]
+        for query in cases:
+            with self.subTest(query=query):
+                self.assertFalse(sql_guard.inspect_sql(query)[0])
 
     def test_strings_and_comments_are_not_sql_commands(self):
         safe = [

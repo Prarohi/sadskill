@@ -75,6 +75,17 @@ def strip_sql_comments(sql: str) -> str:
     return _scan_sql(sql, mask_literals=False)
 
 
+def _has_unconditional_where(condition: str) -> bool:
+    """Recognize a small set of obvious true predicates; this is not SQL parsing."""
+    condition = re.sub(r"\b(?:RETURNING|ORDER\s+BY|LIMIT)\b.*$", "", condition, flags=re.I).strip()
+    truth = r"\(*\s*(?:TRUE|1\s*=\s*1|NOT\s+FALSE)\s*\)*"
+    return bool(
+        re.fullmatch(truth, condition, re.I)
+        or re.match(rf"^\s*{truth}\s+OR\b", condition, re.I)
+        or re.search(rf"\bOR\s+{truth}\s*(?:\bOR\b|$)", condition, re.I)
+    )
+
+
 def inspect_sql(sql_query: str) -> tuple[bool, str]:
     """Return (blocked, reason); only a defense-in-depth heuristic."""
     try:
@@ -102,10 +113,9 @@ def inspect_sql(sql_query: str) -> tuple[bool, str]:
             if where is None:
                 return True, "Unbounded DELETE FROM query detected without WHERE clause"
             condition = remainder[where.end():].strip()
-            if re.match(
-                r"(?:\(?\s*(?:TRUE|1\s*=\s*1)\s*\)?)(?:\s+(?:RETURNING|ORDER|LIMIT)\b|$)",
-                condition, re.I,
-            ):
+            if not condition:
+                return True, "Unbounded DELETE FROM query detected with an empty WHERE clause"
+            if _has_unconditional_where(condition):
                 return True, "Unbounded DELETE FROM query detected with unconditional WHERE"
     return False, ""
 

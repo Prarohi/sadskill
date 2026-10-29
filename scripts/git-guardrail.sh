@@ -237,66 +237,108 @@ def parse_command_string(cmd_str, depth=0):
         results.extend(unwrap_tokens(seg_tokens, depth))
     return results
 
-def strip_sql_comments(sql):
-    tokens = []
-    i = 0
-    n = len(sql)
-    in_single_quote = False
-    in_double_quote = False
+DOLLAR_QUOTE = re.compile(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$")
+
+def scan_sql(sql, mask_literals=True):
+    """Mask SQL comments/literals without joining adjacent tokens."""
+    out = []
+    i, n = 0, len(sql)
     while i < n:
-        c = sql[i]
-        next_c = sql[i + 1] if i + 1 < n else ""
-        if c == chr(39) and not in_double_quote:
-            in_single_quote = not in_single_quote
-            tokens.append(c)
-            i += 1
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+        if ch == "-" and nxt == "-":
+            i += 2
+            while i < n and sql[i] not in "\r\n":
+                i += 1
+            out.append(" ")
             continue
-        if c == chr(34) and not in_single_quote:
-            in_double_quote = not in_double_quote
-            tokens.append(c)
-            i += 1
+        if ch == "/" and nxt == "*":
+            i += 2
+            depth = 1
+            while i < n and depth:
+                if sql.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif sql.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            if depth:
+                raise ValueError("unterminated SQL block comment")
+            out.append(" ")
             continue
-        if not in_single_quote and not in_double_quote:
-            if c == "-" and next_c == "-":
-                i += 2
-                while i < n and sql[i] not in ("\n", "\r"):
+        if ch in (chr(39), chr(34)):
+            start, quote = i, ch
+            i += 1
+            while i < n:
+                if sql[i] == quote:
+                    if i + 1 < n and sql[i + 1] == quote:
+                        i += 2
+                        continue
                     i += 1
-                continue
-            if c == "/" and next_c == "*":
-                i += 2
-                while i + 1 < n and not (sql[i] == "*" and sql[i + 1] == "/"):
+                    break
+                if sql[i] == "\\" and i + 1 < n:
+                    i += 2
+                else:
                     i += 1
-                i += 2
-                tokens.append(" ")
+            else:
+                raise ValueError("unterminated SQL quote")
+            out.append((" ident " if quote == chr(34) else " ") if mask_literals else sql[start:i])
+            continue
+        if ch == "$":
+            match = DOLLAR_QUOTE.match(sql, i)
+            if match:
+                tag = match.group(0)
+                end = sql.find(tag, match.end())
+                if end < 0:
+                    raise ValueError("unterminated SQL dollar quote")
+                out.append(" " if mask_literals else sql[i:end + len(tag)])
+                i = end + len(tag)
                 continue
-        tokens.append(c)
+        out.append(ch)
         i += 1
-    return "".join(tokens)
+    return "".join(out)
+
+def has_unconditional_where(condition):
+    condition = re.sub(r"\b(?:RETURNING|ORDER\s+BY|LIMIT)\b.*$", "", condition, flags=re.I).strip()
+    truth = r"\(*\s*(?:TRUE|1\s*=\s*1|NOT\s+FALSE)\s*\)*"
+    return bool(
+        re.fullmatch(truth, condition, re.I)
+        or re.match(rf"^\s*{truth}\s+OR\b", condition, re.I)
+        or re.search(rf"\bOR\s+{truth}\s*(?:\bOR\b|$)", condition, re.I)
+    )
 
 def inspect_sql(sql_query):
-    clean_sql = strip_sql_comments(sql_query).strip()
-    if not clean_sql:
-        return False, ""
-    normalized = re.sub(r"\s+", " ", clean_sql)
-    drop_match = re.search(
-        r"\bDROP\s+(?:DATABASE|SCHEMA|TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX|COLUMN)\b",
-        normalized,
-        re.IGNORECASE,
-    )
-    if drop_match:
-        return True, "Destructive SQL DROP operation detected: " + drop_match.group(0)
-    if re.search(r"\bALTER\s+TABLE\s+[^\s;]+\s+DROP\s+COLUMN\b", normalized, re.IGNORECASE):
-        return True, "Destructive ALTER TABLE DROP COLUMN detected"
-    truncate_match = re.search(r"\bTRUNCATE\s+(?:TABLE\s+)?([\w.\"]+)\b", normalized, re.IGNORECASE)
-    if truncate_match:
-        return True, "Destructive SQL TRUNCATE operation detected on " + truncate_match.group(1)
-    unbounded_delete = re.search(
-        r"\bDELETE\s+FROM\s+[\w.\"]+\s*(?:;|$)(?!\s*WHERE\b)",
-        normalized,
-        re.IGNORECASE,
-    )
-    if unbounded_delete:
-        return True, "Unbounded DELETE FROM query detected without WHERE clause"
+    try:
+        clean_sql = scan_sql(sql_query, mask_literals=True)
+    except ValueError as exc:
+        return True, "Cannot safely inspect malformed SQL: " + str(exc)
+    for statement in clean_sql.split(";"):
+        normalized = re.sub(r"\s+", " ", statement).strip()
+        if not normalized:
+            continue
+        drop_match = re.search(
+            r"\bDROP\s+(?:DATABASE|SCHEMA|TABLE|VIEW|MATERIALIZED\s+VIEW|INDEX|COLUMN)\b",
+            normalized,
+            re.IGNORECASE,
+        )
+        if drop_match:
+            return True, "Destructive SQL DROP operation detected: " + drop_match.group(0)
+        if re.search(r"\bALTER\s+TABLE\b.*\bDROP\s+(?:COLUMN|CONSTRAINT)\b", normalized, re.I):
+            return True, "Destructive ALTER TABLE DROP operation detected"
+        if re.search(r"\bTRUNCATE\b", normalized, re.I):
+            return True, "Destructive SQL TRUNCATE operation detected"
+        for match in re.finditer(r"\bDELETE\s+FROM\b", normalized, re.I):
+            remainder = normalized[match.end():]
+            where = re.search(r"\bWHERE\b", remainder, re.I)
+            if where is None:
+                return True, "Unbounded DELETE FROM query detected without WHERE clause"
+            condition = remainder[where.end():].strip()
+            if not condition:
+                return True, "Unbounded DELETE FROM query detected with an empty WHERE clause"
+            if has_unconditional_where(condition):
+                return True, "Unbounded DELETE FROM query detected with unconditional WHERE"
     return False, ""
 
 def check_base64_payloads(tokens):
@@ -393,9 +435,6 @@ def check_atomic_command(tokens):
     sql_blocked, sql_reason = inspect_sql(full_str)
     if sql_blocked:
         return True, "Destructive SQL operation detected in '\''" + full_str + "'\'': " + sql_reason
-
-    if re.search(r"\b(DROP\s+(DATABASE|SCHEMA|TABLE|VIEW)|TRUNCATE\s+TABLE|TRUNCATE\s+[a-zA-Z0-9_]+|ALTER\s+TABLE\s+[a-zA-Z0-9_.]+\s+DROP\s+COLUMN)\b", full_str, re.IGNORECASE):
-        return True, "Destructive SQL query detected in '\''" + full_str + "'\''."
 
     return False, ""
 
