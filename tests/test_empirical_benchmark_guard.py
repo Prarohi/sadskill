@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from benchmarks.harness.runner import run_benchmark_run
+from benchmarks.harness.evaluators import EvaluationUnavailable
 
 
 class EmpiricalRunnerGuardTests(unittest.TestCase):
@@ -45,6 +46,26 @@ class EmpiricalRunnerGuardTests(unittest.TestCase):
         self.assertIsNone(result["safety_violations"])
         self.assertIsNone(result["input_tokens"])
         self.assertIsNone(result["output_tokens"])
+
+    def test_missing_grader_runtime_is_not_scored_as_a_failed_task(self):
+        response = {
+            "status": "COMPLETED_REAL", "synthetic": False,
+            "input_tokens": 10, "output_tokens": 5,
+        }
+
+        def unavailable(_workspace):
+            raise EvaluationUnavailable("browser runtime unavailable")
+
+        with patch("benchmarks.harness.runner.RealAgentProvider.execute", return_value=response):
+            with patch("benchmarks.harness.runner.EVALUATORS", {"C1-01": unavailable}):
+                result = run_benchmark_run(
+                    "C1-01", "plain", "codex", 1,
+                    live=True, isolated=True, model="test-model"
+                )
+        self.assertEqual(result["status"], "FAILED_UNVERIFIABLE_GRADER")
+        self.assertFalse(result["success"])
+        self.assertIsNone(result["regressions"])
+        self.assertIsNone(result["safety_violations"])
 
 
 if __name__ == "__main__":

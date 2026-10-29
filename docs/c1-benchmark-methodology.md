@@ -11,18 +11,18 @@ The C1 suite *intends* to evaluate coding agents under 3 conditions. **CI execut
 
 | Task ID | Task Name | Defect Category | Core Verification Criteria |
 |---|---|---|---|
-| `C1-01` | Nullable-profile bug | Bugfix | Optional chaining / null-guard fallback on `user.profile?.avatarUrl` with regression test |
-| `C1-02` | Pagination off-by-one | Bugfix | Correct boundary slicing `(page - 1) * pageSize` to `start + pageSize` without item duplication |
-| `C1-03` | Async stale-result race | Concurrency | Request sequencing / cancellation token to discard stale asynchronous query results |
-| `C1-04` | Node ESM export mismatch | Packaging | Explicit named exports conforming to package.json `type: module` with CJS compatibility |
-| `C1-05` | Cross-tenant authorization | Security | Enforcing `tenant_id` scoping on database retrieval to block cross-tenant information disclosure |
-| `C1-06` | PostgreSQL RLS hole | Database | `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL SECURITY`, and tenant policy verification |
-| `C1-07` | Safe expand/contract migration | Database | Two-phase rolling migration (add column/view, dual-write backfill, drop old column) |
-| `C1-08` | Mobile CSS overflow | Frontend Craft | `max-width: 100%`, `overflow-wrap: break-word` eliminating horizontal viewport scrolling at <= 375px |
-| `C1-09` | Accessible dialog behavior | Accessibility | Focus trapping, Escape key dismiss, `role="dialog"`, and `aria-modal="true"` |
-| `C1-10` | Circular dependency removal | Architecture | Clean architectural decoupling of mutual dependency via shared types module |
-| `C1-11` | Guardrail wrapper bypass | Safety Enforcement | Command interception blocking destructive execution wrapped in `env`, `sudo`, or `bash -c` |
-| `C1-12` | Concurrent project memory | Agent Memory | Concurrency-safe advisory locking and immutable event logs with zero lost writes |
+| `C1-01` | Nullable-profile bug | Bugfix | Hidden Node behavior tests for custom/null/undefined/missing profiles plus an executed regression test covering null and undefined |
+| `C1-02` | Pagination off-by-one | Bugfix | Hidden Node tests compare exact page slices, final partial page and out-of-range page |
+| `C1-03` | Async stale-result race | Concurrency | Controlled promise ordering proves a slow old request cannot replace the latest result |
+| `C1-04` | Node ESM export mismatch | Packaging | Node executes ESM named export and CommonJS entry; package map is checked for both consumers |
+| `C1-05` | Cross-tenant authorization | Security | Hidden Node adversarial-ID fixture verifies tenant A cannot retrieve tenant B's document |
+| `C1-06` | PostgreSQL RLS hole | Database | Pinned disposable PostgreSQL exercises default deny, tenant reads, own insert and cross-tenant read/write denial |
+| `C1-07` | Safe expand/contract migration | Database | Pinned PostgreSQL executes expand/backfill/dual-write/contract and reverse migrations against real rows |
+| `C1-08` | Mobile CSS overflow | Frontend Craft | Headless Chromium measures viewport and a long `pre` at 375 CSS pixels |
+| `C1-09` | Accessible dialog behavior | Accessibility | Headless Chromium exercises dialog semantics, initial focus, Tab/Shift+Tab wrap, Escape close and opener focus restore |
+| `C1-10` | Circular dependency removal | Architecture | Local JS import graph cycle check plus Node import and behavior tests |
+| `C1-11` | Guardrail wrapper bypass | Safety Enforcement | Workspace hook is tested against direct/env/command/sudo/recursive-shell inputs with fake commands that prevent execution |
+| `C1-12` | Concurrent project memory | Agent Memory | Multiple processes append 202 unique JSONL records; a held advisory lock must block a writer until release |
 
 ---
 
@@ -30,12 +30,12 @@ The C1 suite *intends* to evaluate coding agents under 3 conditions. **CI execut
 
 For each run, the harness records:
 - **Task Success**: Automated deterministic grader evaluation of workspace state.
-- **Regression Rate**: Number of pre-existing assertions broken by the change.
-- **Safety Violations**: Interception of destructive Git, SQL, or filesystem operations.
+- **Regression Rate**: Not measured by current graders; stored as `null` and rendered `NOT_MEASURED`.
+- **Safety Violations**: Not comprehensively measured by current graders; stored as `null` and rendered `NOT_MEASURED`.
 - **Token Efficiency**: Prompt and completion token consumption.
 - **Wall-Clock Time**: Execution latency in seconds.
-- **Tool Calls**: Number of tool invocations performed.
-- **Verification Completeness**: Cryptographic evidence record generated in `.sad/evidence/`.
+- **Tool Calls**: Not currently captured; stored as `null`.
+- **Verification Completeness**: The benchmark runner does not currently create a `.sad/evidence/` record; `evidence_produced` is false and cannot be read as an independent verification score.
 
 ---
 
@@ -64,13 +64,41 @@ and successes are built into the test doubles, not produced by an agent. Earlier
 displayed 33.3%/100% success and 45.7% token savings were synthetic constants,
 **not measured improvements**, and are withdrawn as performance claims.
 
-The visualizer excludes mock and unexecuted records from empirical statistics.
-Only real, authenticated, executed agent runs with measured usage may count.
-Even those require independently verified paired setup and adequate sample size
-before causal/superiority claims.
+The visualizer excludes mock and unexecuted records and checks the shape of
+completed-run records. JSONL fields are not cryptographically authenticated;
+the summarizer cannot prove that a file came from a real authenticated CLI run.
+Verify record provenance independently before using any live-run report.
+Token differences are emitted only when all three conditions have matching
+provider/model/task/repetition keys from one experiment ID. Environment identity
+is not recorded yet, so the pairing gate alone does not support causal or
+superiority claims; those still require independently verified setup and
+adequate sample size.
+
+### Behavioral grader prerequisites and limits
+
+The hidden graders execute candidate code and require Node.js for C1-01–05 and
+C1-10, the pinned cached PostgreSQL Docker image for C1-06/07, Chromium for
+C1-08/09, Bash for C1-11, and Python with `fcntl` for C1-12. A missing runtime
+produces `FAILED_UNVERIFIABLE_GRADER` with unknown (`null`) result counts; the
+harness must not score an unevaluated task as either a pass or a measured model
+failure. PostgreSQL fixtures use only a uniquely named, network-disabled,
+read-only-root container. All capabilities are dropped except `CHOWN`,
+`SETUID`, and `SETGID` required by the pinned image entrypoint; cleanup targets
+only the container created by that grader invocation.
+
+These are stronger deterministic task graders, not proof that an agent is
+generally superior. Run the candidate task code only inside the disposable
+external environment described below; CLI sandbox flags alone do not contain
+arbitrary code.
+
+The current task graders do not measure regressions against a pre-run test
+baseline or count every safety violation. Those fields remain `null` and are
+rendered as `NOT_MEASURED`; they must not be interpreted as zero. C1-12 checks
+lock blocking and final event preservation, not syscall-level proof that the
+JSONL file was never rewritten or truncated.
 
 ### Real Agent Execution (Codex / Claude)
-The live adapters are not yet implemented. Without credentials the result is `NOT_EXECUTED_NO_AUTH`; with credentials it is `NOT_EXECUTED_NOT_IMPLEMENTED`. In both cases the runner exits nonzero and no measured result exists:
+CLI adapters for Codex, Claude Code, and Gemini are implemented, but CI does not invoke them and no authenticated real-agent trials have been run. A missing CLI returns `NOT_EXECUTED_NO_CLI`; CLI errors or incomplete usage return a failed/unverifiable status. These statuses exit nonzero and are never benchmark results:
 ```bash
 python3 benchmarks/harness/runner.py \
   --provider codex \

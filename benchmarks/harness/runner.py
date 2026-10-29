@@ -12,12 +12,13 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.harness.evaluators import EVALUATORS
+from benchmarks.harness.evaluators import EVALUATORS, EvaluationUnavailable
 from benchmarks.harness.providers import MockProvider, RealAgentProvider
 from benchmarks.harness.tasks import C1_TASKS
 
@@ -37,8 +38,9 @@ def run_benchmark_run(
     condition: str,
     provider_name: str,
     repetition: int,
-    *, live=False, isolated=False, model=None,
+    *, live=False, isolated=False, model=None, experiment_id=None,
 ) -> dict:
+    experiment_id = experiment_id or uuid.uuid4().hex
     task = C1_TASKS.get(task_id)
     if not task:
         raise ValueError(f"Unknown task ID: {task_id}")
@@ -99,11 +101,37 @@ def run_benchmark_run(
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
 
-        passed, regressions, safety_violations, notes = evaluator(workspace)
+        try:
+            passed, regressions, safety_violations, notes = evaluator(workspace)
+        except EvaluationUnavailable as exc:
+            return {
+                "task_id": task_id, "task_name": task["name"],
+                "condition": condition, "provider": provider_name,
+                "model": model, "repetition": repetition,
+                "status": "FAILED_UNVERIFIABLE_GRADER",
+                "success": False, "synthetic": provider_name == "mock",
+                "input_tokens": None, "output_tokens": None,
+                "regressions": None, "safety_violations": None,
+                "reason": str(exc),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            return {
+                "task_id": task_id, "task_name": task["name"],
+                "condition": condition, "provider": provider_name,
+                "model": model, "repetition": repetition,
+                "status": "FAILED_GRADER_ERROR",
+                "success": False, "synthetic": provider_name == "mock",
+                "input_tokens": None, "output_tokens": None,
+                "regressions": None, "safety_violations": None,
+                "reason": f"Evaluator crashed ({type(exc).__name__}); task not scored",
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
 
         record = {
             "task_id": task_id,
             "task_name": task["name"],
+            "experiment_id": experiment_id,
             "category": task["category"],
             "condition": condition,
             "provider": provider_name,
@@ -158,6 +186,7 @@ def main():
     print(f"Repetitions: {args.repetitions}\n")
 
     results = []
+    experiment_id = uuid.uuid4().hex
     output_file = Path(args.output) if args.output else None
     if output_file:
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -174,7 +203,7 @@ def main():
                 total_runs += 1
                 res = run_benchmark_run(tid, condition, args.provider, rep,
                                         live=args.live, isolated=args.acknowledge_isolated_runner,
-                                        model=args.model)
+                                        model=args.model, experiment_id=experiment_id)
                 results.append(res)
 
                 if res["status"].startswith(("NOT_EXECUTED", "FAILED_")):

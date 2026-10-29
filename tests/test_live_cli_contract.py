@@ -68,6 +68,7 @@ class LiveCLIContractTests(unittest.TestCase):
 
     def test_missing_usage_never_becomes_zero(self):
         self.assertIsNone(parse_usage("claude", '{"usage":{}}'))
+        self.assertIsNone(parse_usage("claude", '{"usage":{"input_tokens":null,"output_tokens":null}}'))
         self.assertIsNone(parse_usage("gemini", '{"error":"unauthorized"}'))
 
 
