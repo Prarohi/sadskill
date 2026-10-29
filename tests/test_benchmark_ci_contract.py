@@ -14,6 +14,7 @@ class BenchmarkCIContractTests(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-latest", workflow)
         self.assertIn("permissions:\n  contents: read", workflow)
         self.assertNotIn("pull_request_target", workflow)
+        self.assertNotIn("  push:\n", workflow)
         self.assertEqual(workflow.count("SADSKILL_CI_CHROMIUM_NO_SANDBOX"), 1)
         self.assertIn(
             "      - name: Run full Python regression suite\n"

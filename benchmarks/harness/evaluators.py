@@ -134,6 +134,7 @@ def _run_chromium(workspace: Path, html: str, *, viewport=(375, 812)):
             "--disable-sync",
             "--no-first-run",
             "--disable-default-apps",
+            "--virtual-time-budget=1000",
             f"--user-data-dir={user_data.name}",
             f"--window-size={viewport[0]},{viewport[1]}",
             "--force-device-scale-factor=1",
@@ -630,7 +631,17 @@ document.body.dataset.result=JSON.stringify({width:root.clientWidth,scrollWidth:
     if 'data-grader="pass"' in result.stdout:
         return _passed("Chromium at 375px verified no viewport overflow with long preformatted content")
     detail = re.search(r'<body[^>]*data-result="([^"]*)"', result.stdout)
-    return _failed("Chromium mobile layout overflowed or the page did not complete its layout probe" + (f": {detail.group(1)}" if detail else ""))
+    if detail:
+        diagnostic = detail.group(1)
+    else:
+        lowered = result.stdout.lower()
+        diagnostic = (
+            "DOM probe missing "
+            f"(html={'<html' in lowered}, body={'<body' in lowered}, "
+            f"grader={'data-grader' in lowered}, result={'data-result' in lowered}, "
+            f"bytes={len(result.stdout)})"
+        )
+    return _failed(f"Chromium mobile layout overflowed or the page did not complete its layout probe: {diagnostic}")
 
 
 def evaluate_c1_09(workspace: Path) -> tuple[bool, int | None, int | None, str]:

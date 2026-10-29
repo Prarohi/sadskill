@@ -8,10 +8,6 @@ on:
       - 'tests/test_live_cli_contract.py'
       - 'tests/test_empirical_benchmark_guard.py'
       - '.github/workflows/benchmark-evidence.yml'
-  push:
-    branches:
-      - 'audit/benchmark-*'
-
 permissions:
   contents: read
 
