@@ -1,0 +1,106 @@
+name: Prepare verified draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing reviewed tag exactly matching VERSION (e.g., v0.5.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sadskill-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Verify release tag, CI and artifacts
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - name: Checkout protected main and its tags
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Require matching tag, version and dated changelog
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 scripts/release_gate.py check --tag "$RELEASE_TAG"
+
+      - name: Require exact-head CI and CodeQL success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" > /tmp/sadskill-checks.json
+          python3 scripts/release_gate.py checks --sha "$GITHUB_SHA" --json-file /tmp/sadskill-checks.json
+
+      - name: Run complete regression, skill contract and vendor checks
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+          python3 -m unittest discover -s tests/skill-contract -p 'test_*.py' -v
+          python3 scripts/verify.py
+          bash scripts/update-vendor.sh --check
+
+      - name: Build reproducible archives and verify digests
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_gate.py package --tag "$RELEASE_TAG" --out dist
+          python3 scripts/release_gate.py package --tag "$RELEASE_TAG" --out dist-repeat
+          diff -rq dist dist-repeat
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+
+      - name: Upload validated assets to the workflow run
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sadskill-reviewed-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  draft:
+    name: Create a draft GitHub release (not published)
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download reviewed assets (no source checkout)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: sadskill-reviewed-release
+          path: dist
+
+      - name: Verify assets and create draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          test "$(cat dist/SOURCE_COMMIT.txt)" = "$GITHUB_SHA"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Existing release or draft: refusing overwrite" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            "dist/sadskill-${RELEASE_TAG#v}.tar.gz" \
+            "dist/sadskill-${RELEASE_TAG#v}.zip" \
+            dist/SHA256SUMS.txt dist/SOURCE_COMMIT.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Sadskill $RELEASE_TAG" \
+            --notes-file dist/RELEASE_NOTES.md \
+            --draft --verify-tag --latest=false
