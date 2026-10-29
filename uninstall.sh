@@ -153,6 +153,36 @@ else
   remove_owned_dir "${TARGET_DIR}/.cursor/skills/sadskill"
 fi
 
+if [[ "$PURGE" == "true" && -f "$MANIFEST_FILE" ]]; then
+  # Unresolved backups may contain user edits. Never lose their manifest
+  # provenance even when purge is explicitly requested.
+  if python3 - "$MANIFEST_FILE" <<'PY'
+import json
+from pathlib import Path
+import sys
+try:
+    data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    entries = data.get("entries", [])
+    if not isinstance(entries, list):
+        raise ValueError("invalid entries")
+    unresolved = any(
+        isinstance(entry, dict) and (
+            any(
+                isinstance(record, dict) and isinstance(record.get("path"), str)
+                and Path(record["path"]).exists()
+                for record in (entry.get("conflict_backups") or [])
+            ) or (entry.get("backup") and Path(entry["backup"]).exists())
+        ) for entry in entries
+    )
+except (OSError, ValueError, TypeError, KeyError):
+    unresolved = True  # Corrupt manifest: refuse destructive purge
+sys.exit(0 if unresolved else 1)
+PY
+  then
+    echo "ERROR: --purge refused; unresolved user backups are still recorded in install-manifest.json." >&2
+    exit 5
+  fi
+fi
 if [[ "$PURGE" == "true" ]]; then
   echo "-> Purging ~/.sadskill user profile directory..."
   if [[ "$DRY_RUN" != "true" ]]; then
