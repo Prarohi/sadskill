@@ -1,4 +1,4 @@
-name: CLI initialization safety
+name: CLI initialization and memory safety
 
 on:
   push:
@@ -6,7 +6,12 @@ on:
   pull_request:
     paths:
       - 'scripts/sad_cli.py'
+      - 'scripts/sad_memory.py'
       - 'tests/test_cli_init_symlink.py'
+      - 'tests/test_concurrent_memory.py'
+      - 'tests/test_memory_search.py'
+      - 'tests/test_cli_memory_workflow_contract.py'
+      - 'docs/compatibility.md'
       - '.github/workflows/cli-init-safety.yml'
 
 permissions:
@@ -30,3 +35,45 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - name: Skill-contract regression suite
         run: python3 -m unittest discover -s tests/skill-contract -p 'test_*.py' -v
+
+  macos-memory-filesystem:
+    name: Native macOS memory/filesystem regressions
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.11'
+      - name: Run memory filesystem and search regressions
+        run: |
+          python3 -m unittest discover -s tests -p 'test_concurrent_memory.py' -v
+          python3 -m unittest discover -s tests -p 'test_memory_search.py' -v
+
+  windows-memory-unsupported:
+    name: Native Windows memory CLI fails closed
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.11'
+      - name: Verify unsupported memory CLI fails closed without writing
+        shell: pwsh
+        run: |
+          $project = Join-Path $env:RUNNER_TEMP 'sadskill-memory-unsupported-smoke'
+          New-Item -ItemType Directory -Force -Path $project | Out-Null
+          $output = & python scripts/sad_memory.py append --root $project --prefix windows-smoke --count 1 2>&1
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -eq 0) { throw 'Windows memory CLI unexpectedly succeeded' }
+          if (($output -join "`n") -notmatch 'safe project-memory .* unavailable on this platform') {
+            throw "Windows memory CLI did not report its unsupported platform boundary: $output"
+          }
+          if (Test-Path (Join-Path $project '.sad')) {
+            throw 'Unsupported Windows memory CLI created a project memory directory'
+          }
