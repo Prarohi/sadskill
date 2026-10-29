@@ -78,6 +78,23 @@ class VendorManifestIntegrityTests(unittest.TestCase):
         self.ref.symlink_to(self.repo / "outside.md")
         self.assertNotEqual(self.check().returncode, 0)
 
+    def test_unlisted_symlink_anywhere_in_vendor_is_rejected(self):
+        (self.vendor / "unexpected-link").symlink_to(self.repo / "outside")
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr.lower())
+
+    def test_name_after_five_frontmatter_lines_is_rejected(self):
+        self.ref.write_text(
+            "---\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nname: executable-skill\n---\nbody\n",
+            encoding="utf-8",
+        )
+        self.sha = hashlib.sha256(self.ref.read_bytes()).hexdigest()
+        self.write_manifest()
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("frontmatter", result.stdout.lower())
+
     def test_unlisted_reference_rejected(self):
         (self.ref.parent / "other.ref.md").write_text("extra", encoding="utf-8")
         self.assertNotEqual(self.check().returncode, 0)
