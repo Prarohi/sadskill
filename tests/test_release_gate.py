@@ -1,7 +1,11 @@
 """Release metadata, evidence, and draft-only workflow regression tests."""
 import json
+import hashlib
 from pathlib import Path
+import subprocess
+import tarfile
 import tempfile
+import zipfile
 import unittest
 from unittest import mock
 
@@ -98,6 +102,36 @@ class ReleaseGateTests(unittest.TestCase):
         ]:
             with self.assertRaisesRegex(gate.ReleaseError, "required check"):
                 gate.verify_checks({"check_runs": bad}, sha)
+
+    def test_reproducible_real_git_archives_and_checksums(self):
+        seed(self.root, status="2026-10-30")
+        (self.root / "README.md").write_text("> Version: `v0.5.0` · MIT\\n".replace("\\\\n", "\\n"))
+        commands = [
+            ["git", "init", "-q"],
+            ["git", "config", "user.name", "Release Gate Test"],
+            ["git", "config", "user.email", "release-test@example.invalid"],
+            ["git", "add", "-A"],
+            ["git", "commit", "-qm", "Seed fake release"],
+            ["git", "tag", "v0.5.0"],
+        ]
+        for command in commands:
+            subprocess.run(command, cwd=self.root, capture_output=True, check=True)
+        first, second = self.root / "first", self.root / "second"
+        gate.package("v0.5.0", first)
+        gate.package("v0.5.0", second)
+        files = sorted(p.name for p in first.iterdir())
+        self.assertEqual(files, sorted(p.name for p in second.iterdir()))
+        for name in files:
+            self.assertEqual((first / name).read_bytes(), (second / name).read_bytes())
+        sums = (first / "SHA256SUMS.txt").read_text().splitlines()
+        self.assertEqual(len(sums), 4)
+        for line in sums:
+            digest, name = line.split("  ", 1)
+            self.assertEqual(digest, hashlib.sha256((first / name).read_bytes()).hexdigest())
+        with tarfile.open(first / "sadskill-0.5.0.tar.gz", "r:gz") as archive:
+            self.assertIn("sadskill-0.5.0/VERSION", archive.getnames())
+        with zipfile.ZipFile(first / "sadskill-0.5.0.zip") as archive:
+            self.assertIn("sadskill-0.5.0/VERSION", archive.namelist())
 
     def test_release_workflow_never_auto_publishes(self):
         flow = (Path(__file__).resolve().parents[1] / ".github/workflows/release.yml").read_text()
