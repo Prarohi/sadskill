@@ -77,24 +77,62 @@ for dir in "${VENDOR_DIR}"/*/; do
   fi
 done
 
-if [[ -f "$MANIFEST_FILE" && "$MODE" == "check" ]]; then
-  echo "-> Checking manifest integrity against reference files..."
-  python3 -c "
-import json, hashlib, sys
+if [[ "$MODE" == "check" ]]; then
+  [[ -f "$MANIFEST_FILE" ]] || { echo "ERROR: Missing vendor manifest: $MANIFEST_FILE" >&2; exit 1; }
+  echo "-> Checking vendor manifest SHA-256 digests and path containment..."
+  python3 - "$REPO_ROOT" "$VENDOR_DIR" "$MANIFEST_FILE" <<'PY'
+import hashlib
+import json
 from pathlib import Path
+import re
+import sys
 
-repo_root = Path('$REPO_ROOT')
-manifest_path = Path('$MANIFEST_FILE')
-with open(manifest_path, 'r', encoding='utf-8') as f:
-    manifest = json.load(f)
-
-for ref in manifest.get('references', []):
-    p = repo_root / ref['path']
-    if not p.exists():
-        print(f'  [FAIL] Missing file: {ref[\"path\"]}')
-        sys.exit(1)
-"
-  echo "   [OK] Manifest check passed."
+root = Path(sys.argv[1]).resolve()
+vendor = Path(sys.argv[2]).resolve()
+manifest_path = Path(sys.argv[3])
+try:
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    sys.exit(f"FAIL: Cannot load vendor manifest: {exc}")
+refs = data.get("references")
+if not isinstance(refs, list) or not refs:
+    sys.exit("FAIL: vendor manifest requires nonempty references array")
+if data.get("total_references") != len(refs):
+    sys.exit("FAIL: vendor manifest count mismatch")
+seen = set()
+for entry in refs:
+    if not isinstance(entry, dict):
+        sys.exit("FAIL: vendor manifest entry is not an object")
+    rel = entry.get("path")
+    digest = entry.get("sha256")
+    if not isinstance(rel, str) or not rel or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        sys.exit("FAIL: invalid vendor path or SHA-256")
+    if "\\" in rel:
+        sys.exit("FAIL: vendor reference has backslash")
+    parts = Path(rel)
+    if parts.is_absolute() or ".." in parts.parts or "." in parts.parts:
+        sys.exit("FAIL: unsafe vendor reference path")
+    if rel in seen:
+        sys.exit("FAIL: duplicate vendor reference")
+    seen.add(rel)
+    path = root / rel
+    if path.is_symlink() or not path.is_file():
+        sys.exit(f"FAIL: missing/symlink vendor reference: {rel}")
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(vendor)
+    except ValueError:
+        sys.exit(f"FAIL: vendor reference escapes vendor directory: {rel}")
+    if not resolved.name.endswith(".ref.md"):
+        sys.exit(f"FAIL: not a vendor reference: {rel}")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != digest:
+        sys.exit(f"FAIL: SHA-256 mismatch for {rel}")
+disk = {str(path.relative_to(root)) for path in vendor.rglob("*.ref.md") if path.is_file()}
+if disk != seen:
+    sys.exit("FAIL: vendor reference manifest/file-set mismatch")
+print(f"Verified SHA-256 digests for {len(refs)} vendor references.")
+PY
 fi
 
 echo "Audit Summary:"
