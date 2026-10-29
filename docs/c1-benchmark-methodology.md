@@ -1,6 +1,6 @@
 # C1 Comparative Real-Agent Benchmark Methodology
 
-The C1 suite *intends* to evaluate coding agents under 3 conditions. **The current provider only runs predetermined synthetic mock solutions; Codex/Claude/Gemini live execution is not implemented. Do not publish mock outputs as real agent performance.**
+The C1 suite *intends* to evaluate coding agents under 3 conditions. **CI executes deterministic mocks only. The Codex/Claude/Gemini live CLI adapters are opt-in and require an externally isolated runner, explicit model ID, and locally authenticated CLI. No real comparative trial results have been collected yet. Never publish mock results as model performance.**
 1. `plain`: Raw agent instruction without structured engineering protocols.
 2. `sadskill`: Agent governed by the sadskill Engineering Confidence Layer (contract-first planning, minimal surgical changes, verification evidence, and safety guardrails).
 3. `competitor`: Agent governed by generic or high-ceremony development methodologies.

@@ -35,10 +35,10 @@ class BenchmarkTruthfulnessTests(unittest.TestCase):
     def test_credential_does_not_make_unimplemented_adapter_real(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-placeholder"}, clear=True):
             result = run_benchmark_run("C1-01", "sadskill", "codex", 1)
-        self.assertEqual(result["status"], "NOT_EXECUTED_NOT_IMPLEMENTED")
+        self.assertEqual(result["status"], "NOT_EXECUTED_DISABLED")
         self.assertFalse(result["success"])
 
-    def test_live_runner_exits_failure_without_adapter(self):
+    def test_real_runner_is_opt_in_even_when_credentials_exist(self):
         env = dict(os.environ)
         env["OPENAI_API_KEY"] = "test-placeholder"
         result = subprocess.run(
@@ -48,6 +48,18 @@ class BenchmarkTruthfulnessTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("NOT EXECUTED", result.stderr)
+
+    def test_live_cli_requires_explicit_isolation_and_model(self):
+        for flags in (["--live", "--model", "test-model"],
+                      ["--live", "--acknowledge-isolated-runner"]):
+            with self.subTest(flags=flags):
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "benchmarks/harness/runner.py"),
+                     "--provider", "codex", "--task", "C1-01", *flags],
+                    text=True, capture_output=True,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("--live requires", result.stderr)
 
     def test_all_condition_matrix_reports_expected_plain_mock_failure(self):
         result = subprocess.run(

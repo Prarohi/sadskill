@@ -35,11 +35,11 @@ class C1BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(res["status"], "SIMULATED")
         self.assertFalse(res["success"], "Plain mock fixture should not satisfy forced RLS invariants")
 
-    def test_unauthenticated_codex_provider_reports_truthful_unauth(self):
+    def test_real_provider_never_runs_without_explicit_opt_in(self):
         res = run_benchmark_run("C1-01", "sadskill", "codex", 1)
-        self.assertEqual(res["status"], "NOT_EXECUTED_NO_AUTH")
+        self.assertEqual(res["status"], "NOT_EXECUTED_DISABLED")
         self.assertFalse(res["success"])
-        self.assertIn("Missing provider API key", res["reason"])
+        self.assertIn("--live", res["reason"])
 
 
 if __name__ == "__main__":
