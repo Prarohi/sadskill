@@ -36,6 +36,11 @@ class CIWorkflowContractTests(unittest.TestCase):
     def test_vendor_hash_check_is_a_required_ci_step(self):
         self.assertIn("bash scripts/update-vendor.sh --check", self.workflow)
 
+    def test_native_platform_smoke_jobs_are_not_misrepresented(self):
+        self.assertIn("Native macOS install/restore smoke", self.workflow)
+        self.assertIn("Native Windows skill-content smoke (not companion CLI)", self.workflow)
+        self.assertIn("test_portable_skill_content.py", self.workflow)
+
     def test_integrity_and_negative_control_preserved(self):
         self.assertIn("git diff --check", self.workflow)
         self.assertIn("npx --yes skills@1.7.4 add . -l", self.workflow)

@@ -21,11 +21,11 @@ The Markdown skill instructions are portable content. That does not prove that a
 | Surface | Linux | macOS | Windows native | Windows with WSL |
 |---|---|---|---|---|
 | Markdown skill instructions | Portable content; host behavior is not certified by this repository. | Same limitation. | Same limitation. | Same limitation. |
-| Companion installer, doctor, manifest, memory, and CLI | Linux is the only platform exercised by CI; companion code uses Bash and POSIX `fcntl`. | Not yet tested; no native support claim. | Unsupported for companion tooling because it requires Bash/POSIX `fcntl`. | Not yet tested; do not infer support from Linux CI. |
+| Companion installer, doctor, manifest, memory, and CLI | Ubuntu regression coverage; companion code uses Bash and POSIX `fcntl`. | Native macOS Codex installer/restore smoke added to CI; broader CLI/agent lifecycle remains unverified. | Unsupported for companion tooling because it requires Bash/POSIX `fcntl`. | Not yet tested; do not infer support from Linux CI. |
 | Bubblewrap sandbox | Linux only; requires `bwrap`. Missing `bwrap` fails closed. | Not supported; Bubblewrap needs Linux namespaces. | Not supported. | Not verified; requires a working Linux `bwrap` inside WSL. |
 | Native PostgreSQL RLS fixture | CI runs on Ubuntu; this is fixture evidence only. | Not run. | Not run. | Not run. |
 
-Current CI runs on `ubuntu-latest` only. Native macOS install/restore coverage and Windows-native behavior are open in [issue #12](https://github.com/Prarohi/sadskill/issues/12). A skill file that can be read by an agent on another platform is not evidence that the companion scripts work there.
+CI retains comprehensive Ubuntu checks and adds native macOS **Codex-only install/restore smoke** plus Windows **skill-content-only smoke** jobs. Passing the latter does not establish Windows companion CLI/installer support (still unsupported). End-to-end native agent-host behavior, WSL and full macOS compatibility remain open in [issue #12](https://github.com/Prarohi/sadskill/issues/12).
 
 ## Portable evidence helper
 
