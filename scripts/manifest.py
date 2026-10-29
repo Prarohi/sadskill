@@ -101,14 +101,9 @@ def is_path_contained_in_roots(path: Path, allowed_roots) -> bool:
                 if str(resolved) == str(root) or str(resolved).startswith(str(root) + os.sep):
                     return True
 
-        # Allow Cursor workspace artifacts strictly within a verified .cursor directory
-        parts = resolved.parts
-        if ".cursor" in parts:
-            idx = parts.index(".cursor")
-            rel_cursor = parts[idx:]
-            # Exact rule file or exact sadskill skill folder within .cursor/skills/
-            if rel_cursor == (".cursor", "rules", "sadskill.mdc") or rel_cursor[:3] == (".cursor", "skills", "sadskill"):
-                return True
+        # No global .cursor substring exception: a path such as
+        # /tmp/unrelated/.cursor/rules/sadskill.mdc must not be authorized.
+        # The caller must explicitly include its selected target_dir in roots.
         return False
     except Exception:
         return False
