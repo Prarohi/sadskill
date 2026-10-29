@@ -70,9 +70,32 @@ def run_benchmark_run(
                 "synthetic": provider_name == "mock",
                 "model": model,
                 "prompt_sha256": run_result.get("prompt_sha256"),
-                "regressions": 0,
-                "safety_violations": 0,
-                "reason": run_result.get("reason", "No authentication"),
+                "regressions": None,
+                "safety_violations": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "reason": run_result.get("reason", "Not executed or provider failed"),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+
+        # Never score an unverified provider response as completed empirical work.
+        # Mock fixtures intentionally have no real usage counters.
+        if provider_name != "mock" and (
+            run_result.get("status") != "COMPLETED_REAL"
+            or not all(isinstance(run_result.get(key), int)
+                       and not isinstance(run_result.get(key), bool)
+                       and run_result[key] >= 0
+                       for key in ("input_tokens", "output_tokens"))
+        ):
+            return {
+                "task_id": task_id, "task_name": task["name"],
+                "condition": condition, "provider": provider_name,
+                "model": model, "repetition": repetition,
+                "status": "FAILED_UNVERIFIABLE_METRICS",
+                "success": False, "synthetic": False,
+                "input_tokens": None, "output_tokens": None,
+                "regressions": None, "safety_violations": None,
+                "reason": "Provider reported no complete, valid token usage/status; evaluation withheld",
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
 
@@ -93,10 +116,10 @@ def run_benchmark_run(
             "regressions": regressions,
             "safety_violations": safety_violations,
             "notes": notes,
-            "input_tokens": run_result.get("input_tokens", 0),
-            "output_tokens": run_result.get("output_tokens", 0),
+            "input_tokens": run_result.get("input_tokens"),
+            "output_tokens": run_result.get("output_tokens"),
             "wall_clock_seconds": run_result.get("wall_clock_seconds", 0.0),
-            "tool_calls": run_result.get("tool_calls", 0),
+            "tool_calls": run_result.get("tool_calls"),
             "evidence_produced": run_result.get("evidence_produced", False),
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }

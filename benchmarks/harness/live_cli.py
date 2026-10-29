@@ -33,6 +33,15 @@ def _num(value):
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
+def _paired_usage(input_value, output_value):
+    """Require both provider-reported token counters; do not invent zeros."""
+    input_tokens = _num(input_value)
+    output_tokens = _num(output_value)
+    if input_tokens is None or output_tokens is None:
+        return None
+    return input_tokens, output_tokens
+
+
 def parse_usage(name, output):
     try:
         if name == "codex":
@@ -45,7 +54,7 @@ def parse_usage(name, output):
             if last is None:
                 return None
             u = last.get("usage") or {}
-            return _num(u.get("input_tokens")), _num(u.get("output_tokens"))
+            return _paired_usage(u.get("input_tokens"), u.get("output_tokens"))
         result = json.loads(output)
         if not isinstance(result, dict) or result.get("error") or result.get("is_error"):
             return None
@@ -53,15 +62,15 @@ def parse_usage(name, output):
         if not isinstance(u, dict):
             return None
         if name == "claude":
-            return _num(u.get("input_tokens")), _num(u.get("output_tokens"))
-        return (_num(u.get("inputTokens", u.get("totalInputTokens"))),
-                _num(u.get("outputTokens", u.get("totalOutputTokens"))))
+            return _paired_usage(u.get("input_tokens"), u.get("output_tokens"))
+        return _paired_usage(u.get("inputTokens", u.get("totalInputTokens")),
+                             u.get("outputTokens", u.get("totalOutputTokens")))
     except (ValueError, AttributeError, TypeError):
         return None
 
 
 def execute_live(task, condition, workspace, name, model):
-    if name not in ("codex", "claude", "gemini") or not _VALID_MODEL.fullmatch(model):
+    if name not in ("codex", "claude", "gemini") or not isinstance(model, str) or not _VALID_MODEL.fullmatch(model):
         return {"status": "NOT_EXECUTED_INVALID_CONFIGURATION", "reason": "Unsupported provider/model"}
     binary = shutil.which(name)
     if not binary:
