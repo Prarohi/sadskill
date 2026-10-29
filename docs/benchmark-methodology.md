@@ -1,4 +1,4 @@
-# sadskill Benchmark Methodology (v0.3.0)
+# Sadskill benchmark methodology (deterministic vs live evidence)
 
 This page separates repository checks from actual coding-agent evaluations. Passing this repository's deterministic checks is not evidence of agent task success or superiority.
 
