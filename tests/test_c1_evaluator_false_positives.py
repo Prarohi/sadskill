@@ -86,6 +86,21 @@ CREATE POLICY tenant_isolation ON documents USING (true) WITH CHECK (true);
 """,
         })
 
+    def test_c1_06_policy_hardcoded_to_one_tenant_is_rejected(self):
+        self.assert_rejected("C1-06", {
+            "migrations/001_rls.sql": """CREATE TABLE documents (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  content text NOT NULL
+);
+ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_a_only ON documents
+  USING (tenant_id = '10000000-0000-0000-0000-000000000001'::UUID)
+  WITH CHECK (tenant_id = '10000000-0000-0000-0000-000000000001'::UUID);
+""",
+        })
+
     def test_c1_07_empty_migration_files_do_not_pass(self):
         self.assert_rejected("C1-07", {
             "migrations/01_expand_up.sql": "-- empty\n",

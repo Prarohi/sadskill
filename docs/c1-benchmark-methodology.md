@@ -86,6 +86,13 @@ read-only-root container. All capabilities are dropped except `CHOWN`,
 `SETUID`, and `SETGID` required by the pinned image entrypoint; cleanup targets
 only the container created by that grader invocation.
 
+The benchmark-only GitHub Actions workflow runs on an ephemeral hosted worker
+with only `contents: read` permissions. It sets
+`SADSKILL_CI_CHROMIUM_NO_SANDBOX=1` because that worker does not expose the
+Linux user namespaces Chromium's own sandbox needs. This compatibility setting
+is not enabled for ordinary local runs; local Chromium keeps its browser
+sandbox enabled.
+
 These are stronger deterministic task graders, not proof that an agent is
 generally superior. Run the candidate task code only inside the disposable
 external environment described below; CLI sandbox flags alone do not contain

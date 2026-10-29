@@ -140,6 +140,12 @@ def _run_chromium(workspace: Path, html: str, *, viewport=(375, 812)):
             "--dump-dom",
             html_path.as_uri(),
         ]
+        # GitHub-hosted Actions workers are already disposable VMs and may
+        # disable the user-namespace features required by Chromium's own
+        # sandbox. Keep the browser sandbox enabled for ordinary local runs;
+        # the CI workflow opts into this narrowly scoped compatibility mode.
+        if os.environ.get("SADSKILL_CI_CHROMIUM_NO_SANDBOX") == "1":
+            command.insert(1, "--no-sandbox")
         try:
             process = subprocess.Popen(
                 command,
@@ -445,6 +451,13 @@ INSERT INTO public.documents (id, tenant_id, content) VALUES
         )
         if visible_a != "1":
             return _failed(f"Tenant A should see only its row (observed {visible_a or error})")
+        visible_b, error = _sql_value(
+            sql,
+            f"BEGIN; SET LOCAL sadskill.tenant_id = '{_TENANT_B}'; SET LOCAL app.current_tenant_id = '{_TENANT_B}'; SELECT count(*) FROM public.documents; ROLLBACK;",
+            role="sadskill_client",
+        )
+        if visible_b != "1":
+            return _failed(f"Tenant B should see only its row (observed {visible_b or error})")
         cross_id, error = _sql_value(
             sql,
             f"BEGIN; SET LOCAL sadskill.tenant_id = '{_TENANT_A}'; SET LOCAL app.current_tenant_id = '{_TENANT_A}'; SELECT count(*) FROM public.documents WHERE id = '{_DOC_B}'; ROLLBACK;",
@@ -460,6 +473,14 @@ INSERT INTO public.documents (id, tenant_id, content) VALUES
         )
         if own_insert.returncode or "20000000-0000-0000-0000-000000000003" not in own_insert.stdout:
             return _failed(f"Tenant A's own insert was not permitted: {_short_output(own_insert)}")
+        own_insert_b = client_query(
+            f"BEGIN; SET LOCAL sadskill.tenant_id = '{_TENANT_B}'; SET LOCAL app.current_tenant_id = '{_TENANT_B}'; "
+            f"INSERT INTO public.documents (id, tenant_id, content) VALUES "
+            f"('20000000-0000-0000-0000-000000000005', '{_TENANT_B}', 'tenant-b own insert') "
+            "RETURNING id; COMMIT;"
+        )
+        if own_insert_b.returncode or "20000000-0000-0000-0000-000000000005" not in own_insert_b.stdout:
+            return _failed(f"Tenant B's own insert was not permitted: {_short_output(own_insert_b)}")
         cross_insert = client_query(
             f"BEGIN; SET LOCAL sadskill.tenant_id = '{_TENANT_A}'; SET LOCAL app.current_tenant_id = '{_TENANT_A}'; "
             f"INSERT INTO public.documents (id, tenant_id, content) VALUES "
@@ -493,7 +514,7 @@ INSERT INTO public.documents (id, tenant_id, content) VALUES
         own_remaining, error = _sql_value(sql, f"SELECT count(*) FROM public.documents WHERE id = '{_DOC_A}';")
         if own_remaining != "0":
             return _failed(f"Tenant A's own row was not deleted (observed {own_remaining or error})")
-    return _passed("Native PostgreSQL verified default-deny RLS, tenant reads, own insert/delete, and cross-tenant INSERT/UPDATE/DELETE denial")
+    return _passed("Native PostgreSQL verified default-deny RLS, both tenants' own reads/inserts, tenant A own delete, and cross-tenant INSERT/UPDATE/DELETE denial")
 
 
 def _column_value(sql, statement):

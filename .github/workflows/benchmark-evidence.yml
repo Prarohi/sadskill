@@ -44,6 +44,7 @@ jobs:
       - name: Run full Python regression suite
         env:
           SADSKILL_REQUIRE_C1_GRADERS: '1'
+          SADSKILL_CI_CHROMIUM_NO_SANDBOX: '1'
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
       - name: Run skill-contract regression suite
         run: python3 -m unittest discover -s tests/skill-contract -p 'test_*.py' -v
