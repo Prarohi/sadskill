@@ -35,6 +35,7 @@ class CLIMemoryWorkflowContractTests(unittest.TestCase):
     def test_windows_companion_memory_is_explicitly_unsupported_and_non_mutating(self):
         self.assertIn("Native Windows memory CLI fails closed", self.workflow)
         self.assertIn("runs-on: windows-2025", self.workflow)
+        self.assertIn("scripts/sad_memory.py append-event --type custom", self.workflow)
         self.assertIn("unavailable on this platform", self.workflow)
         self.assertIn("Unsupported Windows memory CLI created a project memory directory", self.workflow)
 

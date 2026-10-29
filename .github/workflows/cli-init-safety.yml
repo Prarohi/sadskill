@@ -68,7 +68,7 @@ jobs:
         run: |
           $project = Join-Path $env:RUNNER_TEMP 'sadskill-memory-unsupported-smoke'
           New-Item -ItemType Directory -Force -Path $project | Out-Null
-          $output = & python scripts/sad_memory.py append --root $project --prefix windows-smoke --count 1 2>&1
+          $output = & python scripts/sad_memory.py append-event --type custom --payload '{"title":"windows smoke"}' --project-root $project 2>&1
           $exitCode = $LASTEXITCODE
           if ($exitCode -eq 0) { throw 'Windows memory CLI unexpectedly succeeded' }
           if (($output -join "`n") -notmatch 'safe project-memory .* unavailable on this platform') {
