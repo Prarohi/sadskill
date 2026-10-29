@@ -187,27 +187,24 @@ pre {
 
 
 class RealAgentProvider(BaseProvider):
-    """Real agent provider with honest authentication checks."""
-    def __init__(self, provider_name: str = "codex"):
-        super().__init__(provider_name)
-        self.api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("CODEX_API_KEY")
+    """Real execution requires both explicit opt-in and external isolation."""
 
-    def execute(self, task: dict, condition: str, workspace: Path) -> dict:
-        if not self.api_key:
-            return {
-                "task_id": task["id"],
-                "condition": condition,
-                "provider": self.name,
-                "status": "NOT_EXECUTED_NO_AUTH",
-                "reason": "Missing provider API key (OPENAI_API_KEY/CODEX_API_KEY).",
-                "wall_clock_seconds": 0.0,
-            }
-        # If API key is present in environment, actual execution can run
-        return {
-            "task_id": task["id"],
-            "condition": condition,
-            "provider": self.name,
-            "status": "NOT_EXECUTED_NOT_IMPLEMENTED",
-            "reason": "No real model execution adapter has been implemented; credentials alone do not run an agent.",
-            "wall_clock_seconds": 0.0,
-        }
+    def __init__(self, provider_name="codex", *, live=False, isolated=False, model=None):
+        super().__init__(provider_name)
+        self.live = live
+        self.isolated = isolated
+        self.model = model
+
+    def execute(self, task, condition, workspace):
+        common = {"task_id": task["id"], "provider": self.name, "condition": condition}
+        if not self.live:
+            return {**common, "status": "NOT_EXECUTED_DISABLED",
+                    "reason": "Real provider disabled unless --live is specified"}
+        if not self.isolated:
+            return {**common, "status": "NOT_EXECUTED_ISOLATION_REQUIRED",
+                    "reason": "Run the entire harness in an external disposable sandbox"}
+        if not self.model:
+            return {**common, "status": "NOT_EXECUTED_MODEL_REQUIRED",
+                    "reason": "Supply an exact model ID via --model"}
+        from benchmarks.harness.live_cli import execute_live
+        return execute_live(task, condition, workspace, self.name, self.model)

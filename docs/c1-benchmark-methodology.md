@@ -79,3 +79,30 @@ python3 benchmarks/harness/runner.py \
   --repetitions 1 \
   --output .sad/benchmark-codex.jsonl
 ```
+
+## Optional live CLI benchmarking (not executed in CI)
+
+Real Codex, Claude Code, and Gemini CLI adapters exist, but they are disabled by default.
+Only invoke the entire harness and its graders inside an **external disposable VM/container**
+with bounded access and no sensitive host files. CLI sandbox flags alone do not
+contain arbitrary code executed by Python graders. The confirmation flag is a
+user assertion, not technical proof of a sandbox. Real runs may use paid credits.
+
+Example commands inside that disposable environment, with each CLI pre-installed
+and authenticated through its own official login:
+
+```bash
+python3 benchmarks/harness/runner.py --provider codex --live --acknowledge-isolated-runner --model EXACT_CODEX_MODEL --task C1-01 --condition all --repetitions 3 --output /tmp/c1-codex.jsonl
+python3 benchmarks/harness/runner.py --provider claude --live --acknowledge-isolated-runner --model EXACT_CLAUDE_MODEL --task C1-01 --condition all --repetitions 3 --output /tmp/c1-claude.jsonl
+python3 benchmarks/harness/runner.py --provider gemini --live --acknowledge-isolated-runner --model EXACT_GEMINI_MODEL --task C1-01 --condition all --repetitions 3 --output /tmp/c1-gemini.jsonl
+```
+
+The harness reports `COMPLETED_REAL` only for successful structured CLI execution
+and separately grades the resulting code. Missing metrics remain null, not
+zero. Missing CLI/auth, nonzero exit, invalid JSON, or timeout cannot be counted
+as success. Prompts, provider, model and prompt SHA-256 are recorded; raw
+transcripts and stderr are not saved in JSONL. No actual model trials were
+performed during development of these adapters. The competitor condition is
+only a generic structured baseline, not a named competing skill product.
+Conclusive comparisons still require independently verified paired trials,
+version pinning, budget/variance analysis and redacted raw evidence.

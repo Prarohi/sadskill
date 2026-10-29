@@ -37,6 +37,7 @@ def run_benchmark_run(
     condition: str,
     provider_name: str,
     repetition: int,
+    *, live=False, isolated=False, model=None,
 ) -> dict:
     task = C1_TASKS.get(task_id)
     if not task:
@@ -45,7 +46,7 @@ def run_benchmark_run(
     if provider_name == "mock":
         provider = MockProvider()
     else:
-        provider = RealAgentProvider(provider_name)
+        provider = RealAgentProvider(provider_name, live=live, isolated=isolated, model=model)
 
     evaluator = EVALUATORS.get(task_id)
     if not evaluator:
@@ -57,7 +58,7 @@ def run_benchmark_run(
 
         run_result = provider.execute(task, condition, workspace)
 
-        if run_result.get("status", "").startswith("NOT_EXECUTED"):
+        if run_result.get("status", "").startswith(("NOT_EXECUTED", "FAILED_")):
             return {
                 "task_id": task_id,
                 "task_name": task["name"],
@@ -66,6 +67,9 @@ def run_benchmark_run(
                 "repetition": repetition,
                 "status": run_result["status"],
                 "success": False,
+                "synthetic": provider_name == "mock",
+                "model": model,
+                "prompt_sha256": run_result.get("prompt_sha256"),
                 "regressions": 0,
                 "safety_violations": 0,
                 "reason": run_result.get("reason", "No authentication"),
@@ -80,6 +84,8 @@ def run_benchmark_run(
             "category": task["category"],
             "condition": condition,
             "provider": provider_name,
+            "model": model,
+            "prompt_sha256": run_result.get("prompt_sha256"),
             "repetition": repetition,
             "status": run_result.get("status", "COMPLETED"),
             "synthetic": provider_name == "mock",
@@ -104,8 +110,16 @@ def main():
     parser.add_argument("--task", default="C1-01", help="Task ID (e.g. C1-01) or 'all'")
     parser.add_argument("--repetitions", type=int, default=1, help="Repetitions per task")
     parser.add_argument("--output", default=None, help="JSONL output path")
+    parser.add_argument("--live", action="store_true", help="Opt in to authenticated, potentially billable real agent execution")
+    parser.add_argument("--acknowledge-isolated-runner", action="store_true", help="Assert the entire harness and graders are in a disposable external VM/container")
+    parser.add_argument("--model", default=None, help="Exact model ID required for live comparisons")
 
     args = parser.parse_args()
+    if args.live and (args.provider == "mock" or not args.acknowledge_isolated_runner or not args.model):
+        parser.error("--live requires a real provider, --model and --acknowledge-isolated-runner")
+    if args.acknowledge_isolated_runner and not args.live:
+        parser.error("--acknowledge-isolated-runner requires --live")
+
     if args.repetitions < 1:
         parser.error("--repetitions must be at least 1")
 
@@ -135,10 +149,12 @@ def main():
         for condition in conditions:
             for rep in range(1, args.repetitions + 1):
                 total_runs += 1
-                res = run_benchmark_run(tid, condition, args.provider, rep)
+                res = run_benchmark_run(tid, condition, args.provider, rep,
+                                        live=args.live, isolated=args.acknowledge_isolated_runner,
+                                        model=args.model)
                 results.append(res)
 
-                if res["status"].startswith("NOT_EXECUTED"):
+                if res["status"].startswith(("NOT_EXECUTED", "FAILED_")):
                     status_mark = "⚠️ NOT EXECUTED"
                 elif res.get("synthetic"):
                     status_mark = "🧪 MOCK PASS" if res.get("success") else "🧪 MOCK FAIL"
@@ -162,7 +178,7 @@ def main():
 
     # A missing live adapter is not a passing benchmark. Mock fixture tests can
     # pass their own harness-health check, but must never be reported as model runs.
-    not_executed = any(r["status"].startswith("NOT_EXECUTED") for r in results)
+    not_executed = any(r["status"].startswith(("NOT_EXECUTED", "FAILED_")) for r in results)
     if args.provider == "mock":
         print("SIMULATED FIXTURE CHECK ONLY: no AI model invoked; no token/cost/quality advantage measured.")
     if not_executed:
