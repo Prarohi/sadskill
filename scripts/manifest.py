@@ -89,6 +89,16 @@ def get_allowed_roots(target_dir=None):
     return roots
 
 
+_CURSOR_AGENTS = {"cursor_skill", "cursor_rule"}
+
+
+def _entry_allowed_roots(entry, target_dir, default_roots):
+    """Scope Cursor mutations to this invocation's explicit workspace only."""
+    if entry.get("agent") in _CURSOR_AGENTS:
+        return [Path(target_dir).resolve()] if target_dir else []
+    return default_roots
+
+
 def is_path_contained_in_roots(path: Path, allowed_roots) -> bool:
     """Ensure path is strictly within one of the allowed roots."""
     try:
@@ -101,14 +111,9 @@ def is_path_contained_in_roots(path: Path, allowed_roots) -> bool:
                 if str(resolved) == str(root) or str(resolved).startswith(str(root) + os.sep):
                     return True
 
-        # Allow Cursor workspace artifacts strictly within a verified .cursor directory
-        parts = resolved.parts
-        if ".cursor" in parts:
-            idx = parts.index(".cursor")
-            rel_cursor = parts[idx:]
-            # Exact rule file or exact sadskill skill folder within .cursor/skills/
-            if rel_cursor == (".cursor", "rules", "sadskill.mdc") or rel_cursor[:3] == (".cursor", "skills", "sadskill"):
-                return True
+        # Cursor workspace paths are allowed only through an explicit target_dir
+        # root above. A destination or target_root stored in the manifest must not
+        # expand the current command's deletion boundary.
         return False
     except Exception:
         return False
@@ -314,6 +319,12 @@ def _remove_path(path: Path):
 def record_entry(manifest_path: Path, agent: str, destination: str, backup_path: str = "", target_dir: str = ""):
     allowed_roots = get_allowed_roots(target_dir)
     dest_p = Path(destination).resolve()
+    if agent in _CURSOR_AGENTS:
+        if not target_dir:
+            raise ValueError("Cursor artifacts require an explicit target workspace")
+        allowed_roots = [Path(target_dir).resolve()]
+        if dest_p == allowed_roots[0]:
+            raise ValueError("Cursor artifact destination must be inside the target workspace")
     if not is_path_contained_in_roots(dest_p, allowed_roots):
         raise ValueError(f"Destination path traverses outside allowed roots: {destination}")
 
@@ -425,7 +436,8 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
         dest_p = Path(dest_str).resolve()
         bak_p = Path(bak_str).resolve()
 
-        if not is_path_contained_in_roots(dest_p, allowed_roots) or not is_path_contained_in_roots(bak_p, allowed_roots):
+        entry_roots = _entry_allowed_roots(entry, target_dir, allowed_roots)
+        if not is_path_contained_in_roots(dest_p, entry_roots) or not is_path_contained_in_roots(bak_p, entry_roots):
             print(f"   [WARN] Skipping restore for path outside allowed roots: {dest_p} / {bak_p}")
             continue
 
@@ -520,7 +532,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
             continue
         dest_p = Path(dest_str).resolve()
 
-        if not is_path_contained_in_roots(dest_p, allowed_roots):
+        entry_roots = _entry_allowed_roots(entry, target_dir, allowed_roots)
+        if not is_path_contained_in_roots(dest_p, entry_roots):
             print(f"   [WARN] Skipping removal for destination outside allowed roots: {dest_p}")
             continue
 
@@ -552,7 +565,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
             if not bak_str:
                 continue
             bak_p = Path(bak_str).resolve()
-            if not is_path_contained_in_roots(bak_p, allowed_roots):
+            entry_roots = _entry_allowed_roots(entry, target_dir, allowed_roots)
+            if not is_path_contained_in_roots(bak_p, entry_roots):
                 continue
             if not bak_p.exists() or ".bak." not in bak_p.name:
                 continue
