@@ -6,6 +6,7 @@ mounts, and fail-closed behavior when Bubblewrap is unavailable.
 
 from pathlib import Path
 import os
+import pwd
 import shlex
 import shutil
 import subprocess
@@ -22,7 +23,7 @@ class SandboxTests(unittest.TestCase):
             self.skipTest("bubblewrap ('bwrap') binary not available on host system")
         self.tmp = tempfile.TemporaryDirectory()
         self.proj = Path(self.tmp.name)
-        self.home_tmp = tempfile.TemporaryDirectory(prefix="sadskill-sandbox-home-", dir="/var/tmp")
+        self.home_tmp = tempfile.TemporaryDirectory(prefix="sadskill-sandbox-home-")
         self.worktree_tmp = None
         self.host_home = Path(self.home_tmp.name)
         (self.host_home / "private-canary").write_text("synthetic test data", encoding="utf-8")
@@ -42,7 +43,7 @@ class SandboxTests(unittest.TestCase):
              "commit", "--allow-empty", "-m", "sandbox base"],
             cwd=str(self.proj), env=self.env, capture_output=True, check=True,
         )
-        self.worktree_tmp = tempfile.TemporaryDirectory(prefix="sadskill-linked-worktree-", dir="/var/tmp")
+        self.worktree_tmp = tempfile.TemporaryDirectory(prefix="sadskill-linked-worktree-")
         worktree = Path(self.worktree_tmp.name) / "checkout"
         subprocess.run(
             ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
@@ -173,7 +174,7 @@ class SandboxWritableRootTests(unittest.TestCase):
         fake.chmod(0o755)
         self.env = dict(os.environ)
         self.env["PATH"] = str(fake_dir) + os.pathsep + self.env.get("PATH", "")
-        self.home_tmp = tempfile.TemporaryDirectory(prefix="sadskill-sandbox-home-", dir="/var/tmp")
+        self.home_tmp = tempfile.TemporaryDirectory(prefix="sadskill-sandbox-home-")
         self.env["HOME"] = self.home_tmp.name
         self.env["BWRAP_ARGS_CAPTURE"] = str(self.capture)
 
@@ -200,8 +201,73 @@ class SandboxWritableRootTests(unittest.TestCase):
         self.env["HOME"] = str(self.root)
         result = self.sandbox(self.root)
         self.assertEqual(result.returncode, 78, result.stderr)
-        self.assertIn("entire HOME", result.stderr)
+        self.assertIn("entire user HOME", result.stderr)
         self.assertFalse(self.capture.exists())
+
+    def test_overridden_home_cannot_make_real_account_home_writable(self):
+        account_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        fake_home = self.root / "fake-home"
+        fake_home.mkdir()
+        self.env["HOME"] = str(fake_home)
+        result = self.sandbox(account_home)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("entire user HOME", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_sensitive_home_directory_is_refused_as_workspace(self):
+        sensitive = self.root / "unlisted-user" / ".ssh"
+        sensitive.mkdir(parents=True)
+        result = self.sandbox(sensitive)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("sensitive HOME path", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_sensitive_descendant_at_arbitrary_depth_is_refused(self):
+        project = self.root / "deep-project"
+        sensitive = project.joinpath(*(["nested"] * 9), ".aws")
+        sensitive.mkdir(parents=True)
+        result = self.sandbox(project)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("sensitive credential paths", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_project_path_symlinks_are_refused(self):
+        target = self.root / "ordinary-target"
+        target.mkdir()
+        alias = self.root / "project-alias"
+        alias.symlink_to(target, target_is_directory=True)
+        result = self.sandbox(alias)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("symlinked project path", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_default_logical_working_directory_symlink_is_refused(self):
+        target = self.root / "ordinary-working-directory"
+        target.mkdir()
+        alias = self.root / "working-directory-alias"
+        alias.symlink_to(target, target_is_directory=True)
+        env = dict(self.env, PWD=str(alias))
+        result = subprocess.run(
+            ["/bin/bash", str(SANDBOX_SH), "--", "/bin/true"],
+            cwd=str(target), env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("symlinked project path", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_root_identity_helper_classifies_only_uid_zero_as_root(self):
+        helper = Path(__file__).resolve().parents[1] / "scripts/sandbox-paths.sh"
+        script = 'source "$1"; sadskill_is_root "$2"'
+        root_user = subprocess.run(
+            ["bash", "-c", script, "sandbox-test", str(helper), "0"],
+            env=self.env, capture_output=True, text=True,
+        )
+        regular_user = subprocess.run(
+            ["bash", "-c", script, "sandbox-test", str(helper), "1000"],
+            env=self.env, capture_output=True, text=True,
+        )
+        self.assertEqual(root_user.returncode, 0)
+        self.assertEqual(regular_user.returncode, 1)
 
     def test_symlink_to_root_is_refused(self):
         alias = self.root / "root-link"
@@ -215,13 +281,40 @@ class SandboxWritableRootTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--bind", self.capture.read_text())
 
+    def test_process_namespace_is_isolated_before_proc_is_mounted(self):
+        result = self.sandbox(self.workspace)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = self.capture.read_text().splitlines()
+        self.assertIn("--unshare-pid", arguments)
+        self.assertLess(arguments.index("--unshare-pid"), arguments.index("--proc"))
+
+    def test_runtime_socket_roots_are_hidden(self):
+        result = self.sandbox(self.workspace)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        arguments = self.capture.read_text().splitlines()
+        tmpfs_targets = {
+            arguments[index + 1]
+            for index, option in enumerate(arguments[:-1])
+            if option == "--tmpfs"
+        }
+        expected = {
+            str(Path(path).resolve())
+            for path in ("/run", "/var/run")
+            if Path(path).is_dir()
+        }
+        self.assertTrue(expected <= tmpfs_targets)
+
     def test_home_and_environment_are_isolated(self):
         result = self.sandbox(self.workspace)
         self.assertEqual(result.returncode, 0, result.stderr)
         arguments = self.capture.read_text().splitlines()
         self.assertIn("--clearenv", arguments)
         self.assertIn("--tmpfs", arguments)
-        self.assertIn(self.env["HOME"], arguments)
+        self.assertIn("/tmp", arguments)
+        self.assertNotIn(self.env["HOME"], arguments)
+        account_home = str(Path(pwd.getpwuid(os.getuid()).pw_dir).resolve())
+        if account_home != "/tmp" and not account_home.startswith("/tmp/"):
+            self.assertIn(account_home, arguments)
         home_index = arguments.index("--setenv")
         self.assertEqual(arguments[home_index + 1], "PATH")
         self.assertEqual(arguments[home_index + 3], "--setenv")

@@ -89,6 +89,16 @@ def get_allowed_roots(target_dir=None):
     return roots
 
 
+_CURSOR_AGENTS = {"cursor_skill", "cursor_rule"}
+
+
+def _entry_allowed_roots(entry, target_dir, default_roots):
+    """Scope Cursor mutations to this invocation's explicit workspace only."""
+    if entry.get("agent") in _CURSOR_AGENTS:
+        return [Path(target_dir).resolve()] if target_dir else []
+    return default_roots
+
+
 def is_path_contained_in_roots(path: Path, allowed_roots) -> bool:
     """Ensure path is strictly within one of the allowed roots."""
     try:
@@ -101,9 +111,9 @@ def is_path_contained_in_roots(path: Path, allowed_roots) -> bool:
                 if str(resolved) == str(root) or str(resolved).startswith(str(root) + os.sep):
                     return True
 
-        # No global .cursor substring exception: a path such as
-        # /tmp/unrelated/.cursor/rules/sadskill.mdc must not be authorized.
-        # The caller must explicitly include its selected target_dir in roots.
+        # Cursor workspace paths are allowed only through an explicit target_dir
+        # root above. A destination or target_root stored in the manifest must not
+        # expand the current command's deletion boundary.
         return False
     except Exception:
         return False
@@ -309,6 +319,12 @@ def _remove_path(path: Path):
 def record_entry(manifest_path: Path, agent: str, destination: str, backup_path: str = "", target_dir: str = ""):
     allowed_roots = get_allowed_roots(target_dir)
     dest_p = Path(destination).resolve()
+    if agent in _CURSOR_AGENTS:
+        if not target_dir:
+            raise ValueError("Cursor artifacts require an explicit target workspace")
+        allowed_roots = [Path(target_dir).resolve()]
+        if dest_p == allowed_roots[0]:
+            raise ValueError("Cursor artifact destination must be inside the target workspace")
     if not is_path_contained_in_roots(dest_p, allowed_roots):
         raise ValueError(f"Destination path traverses outside allowed roots: {destination}")
 
@@ -397,6 +413,47 @@ def record_entry(manifest_path: Path, agent: str, destination: str, backup_path:
     print(f"   [MANIFEST] Recorded {agent} -> {dest_p}")
 
 
+def _archive_forced_destination(dest_p: Path, entry: dict, manifest_path: Path,
+                                data: dict, allowed_roots, dry_run: bool = False):
+    """Move modified destination content to a recorded sibling before restore."""
+    current_hash = compute_sha256(dest_p)
+    installed_hash = entry.get("content_hash", "")
+    if installed_hash and current_hash == installed_hash:
+        return
+
+    stamp = f"{time.time_ns()}_{os.getpid()}"
+    archive = dest_p.with_name(f"{dest_p.name}.bak.{stamp}")
+    suffix = 0
+    while archive.exists() or archive.is_symlink():
+        suffix += 1
+        archive = dest_p.with_name(f"{dest_p.name}.bak.{stamp}_{suffix}")
+    if not is_path_contained_in_roots(archive, allowed_roots):
+        raise ManifestError(f"conflict backup is outside allowed roots: {archive}")
+    if dry_run:
+        print(f"   [DRY-RUN] Would preserve modified destination at: {archive}")
+        return
+
+    # The backup lives beside the destination, so rename preserves its exact
+    # bytes/tree atomically and never deletes user data to make room for restore.
+    try:
+        os.rename(dest_p, archive)
+    except OSError as exc:
+        raise ManifestError(f"cannot preserve modified destination {dest_p}: {exc}") from exc
+
+    archive_hash = compute_sha256(archive)
+    conflicts = entry.get("conflict_backups")
+    if not isinstance(conflicts, list):
+        conflicts = []
+    conflicts.append({"path": str(archive), "hash": archive_hash, "created_at": _now_iso()})
+    entry["conflict_backups"] = conflicts
+    # Persist provenance before replacing the destination with the older backup.
+    # If persistence fails, the user's bytes remain in the sibling archive.
+    save_manifest_atomic(manifest_path, data)
+    print(f"   [PRESERVE-MODIFIED] Archived user content at: {archive}")
+    if not archive_hash or archive_hash != current_hash:
+        raise ManifestError(f"conflict backup verification failed for {dest_p}")
+
+
 def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = False, dry_run: bool = False):
     """Restore backed up files without deleting them afterwards."""
     if not manifest_path.exists():
@@ -420,7 +477,8 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
         dest_p = Path(dest_str).resolve()
         bak_p = Path(bak_str).resolve()
 
-        if not is_path_contained_in_roots(dest_p, allowed_roots) or not is_path_contained_in_roots(bak_p, allowed_roots):
+        entry_roots = _entry_allowed_roots(entry, target_dir, allowed_roots)
+        if not is_path_contained_in_roots(dest_p, entry_roots) or not is_path_contained_in_roots(bak_p, entry_roots):
             print(f"   [WARN] Skipping restore for path outside allowed roots: {dest_p} / {bak_p}")
             continue
 
@@ -434,29 +492,18 @@ def perform_restore(manifest_path: Path, target_dir: str = "", force: bool = Fal
             continue
 
         if dest_p.exists():
-            # Never silently discard user edits, including when --force is used.
+            # Safety check: if user modified the installed file since installation, preserve it unless forced
             installed_hash = entry.get("content_hash")
             curr_hash = compute_sha256(dest_p)
-            modified = bool(curr_hash) and curr_hash != installed_hash
-            if modified and not force:
+            if installed_hash and curr_hash and curr_hash != installed_hash and not force:
                 print(f"   [CONFLICT] Destination modified since install: {dest_p}")
                 print(f"   [PRESERVE-MODIFIED] Refusing to overwrite modified file without --force. Backup preserved at {bak_p}")
                 had_conflict = True
                 continue
-            if modified and force:
-                conflict_p = dest_p.with_name(dest_p.name + f".bak.conflict.{time.time_ns()}.{os.getpid()}")
-                if conflict_p.exists() or conflict_p.is_symlink():
-                    raise ManifestError(f"Refusing to overwrite an existing conflict archive: {conflict_p}")
-                print(f"   [PRESERVE-USER-EDITS] Archiving modified destination before force restore: {conflict_p}")
-                if not dry_run:
-                    shutil.move(str(dest_p), str(conflict_p))
-                    conflicts = entry.get("conflict_backups")
-                    if not isinstance(conflicts, list):
-                        conflicts = []
-                    conflicts.append({"path": str(conflict_p), "hash": curr_hash, "created_at": _now_iso()})
-                    entry["conflict_backups"] = conflicts
-                    # Persist the ownership ledger before proceeding to restoration.
-                    save_manifest_atomic(manifest_path, data)
+            if force and (not installed_hash or not curr_hash or curr_hash != installed_hash):
+                _archive_forced_destination(
+                    dest_p, entry, manifest_path, data, entry_roots, dry_run=dry_run
+                )
 
         print(f"   [RESTORE] Restoring {dest_p} from {bak_p}")
         if not dry_run:
@@ -530,7 +577,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
             continue
         dest_p = Path(dest_str).resolve()
 
-        if not is_path_contained_in_roots(dest_p, allowed_roots):
+        entry_roots = _entry_allowed_roots(entry, target_dir, allowed_roots)
+        if not is_path_contained_in_roots(dest_p, entry_roots):
             print(f"   [WARN] Skipping removal for destination outside allowed roots: {dest_p}")
             continue
 
@@ -562,7 +610,8 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
             if not bak_str:
                 continue
             bak_p = Path(bak_str).resolve()
-            if not is_path_contained_in_roots(bak_p, allowed_roots):
+            entry_roots = _entry_allowed_roots(entry, target_dir, allowed_roots)
+            if not is_path_contained_in_roots(bak_p, entry_roots):
                 continue
             if not bak_p.exists() or ".bak." not in bak_p.name:
                 continue
@@ -587,7 +636,6 @@ def perform_uninstall(manifest_path: Path, target_dir: str = "", restore_previou
         # becomes an untracked orphan.
         def _resolved(entry):
             if entry.get("restored"):
-                # Keep ledger entries while user-authored conflict archives survive.
                 return not _entry_has_preserved_content(entry)
             destination = entry.get("destination", "")
             if destination and Path(destination).exists():
