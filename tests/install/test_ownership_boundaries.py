@@ -59,6 +59,72 @@ class OwnershipBoundaryTests(SandboxCase):
                 self.assertEqual(Path(dest).read_text(), "USER_FILE")
                 self.assertEqual(Path(backup).read_text(), "USER_BACKUP")
 
+    def test_cursor_manifest_cannot_expand_requested_uninstall_target(self):
+        victim_workspace = Path(self.base) / "cursor-victim"
+        other_workspace = Path(self.base) / "other-workspace"
+        destination = victim_workspace / ".cursor/skills/sadskill"
+        destination.mkdir(parents=True)
+        sentinel = destination / "USER_OWNED_CONTENT.txt"
+        sentinel.write_text("keep this user file")
+
+        recorded = self.run_manifest(
+            "record", "--manifest", self.manifest_path(),
+            "--agent", "cursor_skill", "--destination", str(destination),
+            "--target", str(victim_workspace),
+        )
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+
+        for args in (
+            ("--target", str(other_workspace)),
+            (),
+        ):
+            with self.subTest(args=args):
+                result = self.run_uninstall(*args, "--force")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(sentinel.exists(), result.stdout)
+                self.assertIn("Skipping removal for destination outside allowed roots", result.stdout)
+                self.assertTrue(any(
+                    entry.get("destination") == str(destination)
+                    for entry in self.load_manifest()["entries"]
+                ))
+
+    def test_cursor_manifest_cannot_expand_into_home_agent_roots(self):
+        victim_workspace = Path(self.home) / ".claude/workspace"
+        other_workspace = Path(self.base) / "other-workspace"
+        destination = victim_workspace / ".cursor/skills/sadskill"
+        destination.mkdir(parents=True)
+        sentinel = destination / "USER_OWNED_CONTENT.txt"
+        sentinel.write_text("keep this user file")
+
+        recorded = self.run_manifest(
+            "record", "--manifest", self.manifest_path(),
+            "--agent", "cursor_skill", "--destination", str(destination),
+            "--target", str(victim_workspace),
+        )
+        self.assertEqual(recorded.returncode, 0, recorded.stderr)
+
+        result = self.run_uninstall("--target", str(other_workspace), "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(sentinel.exists(), result.stdout)
+        self.assertIn("Skipping removal for destination outside allowed roots", result.stdout)
+
+    def test_cursor_record_rejects_destination_outside_explicit_target(self):
+        victim_workspace = Path(self.home) / ".claude/workspace"
+        other_workspace = Path(self.base) / "other-workspace"
+        destination = victim_workspace / ".cursor/skills/sadskill"
+        destination.mkdir(parents=True)
+        sentinel = destination / "USER_OWNED_CONTENT.txt"
+        sentinel.write_text("keep this user file")
+
+        recorded = self.run_manifest(
+            "record", "--manifest", self.manifest_path(),
+            "--agent", "cursor_skill", "--destination", str(destination),
+            "--target", str(other_workspace),
+        )
+        self.assertNotEqual(recorded.returncode, 0, recorded.stdout)
+        self.assertTrue(sentinel.exists())
+        self.assertFalse(Path(self.manifest_path()).exists())
+
     def test_manifest_cannot_claim_a_non_sadskill_config_even_with_valid_hash(self):
         config = self.write_file(self.home, ".claude/settings.json", "USER_CONFIG")
         manifest = {"version": "0.3.0", "entries": [{

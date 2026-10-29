@@ -5,6 +5,14 @@
 
 set -euo pipefail
 
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+case "$SCRIPT_PATH" in
+  /*) ;;
+  *) SCRIPT_PATH="$PWD/$SCRIPT_PATH" ;;
+esac
+SCRIPT_DIR="$(cd -- "${SCRIPT_PATH%/*}" && pwd -P)"
+source "${SCRIPT_DIR}/sandbox-paths.sh"
+
 OFFLINE=false
 RO_GIT=true
 ALLOW_UNSANDBOXED=false
@@ -47,13 +55,23 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
+if sadskill_is_root "$EUID"; then
+  echo "ERROR: refusing to run the sandbox with root privileges; use an unprivileged account." >&2
+  exit 78
+fi
+
 if [[ -z "$PROJECT_DIR" ]]; then
-  PROJECT_DIR="$(pwd -P)"
+  # Preserve logical symlink components so the check runs before physical resolution.
+  PROJECT_DIR="$(pwd -L)"
 fi
 
 # Resolve links before mounting; never permit a broad or protected writable root.
 if [[ ! -d "$PROJECT_DIR" ]]; then
   echo "ERROR: missing sandbox project directory: $PROJECT_DIR" >&2
+  exit 78
+fi
+if sadskill_path_has_symlink "$PROJECT_DIR"; then
+  echo "ERROR: refusing a symlinked project path for sandbox containment: $PROJECT_DIR" >&2
   exit 78
 fi
 PROJECT_DIR="$(cd -- "$PROJECT_DIR" && pwd -P)"
@@ -145,7 +163,36 @@ if [[ "$GIT_METADATA_VALID" != "true" && "$GIT_METADATA_ERROR" != "" ]]; then
   fi
 fi
 
-# The current user home is not a safe narrow project workspace.
+# Resolve the real account home independently of caller-controlled HOME.
+# HOME can be overridden; the account database remains the authoritative root.
+ACCOUNT_HOME=""
+PASSWD_ENTRY=""
+for getent_bin in /usr/bin/getent /bin/getent; do
+  if [[ -x "$getent_bin" ]]; then
+    PASSWD_ENTRY="$("$getent_bin" passwd "$EUID" 2>/dev/null || true)"
+    [[ -n "$PASSWD_ENTRY" ]] && break
+  fi
+done
+if [[ -n "$PASSWD_ENTRY" ]]; then
+  IFS=: read -r _ _ _ _ _ ACCOUNT_HOME _ <<< "$PASSWD_ENTRY"
+elif [[ -r /etc/passwd ]]; then
+  while IFS=: read -r _ _ uid _ _ home _; do
+    if [[ "$uid" == "$EUID" ]]; then
+      ACCOUNT_HOME="$home"
+      break
+    fi
+  done < /etc/passwd
+fi
+if [[ -z "$ACCOUNT_HOME" || "$ACCOUNT_HOME" != /* || ! -d "$ACCOUNT_HOME" || ! -x "$ACCOUNT_HOME" ]]; then
+  echo "ERROR: cannot resolve the account HOME; refusing writable sandbox execution." >&2
+  exit 78
+fi
+ACCOUNT_HOME="$(cd -- "$ACCOUNT_HOME" && pwd -P)"
+
+# Include HOME as a second root when the caller set a separate existing path.
+# Both roots are hidden from the sandbox, while only the selected workspace is
+# rebound writable after its parent directories are recreated.
+HOME_ROOTS=("$ACCOUNT_HOME")
 USER_HOME=""
 if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
   USER_HOME="$(cd -- "$HOME" && pwd -P)"
@@ -153,10 +200,42 @@ if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
     echo "ERROR: refusing to sandbox with the filesystem root as HOME." >&2
     exit 78
   fi
-  if [[ "$PROJECT_DIR" == "$USER_HOME" ]]; then
-    echo "ERROR: refusing entire HOME as writable sandbox project: $PROJECT_DIR" >&2
+  seen=false
+  for home_root in "${HOME_ROOTS[@]}"; do
+    [[ "$home_root" == "$USER_HOME" ]] && seen=true
+  done
+  [[ "$seen" == true ]] || HOME_ROOTS+=("$USER_HOME")
+fi
+
+# Refuse any account HOME root as a writable project, even if HOME was
+# redirected and the account has no conventional credential subdirectories.
+for home_root in "${HOME_ROOTS[@]}"; do
+  if [[ "$PROJECT_DIR" == "$home_root" ]]; then
+    echo "ERROR: refusing entire user HOME as writable sandbox project: $PROJECT_DIR" >&2
     exit 78
   fi
+  if sadskill_is_sensitive_home_mount "$PROJECT_DIR" "$home_root"; then
+    echo "ERROR: refusing sensitive HOME path as writable sandbox project: $PROJECT_DIR" >&2
+    exit 78
+  fi
+done
+
+# Overlay only outermost roots so nested HOME overrides do not create a mount
+# below a parent that will subsequently hide that mount.
+MOUNT_HOME_ROOTS=()
+for home_root in "${HOME_ROOTS[@]}"; do
+  covered=false
+  for candidate in "${HOME_ROOTS[@]}"; do
+    if [[ "$candidate" != "$home_root" && "$home_root" == "$candidate/"* ]]; then
+      covered=true
+      break
+    fi
+  done
+  [[ "$covered" == true ]] || MOUNT_HOME_ROOTS+=("$home_root")
+done
+if sadskill_is_sensitive_home_mount "$PROJECT_DIR" "${USER_HOME:-}"; then
+  echo "ERROR: refusing sensitive HOME path as writable sandbox project: $PROJECT_DIR" >&2
+  exit 78
 fi
 case "$PROJECT_DIR" in
   /|/home|/tmp|/var|/mnt|/media|/opt|/workspace|/workspaces|/Users|/etc|/usr|/bin|/sbin|/lib|/lib64|/boot|/dev|/proc|/sys|/run|/root|/snap|/srv)
@@ -168,6 +247,11 @@ case "$PROJECT_DIR" in
     exit 78
     ;;
 esac
+
+if sadskill_has_sensitive_descendant "$PROJECT_DIR"; then
+  echo "ERROR: refusing a project tree that contains sensitive credential paths: $PROJECT_DIR" >&2
+  exit 78
+fi
 
 if ! command -v bwrap >/dev/null 2>&1; then
   if [[ "$ALLOW_UNSANDBOXED" != "true" ]]; then
@@ -185,9 +269,31 @@ fi
 BWRAP_ARGS=(
   --ro-bind / /
   --dev /dev
+  --unshare-pid
   --proc /proc
   --tmpfs /tmp
 )
+
+# Unix sockets remain usable through read-only mounts. Mask both standard
+# runtime paths so host daemons such as Docker, Podman and the user DBus cannot
+# be reached through the sandbox's root filesystem view.
+RUNTIME_DIRS=()
+for runtime_alias in /run /var/run; do
+  if [[ -d "$runtime_alias" ]]; then
+    runtime_dir="$(cd -- "$runtime_alias" && pwd -P)"
+    seen=false
+    for existing_runtime_dir in "${RUNTIME_DIRS[@]}"; do
+      [[ "$existing_runtime_dir" == "$runtime_dir" ]] && seen=true
+    done
+    [[ "$seen" == true ]] || RUNTIME_DIRS+=("$runtime_dir")
+  elif [[ "$runtime_alias" == "/run" ]]; then
+    echo "ERROR: cannot resolve /run; refusing sandbox execution without runtime-socket isolation." >&2
+    exit 78
+  fi
+done
+for runtime_dir in "${RUNTIME_DIRS[@]}"; do
+  BWRAP_ARGS+=(--tmpfs "$runtime_dir")
+done
 
 # Hide the host user's files and credentials. Recreate only the mountpoint
 # path beneath an overlaid HOME or /tmp before rebinding the validated source.
@@ -197,11 +303,18 @@ ensure_sandbox_dir() {
   local relative=""
   local current=""
   local part=""
+  local home_root
+  local best_length=0
   local -a components=()
 
-  if [[ -n "$USER_HOME" && "$USER_HOME" != "/tmp" && "$USER_HOME" != /tmp/* && "$target" == "$USER_HOME"/* ]]; then
-    base="$USER_HOME"
-    relative="${target#"$USER_HOME"/}"
+  for home_root in "${MOUNT_HOME_ROOTS[@]}"; do
+    if [[ "$target" == "$home_root"/* ]] && (( ${#home_root} > best_length )); then
+      base="$home_root"
+      best_length=${#home_root}
+    fi
+  done
+  if [[ -n "$base" ]]; then
+    relative="${target#"$base"/}"
   elif [[ "$target" == /tmp/* ]]; then
     base="/tmp"
     relative="${target#/tmp/}"
@@ -218,9 +331,11 @@ ensure_sandbox_dir() {
   done
 }
 
-if [[ -n "$USER_HOME" && "$USER_HOME" != "/tmp" && "$USER_HOME" != /tmp/* ]]; then
-  BWRAP_ARGS+=(--tmpfs "$USER_HOME")
-fi
+for home_root in "${MOUNT_HOME_ROOTS[@]}"; do
+  if [[ "$home_root" != "/tmp" && "$home_root" != /tmp/* ]]; then
+    BWRAP_ARGS+=(--tmpfs "$home_root")
+  fi
+done
 
 ensure_sandbox_dir "$PROJECT_DIR"
 if [[ "$GIT_KIND" == "worktree" ]]; then
