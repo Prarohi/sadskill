@@ -1640,7 +1640,7 @@ def _backup_dest(dest, backups_dir, backup_id):
 
 
 def _atomic_install_file(staged, dest, *, expected_snapshot=None):
-    """Copy a staged file to dest atomically; returns written path."""
+    """Copy a staged file with owner-only permissions; return its path."""
     dest = Path(dest)
     _assert_no_symlink_components(dest)
     if dest.exists() and not dest.is_file():
@@ -1650,10 +1650,13 @@ def _atomic_install_file(staged, dest, *, expected_snapshot=None):
     try:
         os.close(fd)
         shutil.copyfile(staged, tmp)
-        if dest.exists():
-            mode = stat.S_IMODE(dest.stat().st_mode)
-        else:
-            mode = 0o755 if staged.name == "git-guardrail.sh" else 0o644
+        existing_mode = _validated_regular_file_mode(dest)
+        mode = (existing_mode & 0o700) if existing_mode is not None else 0
+        # Installed content lives in a per-user home. Keep the owner's access
+        # while removing group/other access; the guardrail must remain runnable.
+        mode |= 0o600
+        if staged.name == "git-guardrail.sh":
+            mode |= 0o100
         os.chmod(tmp, mode)
         _sync_file(tmp)
         if expected_snapshot is not None:
@@ -1680,7 +1683,7 @@ def _atomic_install_text(dest, text, *, expected_snapshot=None):
             output.write(text)
             output.flush()
             os.fsync(output.fileno())
-        os.chmod(tmp, 0o644)
+        os.chmod(tmp, 0o600)
         if expected_snapshot is not None:
             _assert_matches_backup_snapshot(dest, expected_snapshot)
         os.replace(tmp, str(dest))

@@ -168,8 +168,16 @@ def fsync_dir(path):
         os.close(fd)
 
 
-def atomic_write_text(path, text, mode=0o644):
-    """Write text atomically: temp file in the same dir, fsync, replace."""
+def _validate_atomic_mode(mode):
+    """Reject atomic-write modes that expose private state to other users."""
+    if type(mode) is not int or mode < 0 or mode & ~0o700:
+        raise ValueError("atomic file mode must use owner-only permissions")
+    return mode
+
+
+def atomic_write_text(path, text, mode=0o600):
+    """Atomically write text with owner-only permissions by default."""
+    mode = _validate_atomic_mode(mode)
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
@@ -191,7 +199,8 @@ def atomic_write_text(path, text, mode=0o644):
     fsync_dir(target.parent)
 
 
-def atomic_write_bytes(path, data, mode=0o644):
+def atomic_write_bytes(path, data, mode=0o600):
+    mode = _validate_atomic_mode(mode)
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
