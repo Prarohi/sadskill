@@ -12,6 +12,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
 SHA = re.compile(r"[0-9a-f]{40}")
+# GitHub Actions app ID. Require trusted provenance, not just a spoofable check name.
+GITHUB_ACTIONS_APP_ID = 15368
 REQUIRED_CHECKS = (
     "Verify sadskill (Node 20)", "Verify sadskill (Node 22)",
     "Native PostgreSQL RLS", "CodeQL Python security analysis",
@@ -90,7 +92,13 @@ def verify_checks(report, sha):
     latest = {}
     for run in sorted(report["check_runs"], key=lambda r: r.get("id", 0), reverse=True):
         name = run.get("name")
-        if run.get("head_sha") == sha and name in REQUIRED_CHECKS and name not in latest:
+        if (
+            run.get("head_sha") == sha
+            and name in REQUIRED_CHECKS
+            and isinstance(run.get("app"), dict)
+            and run["app"].get("id") == GITHUB_ACTIONS_APP_ID
+            and name not in latest
+        ):
             latest[name] = run
     for name in REQUIRED_CHECKS:
         run = latest.get(name)
