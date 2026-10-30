@@ -114,31 +114,39 @@ class ConcurrentMemoryTests(unittest.TestCase):
 
     def test_concurrent_multi_agent_writes_no_loss(self):
         total_writers = 20
+        rounds = 5
 
-        def write_worker(idx):
+        def write_worker(round_index, idx):
             append_event(
                 self.root,
                 event_type="milestone",
-                payload={"title": f"Milestone from agent {idx}", "summary": f"Worker {idx} done."},
+                payload={"title": f"Milestone from agent {round_index}-{idx}",
+                         "summary": f"Worker {round_index}-{idx} done."},
                 actor=f"agent-{idx:02d}",
-                task_id=f"concurrent-{idx}",
+                task_id=f"concurrent-{round_index}-{idx}",
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(write_worker, i) for i in range(total_writers)]
-            # wait() only waits for completion: it silently hides worker exceptions.
-            # Propagate each failure so CI identifies the cause of a missing event.
-            for future in futures:
-                future.result()
+        for round_index in range(rounds):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [
+                    executor.submit(write_worker, round_index, i)
+                    for i in range(total_writers)
+                ]
+                # wait() alone hides worker exceptions and falsely reports event loss.
+                for future in futures:
+                    future.result()
 
-        events = list_events(self.root)
-        self.assertEqual(len(events), total_writers, f"Expected {total_writers} events, found {len(events)}")
+            events = list_events(self.root)
+            expected = total_writers * (round_index + 1)
+            self.assertEqual(len(events), expected,
+                             f"After round {round_index}: expected {expected} events, found {len(events)}")
 
         history_file = self.root / ".sad" / "history.md"
         self.assertTrue(history_file.exists())
         history_content = history_file.read_text(encoding="utf-8")
-        for i in range(total_writers):
-            self.assertIn(f"Milestone from agent {i}", history_content)
+        for round_index in range(rounds):
+            for i in range(total_writers):
+                self.assertIn(f"Milestone from agent {round_index}-{i}", history_content)
 
     def test_memory_redacts_common_secret_fields_and_patterns(self):
         payload = {
