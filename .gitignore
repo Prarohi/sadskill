@@ -22,6 +22,15 @@ node_modules/
 *.tmp
 *.bak
 
+# Generated project-memory state (may contain sensitive runtime context)
+# Keep intentionally versioned .sad/ documentation/fixtures tracked.
+.sad/.lock
+.sad/events/
+.sad/evidence/
+.sad/benchmark-*.jsonl
+.sad/benchmarks/*.jsonl
+.sad/benchmarks/*.tmp
+
 # Sensitive / Private files & user configuration
 /profile.md
 *.env
