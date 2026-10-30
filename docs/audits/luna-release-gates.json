@@ -94,7 +94,7 @@
     {
       "id": "L-004",
       "status": "PASS",
-      "evidence": "missing checksum reports transport-only trust"
+      "evidence": "tests/updater/test_security_boundaries.py verifies default missing-checksum refusal, independent expected-SHA migration, no-write plan refusal, and rollback"
     },
     {
       "id": "L-005",

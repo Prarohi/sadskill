@@ -62,6 +62,19 @@ filter, not a complete shell or SQL security boundary. Always rely on host
 permissions, sandboxing and explicit consent for potentially destructive
 operations.
 
+## Updater artifact integrity
+
+`sadskill-update.py check` reports whether the selected release has a
+`SHA256SUMS.txt` asset. `plan` and `apply` fail closed when the checksum is
+missing, malformed, or does not contain the exact archive name. For a legacy
+release without a checksum, obtain its exact archive SHA-256 from an
+independent trusted source and pass it as `--expected-sha256` to that one
+`plan` or `apply` invocation. The updater verifies the fetched archive against
+it and labels the result `EXTERNAL_CHECKSUM_MATCHED`; the digest is not saved.
+A malformed or mismatched published checksum still refuses the operation. A
+checksum match is integrity evidence, not independent publisher
+authentication.
+
 ## How to merge responsibly
 
 Use a stable base and correct stacked order: PR #4 (0.4 integration), then

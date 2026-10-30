@@ -14,6 +14,7 @@ import threading
 import time
 
 REPO = "Prarohi/sadskill"
+_AUTO_CHECKSUM = object()
 
 SKILL_V031 = """---
 name: sadskill
@@ -77,7 +78,9 @@ class GitHubStub:
     """In-process stub server. Usage:
 
         stub = GitHubStub()
-        stub.serve_release(tag="v0.3.1", prerelease=False, tarball=b"...", sums=None)
+        stub.serve_release(
+            tag="v0.3.1", prerelease=False, tarball=b"...", sums_bytes=None
+        )
         stub.start()
         try: ... os.environ["SADSKILL_UPDATE_API_BASE"] = stub.api_base
         finally: stub.stop()
@@ -90,9 +93,14 @@ class GitHubStub:
         self._port = None
         self._release = None
 
-    def serve_release(self, tag, tarball, prerelease=False, sums_bytes=None,
+    def serve_release(self, tag, tarball, prerelease=False,
+                      sums_bytes=_AUTO_CHECKSUM,
                       include_in_beta=True):
         """Configure or update the release served by this stub. Can be called before or after start()."""
+        if sums_bytes is _AUTO_CHECKSUM:
+            sums_bytes = (
+                hashlib.sha256(tarball).hexdigest() + f"  {tag}.tar.gz\n"
+            ).encode() if tarball is not None else None
         tar_url = None
         if tarball is not None:
             dl_path = f"/dl/{tag}.tar.gz"

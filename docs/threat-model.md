@@ -56,10 +56,10 @@ This document establishes the trust boundaries, threat vectors, privilege models
 - **Mitigation**: Strict canonical path containment checks reject traversal tokens (`..`), absolute paths outside roots, and symlinks resolving outside the project root.
 
 ### T-06: Update Release and Artifact Trust
-- **Scope reviewed**: updater branch head `177c33dbaacb9e45306e01db2dd7bc93f4a1d8e3` (PR #2; not yet merged at this audit).
+- **Scope reviewed**: current updater source and its release artifact validation paths.
 - **Network trust**: update metadata is fetched from canonical GitHub release/API locations. Production redirects are restricted to approved HTTPS content hosts, cross-origin authorization is removed, and artifact downloads do not receive the GitHub API token. Loopback redirects are only accepted by the local test stub.
 - **Release identity**: API, HTML, tag, tarball, and asset identity/host are cross-checked. A repository name appearing only in an arbitrary response body is not sufficient to establish provenance.
-- **Integrity limits**: a matched GitHub-provided digest/checksum can establish byte equality with that source. `TRANSPORT_ONLY` and `SOURCE_CHECKSUM_MATCHED` are distinct labels. Neither establishes a publisher signature or independent origin authenticity. No signed release provenance is claimed.
+- **Integrity limits**: a matched GitHub-provided checksum or independently supplied SHA-256 establishes byte equality with that digest source. A legacy release without `SHA256SUMS` fails closed unless a one-time external digest is supplied. `TRANSPORT_ONLY`, `SOURCE_CHECKSUM_MATCHED`, and `EXTERNAL_CHECKSUM_MATCHED` are distinct labels. None establishes a publisher signature or independent publisher identity. No signed release provenance is claimed.
 - **Archive abuse**: compressed size, expanded size, expansion ratio, member count, nesting depth, duplicate/colliding names, symlinks, and special files are bounded or rejected before installation. `plan` validates archive structure without installing files.
 - **Execution**: downloaded source is not executed by the updater. It is installed as skill content; later host execution remains subject to the host's own behavior and trust model.
 

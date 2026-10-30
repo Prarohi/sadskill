@@ -20,7 +20,20 @@ Missing/empty/invalid ownership hashes and destinations outside canonical Sadski
 
 Installed skill versions take precedence over stale updater state after a companion reinstall. Status/check report a mixed-version installation explicitly; a global apply refuses it until the hosts are aligned through their owning installer. This avoids treating one updated host as proof that every host is current.
 
-For 0.4.0 releases the updater prefers the uniquely named official `sadskill-0.4.0.tar.gz` asset and verifies the matching `SHA256SUMS.txt` entry. Older releases without that asset retain their source-archive fallback and explicit trust label. A checksum for one archive never validates different source-archive bytes.
+For 0.4.0 releases the updater prefers the uniquely named official
+`sadskill-0.4.0.tar.gz` asset and verifies its matching `SHA256SUMS.txt` entry.
+A checksum for one archive never validates different source-archive bytes.
+
+Stable, beta and explicitly pinned `plan`/`apply` operations now refuse a
+release without a matching checksum before downloading its archive or writing
+installation state. `check` reports `TRANSPORT_ONLY` and warns that an explicit
+external digest is needed. For a legacy release only, obtain the exact archive
+SHA-256 from an independent trusted source, then pass it to that one `plan` or
+`apply` invocation with `--expected-sha256`. The updater verifies the fetched
+archive against that digest and labels it `EXTERNAL_CHECKSUM_MATCHED`; it never
+stores the digest or an override in updater state. A malformed or mismatched
+published `SHA256SUMS.txt` still refuses the operation. Prefer a release with
+a published checksum and use an external digest only for a one-time migration.
 
 ## Evidence records
 

@@ -28,7 +28,7 @@ python3 scripts/sadskill-update.py apply --json
 python3 scripts/sadskill-update.py rollback --json
 ```
 
-`check` reports release availability and the trust level of the downloaded metadata. `plan` describes exact source files and destinations and performs no filesystem writes. `apply` is an explicit mutation and must verify the archive, check destination ownership, back up exact paths, write a recovery journal before changes, and report whether artifact trust came only from HTTPS transport or also matched a published source checksum. A checksum published beside the archive is not an authenticated publisher signature.
+`check` reports release availability and whether a source checksum is present; it does not download or validate the archive. `plan` describes exact source files and destinations and performs no filesystem writes. `apply` is an explicit mutation and verifies the archive before checking destination ownership, backing up exact paths, writing a recovery journal, or changing installed files. Missing, malformed, or mismatched checksums fail closed. For a legacy release without `SHA256SUMS`, the user must pass an independently sourced archive digest with `--expected-sha256`; the updater verifies fetched bytes against it and records `EXTERNAL_CHECKSUM_MATCHED`. A checksum match is not an authenticated publisher signature.
 
 On a user modification, the updater refuses by default. A force option is acceptable only when it preserves the exact current content before replacement and reports the conflict. A malformed release identity, checksum, archive, ownership record, or recovery journal must fail closed.
 
