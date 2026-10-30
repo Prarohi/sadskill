@@ -21,6 +21,33 @@ class CliInitSymlinkTests(unittest.TestCase):
             cwd=str(ROOT), capture_output=True, text=True, timeout=20,
         )
 
+    def test_refuses_symlinked_explicit_project_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            outside = root / "outside"
+            alias = root / "project-alias"
+            outside.mkdir()
+            alias.symlink_to(outside, target_is_directory=True)
+
+            res = self.invoke(alias)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("symlinked or non-directory project root", res.stderr)
+            self.assertFalse((outside / ".sad").exists())
+
+    def test_refuses_existing_hardlinked_template(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "project"
+            (project / ".sad").mkdir(parents=True)
+            outside = root / "private-decisions.md"
+            outside.write_text("preserve me", encoding="utf-8")
+            os.link(outside, project / ".sad" / "decisions.md")
+
+            res = self.invoke(project)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertIn("single-link file", res.stderr)
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me")
+
     def test_refuses_symlinked_dot_sad_root(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -102,10 +129,17 @@ class CliInitSymlinkTests(unittest.TestCase):
     def test_existing_directory_at_template_path_is_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp) / "project"
-            (project / ".sad" / "decisions.md").mkdir(parents=True)
+            directory = project / ".sad" / "decisions.md"
+            directory.mkdir(parents=True)
+            sentinel = directory / "user-content.txt"
+            sentinel.write_text("preserve user data\n", encoding="utf-8")
+
             result = self.invoke(project)
+
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("not a file", result.stderr)
+            self.assertIn("not a regular, single-link file", result.stderr)
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve user data\n")
 
 
 if __name__ == "__main__":

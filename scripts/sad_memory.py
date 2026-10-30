@@ -95,12 +95,12 @@ def redact_memory_payload(payload, event_type: str, *, allow_design_token_label:
 
 
 def find_project_root(start_path: Path = None) -> Path:
-    current = (start_path or Path.cwd()).resolve()
+    current = (start_path or Path.cwd()).absolute()
     while current != current.parent:
         if (current / ".sad").exists() or (current / "skills" / "sadskill").exists() or (current / ".git").exists():
             return current
         current = current.parent
-    return (start_path or Path.cwd()).resolve()
+    return (start_path or Path.cwd()).absolute()
 
 
 def get_git_commit(project_root: Path) -> str:
@@ -157,16 +157,31 @@ def _open_directory_at(parent_fd: int, name: str, *, create: bool = False) -> in
 @contextmanager
 def _open_sad_directory(project_root: Path, *, create: bool = False):
     """Open the project and .sad directories without following their final symlinks."""
-    root = Path(project_root).resolve()
-    root_fd = os.open(root, _directory_flags())
+    # Do not resolve the selected project root: doing so follows a symlink
+    # before O_NOFOLLOW has any chance to reject it. Resolve only its parent,
+    # where legitimate platform aliases (such as macOS /var) may exist.
+    chosen = Path(project_root).absolute()
+    _check_basename(chosen.name)
+    parent = chosen.parent.resolve(strict=True)
+    parent_fd = os.open(parent, _directory_flags())
+    root_fd = None
     sad_fd = None
     try:
+        try:
+            root_fd = os.open(chosen.name, _directory_flags(), dir_fd=parent_fd)
+        except OSError as exc:
+            raise OSError(
+                f"refusing symlinked or non-directory project root: {chosen}"
+            ) from exc
+        root = parent / chosen.name
         sad_fd = _open_directory_at(root_fd, ".sad", create=create)
         yield root, sad_fd
     finally:
         if sad_fd is not None:
             os.close(sad_fd)
-        os.close(root_fd)
+        if root_fd is not None:
+            os.close(root_fd)
+        os.close(parent_fd)
 
 
 def _open_regular_at(parent_fd: int, name: str, flags: int, mode: int = 0o600) -> int:
@@ -413,7 +428,7 @@ def append_event(
     task_id: str = "default",
 ) -> Path:
     """Appends an immutable event record under advisory lock and updates human-readable views."""
-    root = Path(project_root).resolve()
+    root = Path(project_root).absolute()
     if not isinstance(payload, dict):
         raise ValueError("project-memory payload must be a JSON object")
     safe_payload = redact_memory_payload(payload, event_type)
@@ -487,7 +502,7 @@ def append_event(
 
 
 def list_events(project_root: Path) -> list:
-    root = Path(project_root).resolve()
+    root = Path(project_root).absolute()
     records = []
     records_by_id = {}
 
@@ -664,7 +679,7 @@ class BM25Ranker:
 
 
 def build_corpus(project_root: Path) -> list[dict]:
-    root = Path(project_root).resolve()
+    root = Path(project_root).absolute()
     corpus = []
 
     # 1. Gather all structured events from .sad/events/
@@ -760,7 +775,7 @@ def compact_memory(project_root: Path, keep_latest: int = 10) -> int:
     """Consolidates older individual event JSON files into monthly archive files."""
     if keep_latest < 0:
         raise ValueError("keep_latest must be zero or greater")
-    root = Path(project_root).resolve()
+    root = Path(project_root).absolute()
     try:
         sad_context = _open_sad_directory(root)
         with sad_context as (_, sad_fd):

@@ -24,6 +24,41 @@ class ConcurrentMemoryTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_explicit_symlinked_project_root_fails_closed_for_all_memory_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            alias = Path(temp) / "project-alias"
+            alias.symlink_to(self.root, target_is_directory=True)
+            operations = {
+                "append": lambda: append_event(alias, "custom", {"title": "outside write"}),
+                "list": lambda: list_events(alias),
+                "search": lambda: search_memory(alias, "outside write"),
+                "compact": lambda: compact_memory(alias, keep_latest=0),
+            }
+            for name, operation in operations.items():
+                with self.subTest(operation=name):
+                    with self.assertRaises(OSError):
+                        operation()
+            self.assertFalse((self.root / ".sad" / "events").exists())
+
+    def test_explicit_symlink_project_root_is_not_canonicalized_by_cli_detection(self):
+        with tempfile.TemporaryDirectory() as temp:
+            alias = Path(temp) / "project-alias"
+            alias.symlink_to(self.root, target_is_directory=True)
+            self.assertEqual(sad_memory.find_project_root(alias), alias)
+            repo_root = Path(__file__).resolve().parents[1]
+            program = repo_root / "scripts" / "sad_memory.py"
+            result = subprocess.run(
+                [
+                    sys.executable, str(program), "append-event", "--type", "custom",
+                    "--payload", '{"title":"must not be recorded"}',
+                    "--project-root", str(alias),
+                ],
+                cwd=str(repo_root), capture_output=True, text=True, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("symlinked or non-directory project root", result.stderr)
+            self.assertFalse((self.root / ".sad" / "events").exists())
+
     def test_single_event_recording(self):
         out = append_event(
             self.root,
@@ -167,28 +202,39 @@ class ConcurrentMemoryTests(unittest.TestCase):
 
     def test_concurrent_multi_agent_writes_no_loss(self):
         total_writers = 20
+        rounds = 5
 
-        def write_worker(idx):
+        def write_worker(round_index, idx):
             append_event(
                 self.root,
                 event_type="milestone",
-                payload={"title": f"Milestone from agent {idx}", "summary": f"Worker {idx} done."},
+                payload={"title": f"Milestone from agent {round_index}-{idx}",
+                         "summary": f"Worker {round_index}-{idx} done."},
                 actor=f"agent-{idx:02d}",
-                task_id=f"concurrent-{idx}",
+                task_id=f"concurrent-{round_index}-{idx}",
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [executor.submit(write_worker, i) for i in range(total_writers)]
-            concurrent.futures.wait(futures)
+        for round_index in range(rounds):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [
+                    executor.submit(write_worker, round_index, i)
+                    for i in range(total_writers)
+                ]
+                # wait() alone hides worker exceptions and falsely reports event loss.
+                for future in futures:
+                    future.result()
 
-        events = list_events(self.root)
-        self.assertEqual(len(events), total_writers, f"Expected {total_writers} events, found {len(events)}")
+            events = list_events(self.root)
+            expected = total_writers * (round_index + 1)
+            self.assertEqual(len(events), expected,
+                             f"After round {round_index}: expected {expected} events, found {len(events)}")
 
         history_file = self.root / ".sad" / "history.md"
         self.assertTrue(history_file.exists())
         history_content = history_file.read_text(encoding="utf-8")
-        for i in range(total_writers):
-            self.assertIn(f"Milestone from agent {i}", history_content)
+        for round_index in range(rounds):
+            for i in range(total_writers):
+                self.assertIn(f"Milestone from agent {round_index}-{i}", history_content)
 
     def test_memory_redacts_common_secret_fields_and_patterns(self):
         payload = {

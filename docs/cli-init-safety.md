@@ -15,6 +15,15 @@ rewrites are staged, fsynced, and atomically renamed; compaction removes source
 events only after the archive is durable. A malformed archive causes compaction
 to stop while retaining source events.
 
+The selected project's final path component is checked with `O_NOFOLLOW`
+*before* canonicalizing the project itself. This prevents an explicit
+`--project-root` symlink from redirecting `sad init`, event writes, reads,
+search, or compaction into another project. The selected project's parent
+may still resolve ordinary platform directory aliases (such as macOS
+`/var`); this is not a guarantee that every ancestor is symlink-free.
+Existing hard-linked init templates are rejected for consistency with memory
+file checks. Regression tests exercise both direct APIs and the memory CLI.
+
 These guards prevent redirection through pre-existing paths and reduce
 path-swap races. They are not an OS sandbox against a hostile process with the
 same user's filesystem permissions; a same-user process can rename an already

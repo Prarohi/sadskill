@@ -97,8 +97,9 @@ def _ensure_template_at(parent_fd: int, basename: str, content: str) -> None:
         except OSError as exc:
             raise OSError(f"refusing symlinked or unsafe confidence document: {basename}") from exc
         try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise OSError(f"existing confidence document is not a file (regular file required): {basename}")
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise OSError(f"existing confidence document is not a regular, single-link file: {basename}")
         finally:
             os.close(fd)
         return
@@ -118,7 +119,7 @@ def _ensure_template_at(parent_fd: int, basename: str, content: str) -> None:
 
 def cmd_init(args) -> int:
     """Initialize .sad/ through pinned, no-follow directory descriptors."""
-    target_root = Path(args.project_root or Path.cwd()).resolve()
+    target_root = Path(args.project_root or Path.cwd()).absolute()
     sad_dir = target_root / ".sad"
     folder_names = ("events", "evidence", "benchmarks")
     templates = {
@@ -138,7 +139,16 @@ def cmd_init(args) -> int:
 
     opened_fds = []
     try:
-        root_fd = os.open(target_root, _safe_directory_flags())
+        if not target_root.name or target_root.name in (".", ".."):
+            raise OSError("refusing a filesystem-root or ambiguous project directory")
+        # Canonicalize only the parent: resolving the project itself follows
+        # the exact symlink O_NOFOLLOW is supposed to reject.
+        parent_fd = os.open(target_root.parent.resolve(strict=True), _safe_directory_flags())
+        opened_fds.append(parent_fd)
+        try:
+            root_fd = os.open(target_root.name, _safe_directory_flags(), dir_fd=parent_fd)
+        except OSError as exc:
+            raise OSError(f"refusing symlinked or non-directory project root: {target_root}") from exc
         opened_fds.append(root_fd)
         sad_fd = _open_or_create_directory_at(root_fd, ".sad")
         opened_fds.append(sad_fd)
