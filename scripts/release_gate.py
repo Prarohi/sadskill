@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fail-closed Sadskill version, CI, and reproducible release packaging gates."""
 import argparse
+from datetime import date
 import gzip
 import hashlib
 import json
@@ -45,8 +46,13 @@ def changelog(version):
     if sum(head.group(1) == version for head in heads) != 1:
         raise ReleaseError("duplicate CHANGELOG version")
     status = heads[0].group(2).strip()
-    if status != "Unreleased" and not re.fullmatch(r"20\d\d-[01]\d-[0-3]\d", status):
-        raise ReleaseError("CHANGELOG must use Unreleased or YYYY-MM-DD")
+    if status != "Unreleased":
+        try:
+            if not re.fullmatch(r"20\d\d-\d{2}-\d{2}", status):
+                raise ValueError("invalid release date format")
+            date.fromisoformat(status)
+        except ValueError as exc:
+            raise ReleaseError("CHANGELOG must use Unreleased or a valid YYYY-MM-DD date") from exc
     body = content[heads[0].end():heads[1].start() if len(heads) > 1 else len(content)].strip()
     if not re.search(r"(?m)^### ", body):
         raise ReleaseError("CHANGELOG current entry needs substantive release notes")
