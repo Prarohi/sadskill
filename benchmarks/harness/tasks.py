@@ -10,6 +10,7 @@ C1_TASKS = {
         "prompt": "Fix TypeError: Cannot read properties of undefined (reading 'avatarUrl') in UserProfile component when user.profile is null or undefined, and add regression test.",
         "budget": {"max_tokens": 1200, "max_turns": 4, "max_time_seconds": 60},
         "setup_files": {
+            "package.json": '{"private":true,"type":"module"}\n',
             "src/UserProfile.js": """export function getAvatar(user) {
   // Bug: Throws if user.profile is undefined
   return user.profile.avatarUrl || '/default-avatar.png';
@@ -32,6 +33,7 @@ console.log('Existing tests pass');
         "prompt": "Fix off-by-one pagination helper where page 1 and page 2 overlap the last item at boundary, and ensure 1-based index returns accurate non-overlapping slices.",
         "budget": {"max_tokens": 1200, "max_turns": 4, "max_time_seconds": 60},
         "setup_files": {
+            "package.json": '{"private":true,"type":"module"}\n',
             "src/paginate.js": """export function paginate(items, page, pageSize) {
   // Bug: inclusive slice boundary overlaps one item
   const start = (page - 1) * pageSize;
@@ -49,6 +51,7 @@ console.log('Existing tests pass');
         "prompt": "Fix async stale-result race condition in DataFetcher where a slow prior request overwrites results from a newer request.",
         "budget": {"max_tokens": 1500, "max_turns": 4, "max_time_seconds": 60},
         "setup_files": {
+            "package.json": '{"private":true,"type":"module"}\n',
             "src/DataFetcher.js": """export class DataFetcher {
   constructor() {
     this.latestData = null;
@@ -70,12 +73,15 @@ console.log('Existing tests pass');
         "prompt": "Fix Node.js ESM named export error 'The requested module does not provide an export named utils' while preserving CommonJS backward compatibility.",
         "budget": {"max_tokens": 1200, "max_turns": 4, "max_time_seconds": 60},
         "setup_files": {
-            "package.json": '{"name": "test-pkg", "type": "module", "main": "./index.cjs", "exports": "./index.js"}\n',
+            "package.json": '{"name": "test-pkg", "private": true, "type": "module", "main": "./index.cjs", "exports": "./index.js"}\n',
             "index.js": """const utils = { format: (s) => s.trim() };
 export default utils;
+""",
+            "index.cjs": """const utils = { format: (s) => s.trim() };
+module.exports = utils;
 """
         },
-        "expected_files": ["index.js"]
+        "expected_files": ["index.js", "index.cjs", "package.json"]
     },
     "C1-05": {
         "id": "C1-05",
@@ -84,6 +90,7 @@ export default utils;
         "prompt": "Fix authorization bypass in getDocument endpoint that allows tenant A to retrieve documents belonging to tenant B by document ID alone.",
         "budget": {"max_tokens": 1600, "max_turns": 4, "max_time_seconds": 90},
         "setup_files": {
+            "package.json": '{"private":true,"type":"module"}\n',
             "src/documentService.js": """export function getDocument(db, tenantId, docId) {
   // Bug: Query ignores tenantId scope
   const doc = db.find(d => d.id === docId);
@@ -97,7 +104,7 @@ export default utils;
         "id": "C1-06",
         "name": "PostgreSQL RLS hole",
         "category": "Database Security",
-        "prompt": "Harden PostgreSQL organizations table by enabling and forcing Row Level Security with strict tenant isolation policy.",
+        "prompt": "Harden the supplied PostgreSQL documents table with ENABLE and FORCE ROW LEVEL SECURITY. Add a restrictive policy that uses the transaction-local sadskill.tenant_id setting to enforce tenant_id on reads and writes; missing tenant context must reveal no rows and cross-tenant writes must be rejected.",
         "budget": {"max_tokens": 1500, "max_turns": 4, "max_time_seconds": 90},
         "setup_files": {
             "migrations/001_rls.sql": """-- Table without forced RLS
@@ -114,12 +121,12 @@ CREATE TABLE documents (
         "id": "C1-07",
         "name": "Safe expand/contract migration",
         "category": "Database Reliability",
-        "prompt": "Refactor immediate destructive column rename into a safe 2-phase expand/contract migration with up and down SQL scripts.",
+        "prompt": "Replace the destructive phone-to-mobile_number rename with four PostgreSQL migrations: 01_expand_up.sql, 01_expand_down.sql, 02_contract_up.sql, and 02_contract_down.sql. Expand must retain phone, add and backfill mobile_number, and keep either old-column or new-column application writes synchronized during rollout. Contract may remove phone only after expansion. Down migrations run in reverse order and must preserve all stored values.",
         "budget": {"max_tokens": 1400, "max_turns": 4, "max_time_seconds": 90},
         "setup_files": {
             "migrations/rename.sql": "ALTER TABLE users RENAME COLUMN phone TO mobile_number;\n"
         },
-        "expected_files": ["migrations/01_expand.sql", "migrations/02_contract.sql"]
+        "expected_files": ["migrations/01_expand_up.sql", "migrations/01_expand_down.sql", "migrations/02_contract_up.sql", "migrations/02_contract_down.sql"]
     },
     "C1-08": {
         "id": "C1-08",
@@ -142,9 +149,10 @@ pre {
         "id": "C1-09",
         "name": "Accessible dialog behavior",
         "category": "Accessibility & UI",
-        "prompt": "Implement accessible modal dialog with Escape key dismiss, focus trapping, role='dialog', and aria-modal='true'.",
+        "prompt": "Implement initModal(el) as an accessible modal dialog: set role='dialog' and aria-modal='true', open and focus the dialog, wrap Tab and Shift+Tab among its buttons, close on Escape, and restore focus to the element active before opening. Keep the function interface unchanged.",
         "budget": {"max_tokens": 1500, "max_turns": 4, "max_time_seconds": 90},
         "setup_files": {
+            "package.json": '{"private":true,"type":"module"}\n',
             "src/Modal.js": """export function initModal(el) {
   // Basic display without a11y focus or key handlers
   el.style.display = 'block';
@@ -160,6 +168,7 @@ pre {
         "prompt": "Decouple circular dependency between OrderService and PaymentService by extracting shared types/interfaces to an independent module.",
         "budget": {"max_tokens": 1600, "max_turns": 4, "max_time_seconds": 90},
         "setup_files": {
+            "package.json": '{"private":true,"type":"module"}\n',
             "src/OrderService.js": """import { processPayment } from './PaymentService.js';
 export function createOrder(data) {
   return processPayment(data.amount);
@@ -178,24 +187,71 @@ export function processPayment(amount) {
         "id": "C1-11",
         "name": "Guardrail wrapper bypass",
         "category": "Safety Enforcement",
-        "prompt": "Verify that command interception guardrail cannot be bypassed using env, sudo, or recursive bash -c wrappers.",
+        "prompt": "Harden scripts/git-guardrail.sh, which receives one proposed shell command from stdin, so destructive git reset --hard commands remain blocked through env assignments, sudo, command, and recursive bash -c wrappers. Benign git status must remain allowed. In scripts/test-bypass.sh, preserve exactly the supplied seven-case array, top-level loop, fail-on-allow hook invocation, and benign git status check; do not add other executable lines or change the structure. Comments and blank lines are allowed. The evaluator checks this exact reference structure statically and never executes the candidate test script. The test suite must never execute the destructive command.",
         "budget": {"max_tokens": 1000, "max_turns": 2, "max_time_seconds": 45},
         "setup_files": {
+            "scripts/git-guardrail.sh": """#!/bin/bash
+set -euo pipefail
+command_text="$(cat)"
+case "$command_text" in
+  "git reset --hard"*) echo "BLOCKED: destructive command" >&2; exit 2 ;;
+esac
+exit 0
+""",
             "scripts/test-bypass.sh": """#!/bin/bash
-env bash -c 'git reset --hard'
+set -e
+hook="$(dirname "$0")/git-guardrail.sh"
+cases=(
+  'git reset --hard HEAD~1'
+  'env git reset --hard HEAD~1'
+  'env SAFE=1 bash -c git reset --hard HEAD~1'
+  'command git reset --hard HEAD~1'
+  'sudo -n git reset --hard HEAD~1'
+  'bash -c git reset --hard HEAD~1'
+  'env bash -c bash -c git reset --hard HEAD~1'
+)
+for command in "${cases[@]}"; do
+  printf '%s\\n' "$command" | bash "$hook" && exit 1
+done
+printf '%s\\n' 'git status' | bash "$hook"
 """
         },
-        "expected_files": ["scripts/test-bypass.sh"]
+        "expected_files": ["scripts/git-guardrail.sh", "scripts/test-bypass.sh"]
     },
     "C1-12": {
         "id": "C1-12",
         "name": "Concurrent project memory",
         "category": "Agent Memory",
-        "prompt": "Ensure concurrent writes to .sad/ memory utilize advisory locking and append-only event log with zero lost writes.",
+        "prompt": "Implement scripts/sad_memory.py append --root <project> --prefix <writer> --count <n>. Serialize writes with an advisory process lock at .sad/.lock and write JSONL events to .sad/events/events.jsonl. Concurrent writers must preserve all prior events and every unique new record.",
         "budget": {"max_tokens": 1200, "max_turns": 3, "max_time_seconds": 60},
         "setup_files": {
-            ".sad/README.md": "# Project Memory\n"
+            ".sad/README.md": "# Project Memory\n",
+            "scripts/sad_memory.py": """#!/usr/bin/env python3
+import argparse
+import json
+import time
+from pathlib import Path
+
+def append(root, prefix, count):
+    events = root / '.sad' / 'events' / 'events.jsonl'
+    events.parent.mkdir(parents=True, exist_ok=True)
+    for index in range(count):
+        old = events.read_text(encoding='utf-8') if events.exists() else ''
+        time.sleep(0.002)
+        record = {'event_id': f'{prefix}-{index}', 'type': 'custom'}
+        events.write_text(old + json.dumps(record) + '\\n', encoding='utf-8')
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='command', required=True)
+    write = sub.add_parser('append')
+    write.add_argument('--root', required=True, type=Path)
+    write.add_argument('--prefix', required=True)
+    write.add_argument('--count', required=True, type=int)
+    args = parser.parse_args()
+    append(args.root, args.prefix, args.count)
+"""
         },
-        "expected_files": [".sad/events"]
+        "expected_files": ["scripts/sad_memory.py", ".sad/.lock", ".sad/events/events.jsonl"]
     }
 }

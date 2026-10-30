@@ -80,29 +80,58 @@ class MockProvider(BaseProvider):
                 "const utils = { format: (s) => s.trim() };\nexport { utils };\nexport default utils;\n",
                 encoding="utf-8"
             )
+            (workspace / "package.json").write_text(
+                '{"name":"test-pkg","private":true,"type":"module","main":"./index.cjs",'
+                '"exports":{".":{"import":"./index.js","require":"./index.cjs"}}}\n',
+                encoding="utf-8"
+            )
         elif task_id == "C1-05":
             (workspace / "src" / "documentService.js").write_text(
                 "export function getDocument(db, tenantId, docId) {\n  return db.find(d => d.id === docId && d.tenantId === tenantId) || null;\n}\n",
                 encoding="utf-8"
             )
         elif task_id == "C1-06":
-            (workspace / "migrations" / "001_rls.sql").write_text(
-                """ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
+            migration = workspace / "migrations" / "001_rls.sql"
+            migration.write_text(migration.read_text(encoding="utf-8") + """\nALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_policy ON documents
   FOR ALL
-  USING (tenant_id = current_setting('app.current_tenant_id')::UUID);
+  USING (tenant_id = current_setting('sadskill.tenant_id', true)::UUID)
+  WITH CHECK (tenant_id = current_setting('sadskill.tenant_id', true)::UUID);
 """,
                 encoding="utf-8"
             )
         elif task_id == "C1-07":
             m_dir = workspace / "migrations"
-            (m_dir / "01_expand.sql").write_text(
-                "ALTER TABLE users ADD COLUMN mobile_number TEXT;\n", encoding="utf-8"
-            )
-            (m_dir / "02_contract.sql").write_text(
-                "ALTER TABLE users DROP COLUMN phone;\n", encoding="utf-8"
-            )
+            (m_dir / "01_expand_up.sql").write_text("""ALTER TABLE users ADD COLUMN mobile_number text;
+UPDATE users SET mobile_number = phone;
+CREATE OR REPLACE FUNCTION sync_users_phone_mobile() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.phone IS NOT NULL AND NEW.mobile_number IS NULL THEN NEW.mobile_number := NEW.phone;
+    ELSIF NEW.mobile_number IS NOT NULL AND NEW.phone IS NULL THEN NEW.phone := NEW.mobile_number;
+    END IF;
+  ELSIF NEW.phone IS DISTINCT FROM OLD.phone THEN NEW.mobile_number := NEW.phone;
+  ELSIF NEW.mobile_number IS DISTINCT FROM OLD.mobile_number THEN NEW.phone := NEW.mobile_number;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER sync_users_phone_mobile BEFORE INSERT OR UPDATE ON users
+FOR EACH ROW EXECUTE FUNCTION sync_users_phone_mobile();
+""", encoding="utf-8")
+            (m_dir / "01_expand_down.sql").write_text("""DROP TRIGGER IF EXISTS sync_users_phone_mobile ON users;
+DROP FUNCTION IF EXISTS sync_users_phone_mobile();
+ALTER TABLE users DROP COLUMN mobile_number;
+""", encoding="utf-8")
+            (m_dir / "02_contract_up.sql").write_text("""DROP TRIGGER IF EXISTS sync_users_phone_mobile ON users;
+DROP FUNCTION IF EXISTS sync_users_phone_mobile();
+ALTER TABLE users DROP COLUMN phone;
+""", encoding="utf-8")
+            (m_dir / "02_contract_down.sql").write_text("""ALTER TABLE users ADD COLUMN phone text;
+UPDATE users SET phone = mobile_number;
+ALTER TABLE users ALTER COLUMN phone SET NOT NULL;
+""", encoding="utf-8")
         elif task_id == "C1-08":
             (workspace / "src" / "styles.css").write_text(
                 """.container {
@@ -121,13 +150,32 @@ pre {
         elif task_id == "C1-09":
             (workspace / "src" / "Modal.js").write_text(
                 """export function initModal(el) {
+  const opener = document.activeElement;
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-hidden', 'false');
   el.style.display = 'block';
-  el.focus();
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') el.style.display = 'none';
-  });
+  el.hidden = false;
+  const controls = () => Array.from(el.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'));
+  const first = () => controls()[0] || el;
+  const last = () => controls().at(-1) || el;
+  first().focus();
+  const onKey = event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden', 'true');
+      document.removeEventListener('keydown', onKey);
+      opener?.focus();
+    } else if (event.key === 'Tab' && controls().length) {
+      if (event.shiftKey && document.activeElement === first()) {
+        event.preventDefault(); last().focus();
+      } else if (!event.shiftKey && document.activeElement === last()) {
+        event.preventDefault(); first().focus();
+      }
+    }
+  };
+  document.addEventListener('keydown', onKey);
 }
 """,
                 encoding="utf-8"
@@ -146,13 +194,46 @@ pre {
             )
         elif task_id == "C1-11":
             (workspace / "scripts").mkdir(parents=True, exist_ok=True)
-            # Reuses verified canonical guardrail
-            pass
+            source = Path(__file__).resolve().parents[2] / "scripts" / "git-guardrail.sh"
+            (workspace / "scripts" / "git-guardrail.sh").write_bytes(source.read_bytes())
         elif task_id == "C1-12":
-            sad_dir = workspace / ".sad"
-            sad_dir.mkdir(parents=True, exist_ok=True)
-            (sad_dir / "events").mkdir(exist_ok=True)
-            (sad_dir / ".lock").write_text("", encoding="utf-8")
+            (workspace / "scripts" / "sad_memory.py").write_text("""#!/usr/bin/env python3
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+
+def append(root, prefix, count):
+    root = Path(root)
+    sad = root / '.sad'
+    events = sad / 'events' / 'events.jsonl'
+    events.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(sad / '.lock', os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        fd = os.open(events, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            for index in range(count):
+                data = (json.dumps({'event_id': f'{prefix}-{index}', 'type': 'custom'}) + '\\n').encode()
+                os.write(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='command', required=True)
+    write = sub.add_parser('append')
+    write.add_argument('--root', required=True, type=Path)
+    write.add_argument('--prefix', required=True)
+    write.add_argument('--count', required=True, type=int)
+    args = parser.parse_args()
+    append(args.root, args.prefix, args.count)
+""", encoding="utf-8")
 
         # Produce evidence record in sadskill mode
         ev_dir = workspace / ".sad" / "mock-artifacts"

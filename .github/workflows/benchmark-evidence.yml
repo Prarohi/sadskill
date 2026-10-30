@@ -1,0 +1,46 @@
+name: Benchmark evidence integrity
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/**'
+      - 'tests/test_*benchmark*.py'
+      - 'tests/test_live_cli_contract.py'
+      - 'tests/test_empirical_benchmark_guard.py'
+      - '.github/workflows/benchmark-evidence.yml'
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-evidence-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-integrity:
+    name: Benchmark evidence regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.11'
+      - name: Set up Node.js for behavioral graders
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+        with:
+          node-version: '20'
+      - name: Cache pinned PostgreSQL grader image
+        run: docker pull postgres@sha256:dfbbb0ad8cab91d41e99123664e37a9b25d0413426d4fb3154e4d668e5d35246
+      - name: Verify headless browser is available
+        run: command -v chromium || command -v chromium-browser || command -v google-chrome
+      - name: Verify Python syntax
+        run: python3 -m compileall -q benchmarks/harness tests
+      - name: Run full Python regression suite
+        env:
+          SADSKILL_REQUIRE_C1_GRADERS: '1'
+          SADSKILL_CI_CHROMIUM_NO_SANDBOX: '1'
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
+      - name: Run skill-contract regression suite
+        run: python3 -m unittest discover -s tests/skill-contract -p 'test_*.py' -v

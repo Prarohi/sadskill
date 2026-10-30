@@ -12,12 +12,13 @@ import shutil
 import sys
 import tempfile
 import time
+import uuid
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmarks.harness.evaluators import EVALUATORS
+from benchmarks.harness.evaluators import EVALUATORS, EvaluationUnavailable
 from benchmarks.harness.providers import MockProvider, RealAgentProvider
 from benchmarks.harness.tasks import C1_TASKS
 
@@ -37,8 +38,9 @@ def run_benchmark_run(
     condition: str,
     provider_name: str,
     repetition: int,
-    *, live=False, isolated=False, model=None,
+    *, live=False, isolated=False, model=None, experiment_id=None,
 ) -> dict:
+    experiment_id = experiment_id or uuid.uuid4().hex
     task = C1_TASKS.get(task_id)
     if not task:
         raise ValueError(f"Unknown task ID: {task_id}")
@@ -70,17 +72,66 @@ def run_benchmark_run(
                 "synthetic": provider_name == "mock",
                 "model": model,
                 "prompt_sha256": run_result.get("prompt_sha256"),
-                "regressions": 0,
-                "safety_violations": 0,
-                "reason": run_result.get("reason", "No authentication"),
+                "regressions": None,
+                "safety_violations": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "reason": run_result.get("reason", "Not executed or provider failed"),
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
 
-        passed, regressions, safety_violations, notes = evaluator(workspace)
+        # Never score an unverified provider response as completed empirical work.
+        # Mock fixtures intentionally have no real usage counters.
+        if provider_name != "mock" and (
+            run_result.get("status") != "COMPLETED_REAL"
+            or not all(isinstance(run_result.get(key), int)
+                       and not isinstance(run_result.get(key), bool)
+                       and run_result[key] >= 0
+                       for key in ("input_tokens", "output_tokens"))
+        ):
+            return {
+                "task_id": task_id, "task_name": task["name"],
+                "condition": condition, "provider": provider_name,
+                "model": model, "repetition": repetition,
+                "status": "FAILED_UNVERIFIABLE_METRICS",
+                "success": False, "synthetic": False,
+                "input_tokens": None, "output_tokens": None,
+                "regressions": None, "safety_violations": None,
+                "reason": "Provider reported no complete, valid token usage/status; evaluation withheld",
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+
+        try:
+            passed, regressions, safety_violations, notes = evaluator(workspace)
+        except EvaluationUnavailable as exc:
+            return {
+                "task_id": task_id, "task_name": task["name"],
+                "condition": condition, "provider": provider_name,
+                "model": model, "repetition": repetition,
+                "status": "FAILED_UNVERIFIABLE_GRADER",
+                "success": False, "synthetic": provider_name == "mock",
+                "input_tokens": None, "output_tokens": None,
+                "regressions": None, "safety_violations": None,
+                "reason": str(exc),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            return {
+                "task_id": task_id, "task_name": task["name"],
+                "condition": condition, "provider": provider_name,
+                "model": model, "repetition": repetition,
+                "status": "FAILED_GRADER_ERROR",
+                "success": False, "synthetic": provider_name == "mock",
+                "input_tokens": None, "output_tokens": None,
+                "regressions": None, "safety_violations": None,
+                "reason": f"Evaluator crashed ({type(exc).__name__}); task not scored",
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
 
         record = {
             "task_id": task_id,
             "task_name": task["name"],
+            "experiment_id": experiment_id,
             "category": task["category"],
             "condition": condition,
             "provider": provider_name,
@@ -93,10 +144,10 @@ def run_benchmark_run(
             "regressions": regressions,
             "safety_violations": safety_violations,
             "notes": notes,
-            "input_tokens": run_result.get("input_tokens", 0),
-            "output_tokens": run_result.get("output_tokens", 0),
+            "input_tokens": run_result.get("input_tokens"),
+            "output_tokens": run_result.get("output_tokens"),
             "wall_clock_seconds": run_result.get("wall_clock_seconds", 0.0),
-            "tool_calls": run_result.get("tool_calls", 0),
+            "tool_calls": run_result.get("tool_calls"),
             "evidence_produced": run_result.get("evidence_produced", False),
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
@@ -135,6 +186,7 @@ def main():
     print(f"Repetitions: {args.repetitions}\n")
 
     results = []
+    experiment_id = uuid.uuid4().hex
     output_file = Path(args.output) if args.output else None
     if output_file:
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -151,7 +203,7 @@ def main():
                 total_runs += 1
                 res = run_benchmark_run(tid, condition, args.provider, rep,
                                         live=args.live, isolated=args.acknowledge_isolated_runner,
-                                        model=args.model)
+                                        model=args.model, experiment_id=experiment_id)
                 results.append(res)
 
                 if res["status"].startswith(("NOT_EXECUTED", "FAILED_")):

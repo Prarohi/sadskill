@@ -6,21 +6,63 @@ tables, statistical summaries, and Mermaid charts.
 
 import argparse
 import json
+import math
 from pathlib import Path
+import re
 import sys
 
 
+_REAL_PROVIDERS = {"codex", "claude", "gemini"}
+_CONDITIONS = ("plain", "sadskill", "competitor")
+
+
 def synthesize_metrics(records: list) -> dict:
-    # Exclude all synthetic/demo and unexecuted records from empirical statistics.
-    # Mixing them would manufacture comparative performance numbers.
+    # Keep only schema-valid runner records. These checks do not authenticate
+    # the JSONL source; reports must still be backed by trusted runner output.
     records = [
         r for r in records
-        if r.get("provider") != "mock"
-        and not r.get("synthetic")
-        and r.get("status") == "COMPLETED"
+        if isinstance(r, dict)
+        and r.get("provider") in _REAL_PROVIDERS
+        and r.get("synthetic") is False
+        and r.get("status") == "COMPLETED_REAL"
+        and r.get("condition") in _CONDITIONS
+        and isinstance(r.get("task_id"), str)
+        and re.fullmatch(r"C1-\d{2}", r["task_id"])
+        and isinstance(r.get("model"), str)
+        and bool(r["model"].strip())
+        and isinstance(r.get("experiment_id"), str)
+        and re.fullmatch(r"[0-9a-f]{32}", r["experiment_id"])
+        and isinstance(r.get("repetition"), int)
+        and not isinstance(r.get("repetition"), bool)
+        and r["repetition"] > 0
+        and isinstance(r.get("prompt_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", r["prompt_sha256"])
         and isinstance(r.get("input_tokens"), int)
+        and not isinstance(r.get("input_tokens"), bool)
+        and r.get("input_tokens") >= 0
         and isinstance(r.get("output_tokens"), int)
+        and not isinstance(r.get("output_tokens"), bool)
+        and r.get("output_tokens") >= 0
+        and isinstance(r.get("success"), bool)
+        and isinstance(r.get("wall_clock_seconds"), (int, float))
+        and not isinstance(r.get("wall_clock_seconds"), bool)
+        and math.isfinite(r["wall_clock_seconds"])
+        and r["wall_clock_seconds"] >= 0
     ]
+    trials_by_condition = {condition: [] for condition in _CONDITIONS}
+    for record in records:
+        trials_by_condition[record["condition"]].append((
+            record["experiment_id"], record["provider"], record["model"],
+            record["task_id"], record["repetition"],
+        ))
+    paired_tokens = all(trials_by_condition[condition] for condition in _CONDITIONS)
+    if paired_tokens:
+        key_sets = [set(trials_by_condition[condition]) for condition in _CONDITIONS]
+        paired_tokens = (
+            all(len(keys) == len(trials_by_condition[condition])
+                for keys, condition in zip(key_sets, _CONDITIONS))
+            and key_sets[0] == key_sets[1] == key_sets[2]
+        )
     conditions = {}
     for r in records:
         cond = r.get("condition", "unknown")
@@ -29,7 +71,9 @@ def synthesize_metrics(records: list) -> dict:
                 "total": 0,
                 "passed": 0,
                 "regressions": 0,
+                "regression_measurements": 0,
                 "safety_violations": 0,
+                "safety_measurements": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "wall_clock": 0.0,
@@ -39,12 +83,16 @@ def synthesize_metrics(records: list) -> dict:
         c["total"] += 1
         if r.get("success"):
             c["passed"] += 1
-        c["regressions"] += r.get("regressions", 0)
-        c["safety_violations"] += r.get("safety_violations", 0)
+        if isinstance(r.get("regressions"), int) and not isinstance(r.get("regressions"), bool) and r["regressions"] >= 0:
+            c["regressions"] += r["regressions"]
+            c["regression_measurements"] += 1
+        if isinstance(r.get("safety_violations"), int) and not isinstance(r.get("safety_violations"), bool) and r["safety_violations"] >= 0:
+            c["safety_violations"] += r["safety_violations"]
+            c["safety_measurements"] += 1
         c["input_tokens"] += r.get("input_tokens", 0)
         c["output_tokens"] += r.get("output_tokens", 0)
         c["wall_clock"] += r.get("wall_clock_seconds", 0.0)
-        if r.get("evidence_produced"):
+        if r.get("evidence_produced") is True:
             c["evidence_count"] += 1
 
     summary = {}
@@ -53,14 +101,16 @@ def synthesize_metrics(records: list) -> dict:
         summary[cond] = {
             "total_runs": data["total"],
             "success_rate": round((data["passed"] / tot) * 100, 1),
-            "regressions": data["regressions"],
-            "safety_violations": data["safety_violations"],
+            "regressions": data["regressions"] if data["regression_measurements"] == data["total"] else None,
+            "safety_violations": data["safety_violations"] if data["safety_measurements"] == data["total"] else None,
             "avg_input_tokens": round(data["input_tokens"] / tot),
             "avg_output_tokens": round(data["output_tokens"] / tot),
             "avg_total_tokens": round((data["input_tokens"] + data["output_tokens"]) / tot),
             "avg_latency_s": round(data["wall_clock"] / tot, 2),
             "evidence_rate": round((data["evidence_count"] / tot) * 100, 1),
         }
+    if summary:
+        summary["_paired_token_comparison"] = paired_tokens
     return summary
 
 
@@ -75,23 +125,28 @@ def generate_markdown_report(summary: dict) -> str:
         )
     md = [
         "# C1 Comparative Benchmark Results\n",
-        "Measured live-agent trials only; compare conditions only when the model, task, environment and budget match.\n",
+        "Schema-valid live-agent records; JSONL claims are not cryptographically authenticated. Use trusted runner output and compare only matched trials.\n",
         "| Condition | Success Rate | Regressions | Safety Violations | Avg Tokens | Avg Latency | Evidence Rate |",
         "|---|:---:|:---:|:---:|:---:|:---:|:---:|",
     ]
     for cond in ("plain", "sadskill", "competitor"):
         if cond in summary:
             s = summary[cond]
+            regression_count = s["regressions"] if s["regressions"] is not None else "NOT_MEASURED"
+            safety_count = s["safety_violations"] if s["safety_violations"] is not None else "NOT_MEASURED"
             md.append(
-                f"| **`{cond}`** | **{s['success_rate']}%** | {s['regressions']} | {s['safety_violations']} | {s['avg_total_tokens']} | {s['avg_latency_s']}s | {s['evidence_rate']}% |"
+                f"| **`{cond}`** | **{s['success_rate']}%** | {regression_count} | {safety_count} | {s['avg_total_tokens']} | {s['avg_latency_s']}s | {s['evidence_rate']}% |"
             )
 
     md.append("\n## Token & Efficiency Comparison\n")
-    sad_tokens = summary.get("sadskill", {}).get("avg_total_tokens", 1)
-    comp_tokens = summary.get("competitor", {}).get("avg_total_tokens", 1)
-    if comp_tokens > sad_tokens:
-        savings = round(((comp_tokens - sad_tokens) / comp_tokens) * 100, 1)
-        md.append(f"> **Observed token difference**: {savings}% in this input dataset. This is descriptive, not proof of causal improvement; validate paired model/task/budget equivalence before any public claim.\n")
+    if summary.get("_paired_token_comparison"):
+        sad_tokens = summary["sadskill"]["avg_total_tokens"]
+        comp_tokens = summary["competitor"]["avg_total_tokens"]
+        if comp_tokens > sad_tokens:
+            savings = round(((comp_tokens - sad_tokens) / comp_tokens) * 100, 1)
+            md.append(f"> **Observed token difference**: {savings}% across matched task/model/repetition records in one experiment. This is descriptive, not proof of causal improvement.\n")
+    else:
+        md.append("> **Token comparison omitted**: no complete matched trial set exists across plain, sadskill, and competitor conditions.\n")
 
     md.append("\n```mermaid\nxychart-beta\n  title \"Task Success Rate vs Token Consumption\"\n  x-axis [\"plain\", \"sadskill\", \"competitor\"]\n  y-axis \"Success Rate (%)\" 0 --> 100\n  bar ["
               + f"{summary.get('plain', {}).get('success_rate', 0)}, "

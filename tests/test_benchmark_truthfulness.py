@@ -32,6 +32,66 @@ class BenchmarkTruthfulnessTests(unittest.TestCase):
         self.assertNotIn("45.7%", report)
         self.assertNotIn("100.0%", report)
 
+    def test_visualizer_includes_completed_real_records_without_unmeasured_counts(self):
+        record = {
+            "task_id": "C1-01", "condition": "plain", "provider": "codex",
+            "model": "test-model", "experiment_id": "a" * 32, "repetition": 1,
+            "prompt_sha256": "b" * 64,
+            "synthetic": False, "status": "COMPLETED_REAL", "success": True,
+            "input_tokens": 12, "output_tokens": 8,
+            "regressions": None, "safety_violations": None, "wall_clock_seconds": 1.5,
+        }
+        summary = synthesize_metrics([record])
+        self.assertEqual(summary["plain"]["total_runs"], 1)
+        self.assertEqual(summary["plain"]["success_rate"], 100.0)
+        self.assertIsNone(summary["plain"]["regressions"])
+        self.assertIsNone(summary["plain"]["safety_violations"])
+        report = generate_markdown_report(summary)
+        self.assertIn("NOT_MEASURED", report)
+
+    def test_visualizer_rejects_invalid_provenance_usage_or_latency(self):
+        base = {
+            "task_id": "C1-01", "condition": "plain", "provider": "codex",
+            "model": "test-model", "experiment_id": "a" * 32, "repetition": 1,
+            "prompt_sha256": "b" * 64,
+            "synthetic": False, "status": "COMPLETED_REAL", "success": True,
+            "input_tokens": 12, "output_tokens": 8,
+            "wall_clock_seconds": 1.5,
+        }
+        missing_status = {**base, "status": "COMPLETED"}
+        boolean_usage = {**base, "input_tokens": True}
+        invalid_latency = {**base, "wall_clock_seconds": float("nan")}
+        unsupported_provider = {**base, "provider": "invented"}
+        missing_synthetic_flag = {key: value for key, value in base.items() if key != "synthetic"}
+        non_boolean_synthetic = {**base, "synthetic": 0}
+        self.assertEqual(synthesize_metrics([
+            missing_status, boolean_usage, invalid_latency, unsupported_provider,
+            missing_synthetic_flag, non_boolean_synthetic,
+        ]), {})
+
+    def test_visualizer_reports_token_difference_only_for_matched_trials(self):
+        def record(condition, task_id, token_count):
+            return {
+                "task_id": task_id, "condition": condition, "provider": "codex",
+                "model": "test-model", "experiment_id": "a" * 32, "repetition": 1,
+                "prompt_sha256": "b" * 64, "synthetic": False,
+                "status": "COMPLETED_REAL", "success": True,
+                "input_tokens": token_count // 2, "output_tokens": token_count // 2,
+                "regressions": None, "safety_violations": None,
+                "wall_clock_seconds": 1.0,
+            }
+
+        matched = [record("plain", "C1-01", 30), record("sadskill", "C1-01", 20),
+                   record("competitor", "C1-01", 40)]
+        report = generate_markdown_report(synthesize_metrics(matched))
+        self.assertIn("Observed token difference", report)
+
+        unpaired = [record("plain", "C1-01", 30), record("sadskill", "C1-01", 20),
+                    record("competitor", "C1-02", 40)]
+        report = generate_markdown_report(synthesize_metrics(unpaired))
+        self.assertIn("Token comparison omitted", report)
+        self.assertNotIn("Observed token difference", report)
+
     def test_credential_does_not_make_unimplemented_adapter_real(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-placeholder"}, clear=True):
             result = run_benchmark_run("C1-01", "sadskill", "codex", 1)
