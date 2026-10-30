@@ -90,7 +90,8 @@ class ReleaseGateTests(unittest.TestCase):
         sha = "a" * 40
         good = [
             {"id": i, "head_sha": sha, "name": name,
-             "status": "completed", "conclusion": "success"}
+             "status": "completed", "conclusion": "success",
+             "app": {"id": gate.GITHUB_ACTIONS_APP_ID, "slug": "github-actions"}}
             for i, name in enumerate(gate.REQUIRED_CHECKS, 1)
         ]
         gate.verify_checks({"check_runs": good}, sha)
@@ -99,6 +100,8 @@ class ReleaseGateTests(unittest.TestCase):
             good + [{"id": 999, "head_sha": sha, "name": good[0]["name"],
                      "status": "completed", "conclusion": "failure"}],
             [{**entry, "head_sha": "b" * 40} for entry in good],
+            [{**entry, "app": {"id": 57789, "slug": "github-advanced-security"}} for entry in good],
+            [{**entry, "app": {}} for entry in good],
         ]:
             with self.assertRaisesRegex(gate.ReleaseError, "required check"):
                 gate.verify_checks({"check_runs": bad}, sha)
