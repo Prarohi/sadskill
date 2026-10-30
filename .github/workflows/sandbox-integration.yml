@@ -3,18 +3,8 @@ name: Native Linux Bubblewrap containment
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'scripts/sandbox.sh'
-      - 'scripts/sandbox-paths.sh'
-      - 'tests/test_sandbox.py'
-      - '.github/workflows/sandbox-integration.yml'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'scripts/sandbox.sh'
-      - 'scripts/sandbox-paths.sh'
-      - 'tests/test_sandbox.py'
-      - '.github/workflows/sandbox-integration.yml'
 
 permissions:
   contents: read
