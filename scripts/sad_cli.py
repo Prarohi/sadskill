@@ -5,7 +5,9 @@ evidence verification, project memory, and guardrail inspection.
 """
 
 import argparse
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -47,42 +49,120 @@ def configure_color(enabled: bool) -> None:
     BADGE_INFO = colored("[ℹ INFO]", "97;1")
 
 
+def _safe_directory_flags() -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory or os.open not in getattr(os, "supports_dir_fd", set()):
+        raise OSError("safe initialization is unavailable on this platform")
+    return os.O_RDONLY | nofollow | directory | getattr(os, "O_CLOEXEC", 0)
+
+
+def _open_or_create_directory_at(parent_fd: int, basename: str) -> int:
+    created = False
+    try:
+        os.mkdir(basename, mode=0o700, dir_fd=parent_fd)
+    except FileExistsError:
+        pass
+    else:
+        created = True
+    if created:
+        os.fsync(parent_fd)
+    try:
+        fd = os.open(basename, _safe_directory_flags(), dir_fd=parent_fd)
+    except OSError as exc:
+        raise OSError(f"refusing symlinked or non-directory confidence path: {basename}") from exc
+    if not stat.S_ISDIR(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(f"refusing non-directory confidence path: {basename}")
+    return fd
+
+
+def _ensure_template_at(parent_fd: int, basename: str, content: str) -> None:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(
+            basename,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow | cloexec,
+            0o600,
+            dir_fd=parent_fd,
+        )
+    except FileExistsError:
+        try:
+            fd = os.open(
+                basename,
+                os.O_RDONLY | os.O_NONBLOCK | nofollow | cloexec,
+                dir_fd=parent_fd,
+            )
+        except OSError as exc:
+            raise OSError(f"refusing symlinked or unsafe confidence document: {basename}") from exc
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise OSError(f"existing confidence document is not a regular, single-link file: {basename}")
+        finally:
+            os.close(fd)
+        return
+
+    try:
+        remaining = memoryview(content.encode("utf-8"))
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise OSError(f"short write while creating confidence document: {basename}")
+            remaining = remaining[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.fsync(parent_fd)
+
+
 def cmd_init(args) -> int:
-    """Initializes the .sad/ directory structure and templates."""
-    target_root = Path(args.project_root or Path.cwd()).resolve()
+    """Initialize .sad/ through pinned, no-follow directory descriptors."""
+    target_root = Path(args.project_root or Path.cwd()).absolute()
     sad_dir = target_root / ".sad"
-
-    events_dir = sad_dir / "events"
-    evidence_dir = sad_dir / "evidence"
-    benchmarks_dir = sad_dir / "benchmarks"
-
-    events_dir.mkdir(parents=True, exist_ok=True)
-    evidence_dir.mkdir(parents=True, exist_ok=True)
-    benchmarks_dir.mkdir(parents=True, exist_ok=True)
-
-    decisions_file = sad_dir / "decisions.md"
-    if not decisions_file.exists():
-        decisions_file.write_text(
+    folder_names = ("events", "evidence", "benchmarks")
+    templates = {
+        "decisions.md": (
             "# Architectural Decision Records (ADRs)\n\n"
-            "This document tracks durable architectural choices for the project.\n",
-            encoding="utf-8",
-        )
-
-    history_file = sad_dir / "history.md"
-    if not history_file.exists():
-        history_file.write_text(
+            "This document tracks durable architectural choices for the project.\n"
+        ),
+        "history.md": (
             "# Project Milestones & Execution History\n\n"
-            "Chronological milestone log maintained automatically across agent sessions.\n",
-            encoding="utf-8",
-        )
-
-    design_file = sad_dir / "design-memory.md"
-    if not design_file.exists():
-        design_file.write_text(
+            "Chronological milestone log maintained automatically across agent sessions.\n"
+        ),
+        "design-memory.md": (
             "# Design Tokens & Visual Hierarchy Memory\n\n"
-            "Approved tokens and UI styling decisions.\n",
-            encoding="utf-8",
-        )
+            "Approved tokens and UI styling decisions.\n"
+        ),
+    }
+
+    opened_fds = []
+    try:
+        if not target_root.name or target_root.name in (".", ".."):
+            raise OSError("refusing a filesystem-root or ambiguous project directory")
+        # Canonicalize only the parent: resolving the project itself follows
+        # the exact symlink O_NOFOLLOW is supposed to reject.
+        parent_fd = os.open(target_root.parent.resolve(strict=True), _safe_directory_flags())
+        opened_fds.append(parent_fd)
+        try:
+            root_fd = os.open(target_root.name, _safe_directory_flags(), dir_fd=parent_fd)
+        except OSError as exc:
+            raise OSError(f"refusing symlinked or non-directory project root: {target_root}") from exc
+        opened_fds.append(root_fd)
+        sad_fd = _open_or_create_directory_at(root_fd, ".sad")
+        opened_fds.append(sad_fd)
+        for name in folder_names:
+            folder_fd = _open_or_create_directory_at(sad_fd, name)
+            os.close(folder_fd)
+        for basename, content in templates.items():
+            _ensure_template_at(sad_fd, basename, content)
+    except (OSError, ValueError) as exc:
+        print(f"{BADGE_FAIL} Initialization refused: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        for fd in reversed(opened_fds):
+            os.close(fd)
 
     print(f"{BADGE_PASS} Initialized sadskill project confidence layer at {sad_dir}")
     print(f"  ├── events/       (process-safe append-only memory)")

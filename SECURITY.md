@@ -28,5 +28,6 @@ are specified in [Release Process](docs/release-process.md).
 3. Include the affected revision, impact, minimal reproduction and proposed
    mitigation if known.
 
-Reports are reviewed as maintainer capacity permits. No unverified response
-or resolution-time guarantee is made.
+Reports are reviewed as maintainer capacity permits. No response-time or
+remediation-time guarantee is made. Any coordinated fix
+and disclosure timeline will be agreed with the reporter where possible.
