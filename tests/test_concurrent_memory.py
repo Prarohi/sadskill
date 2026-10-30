@@ -126,7 +126,10 @@ class ConcurrentMemoryTests(unittest.TestCase):
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = [executor.submit(write_worker, i) for i in range(total_writers)]
-            concurrent.futures.wait(futures)
+            # wait() only waits for completion: it silently hides worker exceptions.
+            # Propagate each failure so CI identifies the cause of a missing event.
+            for future in futures:
+                future.result()
 
         events = list_events(self.root)
         self.assertEqual(len(events), total_writers, f"Expected {total_writers} events, found {len(events)}")
