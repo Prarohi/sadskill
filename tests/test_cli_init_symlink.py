@@ -129,10 +129,17 @@ class CliInitSymlinkTests(unittest.TestCase):
     def test_existing_directory_at_template_path_is_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp) / "project"
-            (project / ".sad" / "decisions.md").mkdir(parents=True)
+            directory = project / ".sad" / "decisions.md"
+            directory.mkdir(parents=True)
+            sentinel = directory / "user-content.txt"
+            sentinel.write_text("preserve user data\n", encoding="utf-8")
+
             result = self.invoke(project)
+
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("not a file", result.stderr)
+            self.assertIn("not a regular, single-link file", result.stderr)
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve user data\n")
 
 
 if __name__ == "__main__":
