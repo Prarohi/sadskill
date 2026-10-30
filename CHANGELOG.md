@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - Unreleased
 
+### Fixed
+- Make the draft-release gate require every protected-main check at the exact release commit, including trusted CodeQL and real Bubblewrap results.
+- Validate canonical SemVer prerelease identifiers and accept valid build metadata.
+
 ### Added
 - **12-Task C1 Benchmark Harness**: Deterministic mock conditions and optional real Codex, Claude and Gemini CLI adapters. No independently graded paired real-agent trial has established improved correctness or token savings.
 - **Canonical Guardrail Parser**: Recursive AST command unwrapper supporting wrappers (`env`, `sudo`, `command`, `exec`, `nohup`, `nice`) and nested shell interpreters (`bash -c`, `sh -c`, `zsh -c`) to prevent evasive bypass of destructive Git, SQL, and filesystem operations.

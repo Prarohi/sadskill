@@ -35,7 +35,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: python3 scripts/release_gate.py check --tag "$RELEASE_TAG"
 
-      - name: Require exact-head CI and CodeQL success
+      - name: Require all protected-main and native checks at exact HEAD
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

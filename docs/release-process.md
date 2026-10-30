@@ -24,14 +24,19 @@ been rebuilt from current main.
 | Weekly | CodeQL on main |
 | Weekly | Dependabot proposes GitHub Actions version bumps as separate PRs |
 
-All general CI uses a read-only repository token. The protected main
-ruleset currently requires Node 20, Node 22 and PostgreSQL RLS.
-The version metadata gate runs **inside the required Node jobs**.
-CodeQL is additionally mandatory for creating a release draft; if you
-also want to block every PR merge until CodeQL passes, add its exact job
-name (`CodeQL Python security analysis`) to the ruleset in the GitHub UI
-(Administration write permission required). Independent review is a
-human release gate, not something CodeQL certifies.
+All general CI uses a read-only repository token. The protected-main ruleset
+currently requires `Verify sadskill (Node 20)`, `Verify sadskill (Node 22)`,
+`Native PostgreSQL RLS`, `Native Linux Bubblewrap containment`, and the
+GitHub Advanced Security `CodeQL` result. It also requires resolved review
+threads and prohibits deletion and non-fast-forward updates. The current
+ruleset requires **zero approving reviews**; eligible independent human review
+is still a project release/merge requirement and must be recorded separately.
+
+The release gate independently checks every protected-main status above, plus
+`CodeQL Python security analysis` and native macOS/Windows smoke checks. It
+accepts each result only from its expected GitHub application and exact commit.
+The version metadata gate runs **inside the required Node jobs**. A CodeQL run
+is evidence for that analysis only; it does not certify an independent review.
 
 ## Preparing v0.5.0 (or any future version)
 
@@ -53,9 +58,9 @@ human release gate, not something CodeQL certifies.
 4. Run GitHub Actions → **Prepare verified draft release** via
    **workflow_dispatch on main**, supplying this *existing* tag.
 5. The validation job fails closed if the tag/version/changelog disagree,
-   tag does not equal main HEAD, any of Node 20/22, native PostgreSQL
-   RLS, CodeQL, macOS/Windows smoke is missing or non-green at that
-   SHA, local tests fail, or reproducible archive comparison fails.
+   the tag does not equal main HEAD, any protected-main check or release-only
+   macOS/Windows/CodeQL-analysis check is missing or non-green at that SHA,
+   local tests fail, or reproducible archive comparison fails.
 6. A separate job with `contents: write` downloads reviewed artifacts
    (without checking out PR code), re-verifies SHA-256 and source commit,
    refuses an existing release/draft, and creates **a draft only**.

@@ -21,6 +21,11 @@ It offers `sad doctor`, `sad verify`, `sad guard`, `sad memory`,
   including `skills` package single-skill discovery.
 - `Native PostgreSQL RLS`: real PostgreSQL policy tests and negative control
   proving disabled RLS fails.
+- `Native Linux Bubblewrap containment`: actual namespace and filesystem
+  containment tests; missing Bubblewrap or unavailable unprivileged namespaces
+  fail the job.
+- `CodeQL`: the GitHub Advanced Security result required by the protected-main
+  ruleset.
 
 The workflow grants only `contents: read`, pins GitHub Actions to immutable
 commits, bounds the main verification job to 30 minutes and the RLS job to 10
@@ -111,9 +116,11 @@ README, `plugin.json`, CLI banner and CHANGELOG must agree. CodeQL also runs
 weekly; Dependabot proposes GitHub Actions updates for review.
 
 The manually dispatched [draft-release workflow](../.github/workflows/release.yml)
-checks exact-head CI and CodeQL, requires an existing matching tag and dated
-changelog, builds reproducible archives and SHA256SUMS, and creates a **draft
-only**. A maintainer must publish any release manually.
+checks every protected-main status (including CodeQL and Bubblewrap) plus the
+native macOS/Windows and CodeQL analysis jobs at the exact tag commit. It then
+requires an existing matching tag and dated changelog, builds reproducible
+archives and SHA256SUMS, and creates a **draft only**. A maintainer must publish
+any release manually.
 
 See [Release Process](release-process.md) for the promotion sequence, current
 published-versus-source version distinction, and existing v0.4.0 draft warning.

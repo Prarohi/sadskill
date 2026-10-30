@@ -58,10 +58,25 @@ class ReleaseGateTests(unittest.TestCase):
             gate.check()
 
     def test_invalid_version_rejected(self):
-        for invalid in ("v0.5.0", "0.05.0", "0.5.0-", "0.5"):
+        for invalid in ("v0.5.0", "0.05.0", "0.5.0-", "0.5",
+                        "0.5.0-01", "0.5.0-rc.01"):
             (self.root / "VERSION").write_text(invalid + "\n")
             with self.subTest(invalid=invalid), self.assertRaisesRegex(gate.ReleaseError, "SemVer"):
                 gate.check()
+
+    def test_valid_semver_prerelease_and_build_metadata_are_accepted(self):
+        version = "0.5.0-rc.1+build.02"
+        (self.root / "VERSION").write_text(version + "\n")
+        (self.root / "plugin.json").write_text(json.dumps({"version": version}))
+        (self.root / "skills/sadskill/SKILL.md").write_text(
+            f"---\nname: sadskill\nmetadata:\n  version: {version}\n---\n"
+        )
+        (self.root / "README.md").write_text(f"> Version: `v{version}` (release candidate)\n")
+        (self.root / "scripts/sad_cli.py").write_text(f'version="sadskill {version}"\n')
+        (self.root / "CHANGELOG.md").write_text(
+            f"# Changelog\n\n## [{version}] - Unreleased\n\n### Fixed\n- A new fix.\n"
+        )
+        self.assertEqual(gate.check(), version)
 
     def test_impossible_changelog_calendar_dates_are_rejected(self):
         for invalid in ("2026-13-01", "2026-02-30", "2026-11-31", "2025-02-29", "2026-1-01"):
@@ -98,18 +113,34 @@ class ReleaseGateTests(unittest.TestCase):
         good = [
             {"id": i, "head_sha": sha, "name": name,
              "status": "completed", "conclusion": "success",
-             "app": {"id": gate.GITHUB_ACTIONS_APP_ID, "slug": "github-actions"}}
-            for i, name in enumerate(gate.REQUIRED_CHECKS, 1)
+             "app": {"id": app_id, "slug": "trusted-check-provider"}}
+            for i, (name, app_id) in enumerate(gate.REQUIRED_CHECK_APP_IDS.items(), 1)
         ]
+        ruleset_checks = {
+            "Verify sadskill (Node 20)", "Verify sadskill (Node 22)",
+            "Native PostgreSQL RLS", "Native Linux Bubblewrap containment", "CodeQL",
+        }
+        self.assertTrue(ruleset_checks.issubset(gate.REQUIRED_CHECK_APP_IDS))
         gate.verify_checks({"check_runs": good}, sha)
+        for missing in gate.REQUIRED_CHECKS:
+            with self.subTest(missing=missing), self.assertRaisesRegex(gate.ReleaseError, "required check"):
+                gate.verify_checks({"check_runs": [entry for entry in good if entry["name"] != missing]}, sha)
+
+        failed_newest = good + [{
+            **good[0], "id": 999, "status": "completed", "conclusion": "failure",
+        }]
+        wrong_apps = [
+            {**entry, "app": {"id": gate.REQUIRED_CHECK_APP_IDS[entry["name"]] + 1}}
+            for entry in good
+        ]
+        pending = [{**entry, "status": "in_progress", "conclusion": None} for entry in good]
+        wrong_head = [{**entry, "head_sha": "b" * 40} for entry in good]
         for bad in [
-            good[:-1],
-            good + [{"id": 999, "head_sha": sha, "name": good[0]["name"],
-                     "status": "completed", "conclusion": "failure",
-                     "app": {"id": gate.GITHUB_ACTIONS_APP_ID, "slug": "github-actions"}}],
-            [{**entry, "head_sha": "b" * 40} for entry in good],
-            [{**entry, "app": {"id": 57789, "slug": "github-advanced-security"}} for entry in good],
+            failed_newest,
+            wrong_head,
+            wrong_apps,
             [{**entry, "app": {}} for entry in good],
+            pending,
         ]:
             with self.assertRaisesRegex(gate.ReleaseError, "required check"):
                 gate.verify_checks({"check_runs": bad}, sha)

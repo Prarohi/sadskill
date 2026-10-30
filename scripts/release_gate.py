@@ -11,16 +11,30 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
-SHA = re.compile(r"[0-9a-f]{40}")
-# GitHub Actions app ID. Require trusted provenance, not just a spoofable check name.
-GITHUB_ACTIONS_APP_ID = 15368
-REQUIRED_CHECKS = (
-    "Verify sadskill (Node 20)", "Verify sadskill (Node 22)",
-    "Native PostgreSQL RLS", "CodeQL Python security analysis",
-    "Native macOS install/restore smoke",
-    "Native Windows skill-content smoke (not companion CLI)",
+PRERELEASE_IDENTIFIER = r"(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+BUILD_IDENTIFIER = r"[0-9A-Za-z-]+"
+SEMVER = re.compile(
+    rf"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    rf"(?:-({PRERELEASE_IDENTIFIER}(?:\.{PRERELEASE_IDENTIFIER})*))?"
+    rf"(?:\+({BUILD_IDENTIFIER}(?:\.{BUILD_IDENTIFIER})*))?"
 )
+SHA = re.compile(r"[0-9a-f]{40}")
+# Require trusted provenance for each check, not just a spoofable check name.
+GITHUB_ACTIONS_APP_ID = 15368
+CODEQL_APP_ID = 57789
+REQUIRED_CHECK_APP_IDS = {
+    # These five contexts are required by the live protected-main ruleset.
+    "Verify sadskill (Node 20)": GITHUB_ACTIONS_APP_ID,
+    "Verify sadskill (Node 22)": GITHUB_ACTIONS_APP_ID,
+    "Native PostgreSQL RLS": GITHUB_ACTIONS_APP_ID,
+    "Native Linux Bubblewrap containment": GITHUB_ACTIONS_APP_ID,
+    "CodeQL": CODEQL_APP_ID,
+    # The release gate also requires these native compatibility/security jobs.
+    "CodeQL Python security analysis": GITHUB_ACTIONS_APP_ID,
+    "Native macOS install/restore smoke": GITHUB_ACTIONS_APP_ID,
+    "Native Windows skill-content smoke (not companion CLI)": GITHUB_ACTIONS_APP_ID,
+}
+REQUIRED_CHECKS = tuple(REQUIRED_CHECK_APP_IDS)
 
 
 class ReleaseError(ValueError):
@@ -98,11 +112,12 @@ def verify_checks(report, sha):
     latest = {}
     for run in sorted(report["check_runs"], key=lambda r: r.get("id", 0), reverse=True):
         name = run.get("name")
+        expected_app_id = REQUIRED_CHECK_APP_IDS.get(name)
         if (
             run.get("head_sha") == sha
-            and name in REQUIRED_CHECKS
+            and expected_app_id is not None
             and isinstance(run.get("app"), dict)
-            and run["app"].get("id") == GITHUB_ACTIONS_APP_ID
+            and run["app"].get("id") == expected_app_id
             and name not in latest
         ):
             latest[name] = run
