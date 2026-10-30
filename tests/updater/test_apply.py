@@ -99,6 +99,27 @@ class ApplyRollbackTests(SandboxCase):
             entry["content_hash"],
             core.compute_sha256(entry["destination"]),
         )
+        state_dir = Path(self.home) / ".sadskill"
+        self.assertEqual(
+            stat.S_IMODE((state_dir / "install-manifest.json").stat().st_mode),
+            0o600,
+        )
+        self.assertEqual(
+            stat.S_IMODE((state_dir / "install-state.json").stat().st_mode),
+            0o600,
+        )
+        self.assertEqual(
+            stat.S_IMODE((state_dir / "update-journal.json").stat().st_mode),
+            0o600,
+        )
+        self.assertEqual(stat.S_IMODE(Path(self.skill_md()).stat().st_mode), 0o600)
+        self.assertEqual(
+            stat.S_IMODE(
+                (Path(self.home) / ".claude" / "hooks" / "git-guardrail.sh")
+                .stat().st_mode
+            ),
+            0o700,
+        )
         # History + journal closed.
         with open(os.path.join(self.home, ".sadskill", "history.jsonl"),
                   encoding="utf-8") as fh:
@@ -165,13 +186,13 @@ class ApplyRollbackTests(SandboxCase):
     def test_apply_rejects_unsupported_special_permission_bits(self):
         target = Path(self.skill_md())
         original = target.read_bytes()
-        os.chmod(target, 0o4755)
+        os.chmod(target, 0o4700)
 
         applied = self.run_update("apply", "--json", "--force")
         self.assertEqual(applied.returncode, 4, applied.stdout + applied.stderr)
         self.assertIn("unsupported special permission bits", applied.stdout)
         self.assertEqual(target.read_bytes(), original)
-        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o4755)
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o4700)
         self.assertFalse(
             (Path(self.home) / ".sadskill" / "update-journal.json").exists()
         )
