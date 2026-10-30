@@ -21,6 +21,11 @@ It offers `sad doctor`, `sad verify`, `sad guard`, `sad memory`,
   including `skills` package single-skill discovery.
 - `Native PostgreSQL RLS`: real PostgreSQL policy tests and negative control
   proving disabled RLS fails.
+- `Native Linux Bubblewrap containment`: actual namespace and filesystem
+  containment tests; missing Bubblewrap or unavailable unprivileged namespaces
+  fail the job.
+- `CodeQL`: the GitHub Advanced Security result required by the protected-main
+  ruleset.
 
 The workflow grants only `contents: read`, pins GitHub Actions to immutable
 commits, bounds the main verification job to 30 minutes and the RLS job to 10
@@ -52,10 +57,12 @@ a hyphenated, non-package directory.
 ```
 
 **Critical benchmark limitation:** `--provider mock` deliberately creates
-simulated fixture solutions. They are **not actual model tests** and carry no
-measured agent token savings. `--provider codex/claude/gemini` currently fails
-closed without a working real-agent adapter. CI green, mock fixture passing,
-and static contract passing are distinct from empirical superiority.
+simulated fixtures. They are **not actual model tests** or measured token
+savings. Live Codex/Claude/Gemini CLI adapters are opt-in and require an
+authenticated CLI inside an external disposable isolated runner. No
+independently graded paired real-agent study is published. CI green,
+mock fixture passing and static contract passing do not establish
+comparative superiority.
 
 **Critical security limitation:** `sad guard` is a defense-in-depth lexical
 filter, not a complete shell or SQL security boundary. Always rely on host
@@ -64,11 +71,13 @@ operations.
 
 ## How to merge responsibly
 
-Use a stable base and correct stacked order: PR #4 (0.4 integration), then
-retarget PR #9 (0.5 candidate) onto main. Require exact-head CI, independent
-review or an *explicitly authorized and recorded owner PR-only bypass*,
-resolved conversations and intact branch protection. PR-only bypass does not
-turn unrun checks into passing checks.
+PR #4 and PR #9 have already been merged into protected `main` as of
+2026-10-30. New PRs should target current main and require exact-head Node
+20/22 and native PostgreSQL RLS checks with resolved review threads. Request
+independent review for security-sensitive changes. CodeQL also runs on PRs
+and must pass before release-draft preparation; it is not currently a
+main-ruleset required status check. Never infer a successful new head from
+an older passing CI run.
 
 If your GitHub connector cannot update the ruleset, do not alter the branch
 through an alternate destructive ref operation. Explain the permissions
@@ -98,3 +107,20 @@ download and claim that this independently authenticates the release.
 Tests: tests/test_web_install_security.py runs offline with a fake downloader.
 Until signed/published release digests, comprehensive platform checks and
 independent review are complete, issue #10 remains open.
+
+## Release CI/CD and version automation
+
+Every protected Node 20/22 CI run verifies version consistency using
+`python3 scripts/release_gate.py check`: `VERSION`, skill frontmatter,
+README, `plugin.json`, CLI banner and CHANGELOG must agree. CodeQL also runs
+weekly; Dependabot proposes GitHub Actions updates for review.
+
+The manually dispatched [draft-release workflow](../.github/workflows/release.yml)
+checks every protected-main status (including CodeQL and Bubblewrap) plus the
+native macOS/Windows and CodeQL analysis jobs at the exact tag commit. It then
+requires an existing matching tag and dated changelog, builds reproducible
+archives and SHA256SUMS, and creates a **draft only**. A maintainer must publish
+any release manually.
+
+See [Release Process](release-process.md) for the promotion sequence, current
+published-versus-source version distinction, and existing v0.4.0 draft warning.

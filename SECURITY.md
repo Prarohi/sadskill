@@ -1,31 +1,33 @@
 # Security Policy
 
-## Supported Versions
+## Release status and support boundaries
 
-| Version | Maintenance status |
-| ------- | ------------------ |
-| 0.5.0 source candidate | Unreleased; not a published security-update channel |
-| 0.4.0 | Unpublished draft; not a published security-update channel |
-| 0.3.x | Latest published release line; report suspected vulnerabilities privately |
-| 0.2.x and earlier | Legacy releases; upgrade recommended |
+`VERSION` describes the **current source tree**, not necessarily a public
+release. The following inventory was verified on **2026-10-30**:
 
-This table distinguishes released artifacts from source candidates. It does **not**
-promise a fixed support lifetime or that every report can be patched
-immediately. Confirm the latest published release on GitHub before upgrading.
+| Version | State | Guidance |
+| --- | --- | --- |
+| 0.5.0 | Unreleased source candidate | Not a published release |
+| 0.4.0 | Draft GitHub release | Contains historical notes; do not publish without review |
+| 0.3.0 | Published | Latest published version at this audit date |
+| 0.2.1 | Older published release | Review subsequent security fixes before use |
+| 0.1.x | Historical | Unsupported |
 
----
+This is a dated inventory, not a guarantee that any listed release is free
+of vulnerabilities or that an unpublished version receives production support.
+Check the [live GitHub Releases](https://github.com/Prarohi/sadskill/releases)
+page for current publication status. Release promotion and artifact validation
+are specified in [Release Process](docs/release-process.md).
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-Security is a foundational pillar of `sadskill`. If you discover a vulnerability—including security guardrail bypasses, credential exposure risks, or malicious payload execution vectors:
+**Do not post a new vulnerability in a public GitHub issue.**
 
-1. **Do NOT open a public GitHub issue.**
-2. Send an advisory report via GitHub Private Security Advisories:
-   - Navigate to the [Security Advisories](https://github.com/Prarohi/sadskill/security/advisories) tab on GitHub.
-   - Click **"Report a vulnerability"**.
-3. Include:
-   - A description of the issue and affected files/protocols.
-   - Steps to reproduce or a minimal proof-of-concept (PoC).
-   - Any proposed remediation diff.
+1. Go to [GitHub Security Advisories](https://github.com/Prarohi/sadskill/security/advisories).
+2. Select **Report a vulnerability**.
+3. Include the affected revision, impact, minimal reproduction and proposed
+   mitigation if known.
 
-We aim to acknowledge security reports promptly and coordinate a tested fix with the reporter before public disclosure. Response time and remediation depend on the severity and available maintainers.
+Reports are reviewed as maintainer capacity permits. No response-time or
+remediation-time guarantee is made. Any coordinated fix
+and disclosure timeline will be agreed with the reporter where possible.

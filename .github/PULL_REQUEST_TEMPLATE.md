@@ -19,3 +19,8 @@ For a behavioral fix, include a meaningful regression case. For documentation, c
 - [ ] Request an independent reviewer; address findings and recheck CI after the final push.
 
 State material risks and recovery steps. Required GitHub review and current CI must complete before merge; ticking this template does not replace them.
+
+## Release and version impact
+
+- [ ] If version metadata changes, verify `VERSION`, skill, README, plugin, CLI, CHANGELOG and security status are consistent.
+- [ ] This PR does not create tags, publish releases, bypass protected status checks or silently alter existing release assets.

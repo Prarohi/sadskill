@@ -5,17 +5,22 @@ All notable changes to the `sadskill` project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-10-29
+## [0.5.0] - Unreleased
+
+### Fixed
+- Make the draft-release gate require every protected-main check at the exact release commit, including trusted CodeQL and real Bubblewrap results.
+- Validate canonical SemVer prerelease identifiers and accept valid build metadata.
 
 ### Added
-- **12-Task C1 Comparative Agent Benchmark Harness**: Runnable benchmarking suite (`benchmarks/harness/runner.py`) across 12 realistic defect scenarios (C1-01 through C1-12) evaluating `plain`, `sadskill`, and `competitor` conditions. Supports deterministic `--provider mock` and real agent execution (`--provider codex`) with fail-closed authentication checking (`NOT_EXECUTED_NO_AUTH`).
+- **12-Task C1 Benchmark Harness**: Deterministic mock conditions and optional real Codex, Claude and Gemini CLI adapters. No independently graded paired real-agent trial has established improved correctness or token savings.
 - **Canonical Guardrail Parser**: Recursive AST command unwrapper supporting wrappers (`env`, `sudo`, `command`, `exec`, `nohup`, `nice`) and nested shell interpreters (`bash -c`, `sh -c`, `zsh -c`) to prevent evasive bypass of destructive Git, SQL, and filesystem operations.
-- **Evidence v2 & Cryptographic Provenance**: Enhanced independent evidence verification (`scripts/verify-evidence.py`) with canonical JSON hashing, SHA-256 provenance hash-chaining across runs, and GitHub Artifact Attestation compatibility.
+- **Evidence v2**: Structured evidence verification and content-bound retests. A self-reported CI status or SHA-256 digest is not an authenticated publisher signature.
 - **Concurrency-Safe Project Memory (`.sad/`)**: Advisory file locking and immutable append-only event log (`scripts/sad_memory.py`) preventing multi-agent race conditions or silent lost updates.
 - **Agent Plugin Packaging**: Root `plugin.json` conforming to OpenAI Agent Plugin and Cursor standards while strictly maintaining single-skill discovery (`npx skills add . -l`).
 
 ### Changed
-- Promoted version across repository components to `0.5.0`.
+- Promoted source metadata to `0.5.0` as an **unreleased candidate**, not a published tag or GitHub release.
+- Added consistent-version CI validation and manual, fail-closed draft preparation with exact-head CI/CodeQL checks, reproducible archives, SHA256SUMS and source identity.
 - Hardened pre-push branch deletion and force-push checks.
 
 ## [0.4.0] - 2026-10-29

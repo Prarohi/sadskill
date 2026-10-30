@@ -119,6 +119,9 @@ jobs:
       - name: Verify vendored reference hashes
         run: bash scripts/update-vendor.sh --check
 
+      - name: Validate version and release metadata
+        run: python3 scripts/release_gate.py check
+
       - name: Run Python regression tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 

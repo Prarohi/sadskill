@@ -1,30 +1,47 @@
-# Independent security review and protected merge checklist
+# Independent security review and protected release checklist
 
-An automated CodeQL analysis is not a qualifying independent GitHub approval.
-Only a reviewer who is not the PR author/last pusher can satisfy the current
-protected-main requirement. Do not weaken GitHub rulesets to call a release ready.
+This is the current policy guidance (verified on 2026-10-30), not a
+statement that every security finding is resolved.
 
-## Required order
+## Current main ruleset and review
 
-1. Review and merge PR #4 into protected main after approval and exact-head checks.
-2. Retarget PR #9 onto main, resolve conflicts, and rerun all required CI.
-3. Obtain fresh independent approval for PR #9 at its final head.
-4. Merge only after GitHub's protected ruleset is satisfied and verify main.
+Integration PR #4 and candidate PR #9 were merged into protected main
+on 2026-10-30 (Bangladesh local time). The active branch ruleset requires
+successful **Verify sadskill (Node 20)**, **Verify sadskill (Node 22)**
+and **Native PostgreSQL RLS** checks, forbids force-push/deletion and
+requires resolution of GitHub review threads.
 
-## Security review topics
+The current GitHub required-approvals count is **zero**. That does not
+make a high-risk change independently reviewed: require a separate eligible
+human reviewer by project release policy where possible. A CodeQL run
+is not a human approval or proof of absence of vulnerabilities.
 
-- Installer symlink and parent traversal checks, backups and user-file preservation
-- Force restore, clean backups, uninstall purge and failed/partial rollback
-- Manifest destination ownership, Cursor workspace path containment and hashes
-- Git guardrail wrapper/subshell/alias bypasses and false positives
-- SQL guard edge cases and native PostgreSQL RLS negative control
-- Evidence retest path/recipe restrictions and honest benchmark metrics
-- Vendored reference integrity, attribution and upstream license checks
-- Native macOS smoke, Windows support limits and exact-head CI
-- CodeQL findings (triage alerts: passing upload alone is not a clean security verdict)
+## Current review order
 
-## Reviewer availability blocker
+1. Review each new change against the exact latest protected main.
+2. Verify installer, updater and memory safety boundary and any changed
+   file ownership, restore, concurrency, sandbox or trust assumptions.
+3. Request eligible independent security review for high-risk changes.
+4. Ensure current-head CI and CodeQL both pass, resolve threads and preserve
+   the required branch ruleset. Do not use an old-head pass.
+5. For a release, verify the reviewed tag and exact-head checks through
+   the [draft release workflow](../.github/workflows/release.yml) and inspect
+   [release process](release-process.md) before manual publication.
 
-On 2026-10-29, the repository collaborator API returned only sadafbabu,
-who authored both PRs. Invite a trusted additional GitHub user with review
-permissions and have that person submit an actual approval on each PR.
+## Security review focus
+
+- Installer path traversal, ownership, symlinks, hardlinks, backups and rollback
+- Memory root and .sad filesystem boundaries; live host lifecycle limits
+- Updater archive identity, redirects, checksum provenance and recovery
+- Command/SQL guardrail bypasses, false positives and sandbox limitations
+- Evidence verifier, retest allowlist and non-empirical benchmark claims
+- CodeQL alerts and repository dependency advisories (run success alone
+  does not certify a clean security report)
+- macOS/Windows smoke evidence and unsupported platform paths
+
+## Historical reviewer status
+
+An older note from 2026-10-29 said a second collaborator was needed to
+satisfy a one-approval ruleset. GitHub's active ruleset changed later to
+require zero approvals. Preserve independent release review as an
+engineering policy, but do not represent the old API state as current.

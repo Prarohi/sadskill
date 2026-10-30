@@ -2,13 +2,15 @@
 
 > **One engineering workflow. Any coding agent.**  
 > *A portable engineering workflow for coding agents that plans proportionally, remembers decisions, verifies outcomes, and reports uncertainty.*  
-> Version: `v0.5.0` (release candidate) · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity, Gemini CLI)
+> Version: `v0.5.0` (release candidate; not a published release) · License: `MIT` · Multi-Agent Compatible (Claude Code, OpenAI Codex, Cursor, Antigravity, Gemini CLI)
 
 > *"Understand the real engineering task, make the smallest appropriate change, preserve the reasoning, and prove what actually works—across coding agents."*
 
 [![CI](https://github.com/Prarohi/sadskill/actions/workflows/ci.yml/badge.svg)](https://github.com/Prarohi/sadskill/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![skills.sh](https://img.shields.io/badge/skills.sh-sadskill-success.svg)](https://skills.sh)
+
+> **Version policy:** `VERSION` describes this source checkout, not the latest published release. See [Release Process](docs/release-process.md) for tag, checksum, review and draft-publishing gates.
 
 `sadskill` is an open-source **Engineering Confidence Layer** for AI coding agents. Instead of juggling conflicting prompt fragments or enduring repetitive trial-and-error cycles, `sadskill` provides **conversation-aware context interpretation, whole-codebase discovery with coverage ledgers, risk-proportional planning, persistent project memory, defense-in-depth safety guardrails, and proof-grounded verification** across coding agents.
 
