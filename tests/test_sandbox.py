@@ -20,6 +20,8 @@ SANDBOX_SH = ROOT / "scripts/sandbox.sh"
 class SandboxTests(unittest.TestCase):
     def setUp(self):
         if not shutil.which("bwrap"):
+            if os.environ.get("SADSKILL_REQUIRE_BWRAP") == "1":
+                self.fail("Bubblewrap is mandatory for native sandbox integration CI")
             self.skipTest("bubblewrap ('bwrap') binary not available on host system")
         self.tmp = tempfile.TemporaryDirectory()
         self.proj = Path(self.tmp.name)
