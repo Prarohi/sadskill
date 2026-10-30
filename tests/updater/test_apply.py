@@ -84,7 +84,7 @@ class ApplyRollbackTests(SandboxCase):
         data = json.loads(p.stdout)
         self.assertTrue(data["applied"])
         self.assertEqual(data["to_version"], "0.3.1")
-        self.assertEqual(data.get("artifact_trust"), "TRANSPORT_ONLY")
+        self.assertEqual(data.get("artifact_trust"), "SOURCE_CHECKSUM_MATCHED")
         # Content updated.
         with open(self.skill_md(), encoding="utf-8") as fh:
             self.assertIn(MARKER, fh.read())

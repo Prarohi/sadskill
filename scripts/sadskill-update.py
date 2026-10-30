@@ -951,6 +951,8 @@ def cmd_check(args):
         "mixed_versions": len(observed_installed_versions(manifest)) > 1,
         "release_url": release.get("html_url"),
         "artifact_trust": _artifact_trust_hint(release),
+        "external_sha256_required":
+            _artifact_trust_hint(release) == "TRANSPORT_ONLY",
         "publisher_authenticated": False,
         "modified_installation": False,
     }, EXIT_OK
@@ -969,7 +971,10 @@ def cmd_plan(args):
         release = _fetch_pinned(args.version)
     target_ver = core.version_text(release_version(release))
     tarball_url = release_artifact_url(release)
-    tar_bytes, artifact_trust = _download_verified(release, tarball_url)
+    tar_bytes, artifact_trust = _download_verified(
+        release, tarball_url,
+        external_sha256=args.expected_sha256,
+    )
     # A plan validates the bounded archive in memory and never creates staging files.
     _stage, rel_files = stage_archive(tar_bytes, write=False)
     actions = build_transition(manifest, by_agent, rel_files)
@@ -1008,17 +1013,34 @@ def _manual_steps(by_agent):
     return steps
 
 
-def _download_verified(release, tarball_url):
+def _download_verified(release, tarball_url, external_sha256=None):
+    source_digest = release_digest(release, tarball_url)
+    if external_sha256 is not None:
+        external_sha256 = external_sha256.lower()
+        if source_digest is not None and source_digest != external_sha256:
+            raise core.IntegrityError(
+                "independently supplied SHA-256 does not match SHA256SUMS"
+            )
+    expected = source_digest or external_sha256
+    if expected is None:
+        raise core.IntegrityError(
+            "release is missing a SHA256SUMS entry for the requested archive; "
+            "refusing an unauthenticated update. For a legacy release only, "
+            "verify its archive digest from an independent trusted source and "
+            "pass --expected-sha256 for this invocation"
+        )
     tar_bytes, _ = _open(urllib.request.Request(tarball_url), MAX_TARBALL_BYTES)
-    expected = release_digest(release, tarball_url)
     if expected is not None:
         actual = core.compute_sha256_of_bytes(tar_bytes)
         if actual != expected:
             raise core.IntegrityError(
                 f"tarball digest mismatch: expected {expected}, got {actual}"
             )
-        return tar_bytes, "SOURCE_CHECKSUM_MATCHED"
-    return tar_bytes, "TRANSPORT_ONLY"
+        return tar_bytes, (
+            "SOURCE_CHECKSUM_MATCHED" if source_digest is not None
+            else "EXTERNAL_CHECKSUM_MATCHED"
+        )
+    raise core.IntegrityError("no trusted expected SHA-256 is available")
 
 
 def _artifact_trust_hint(release):
@@ -1101,7 +1123,10 @@ def _cmd_apply_locked(args):
                 "message": f"installation already at {current}; nothing to do",
             }, EXIT_OK
 
-    tar_bytes, artifact_trust = _download_verified(release, tarball_url)
+    tar_bytes, artifact_trust = _download_verified(
+        release, tarball_url,
+        external_sha256=args.expected_sha256,
+    )
     stage, rel_files = stage_archive(tar_bytes)
     try:
         actions = build_transition(manifest, by_agent, rel_files)
@@ -2045,6 +2070,11 @@ def _print_human(result):
             print(f"latest:  {result.get('latest')}")
             state = "up to date" if result.get("up_to_date") else "update available"
             print(f"state:   {state} ({result.get('channel')})")
+            print(f"artifact trust: {result.get('artifact_trust')}")
+            if result.get("external_sha256_required"):
+                print("warning: this legacy release has no SHA256SUMS; plan/apply "
+                      "refuse unless you pass --expected-sha256 from an "
+                      "independent trusted source")
     elif cmd == "plan":
         print(f"transition: {result.get('from_version')} -> {result.get('to_version')}")
         print(f"files affected: {len(result.get('files_affected', []))}")
@@ -2081,6 +2111,12 @@ def _read_json(path):
         return None
 
 
+def _parse_cli_sha256(value):
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+        raise argparse.ArgumentTypeError("expected exactly 64 hexadecimal SHA-256 digits")
+    return value.lower()
+
+
 def main(argv=None):
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
@@ -2088,6 +2124,11 @@ def main(argv=None):
     common.add_argument("--channel", choices=["stable", "beta", "pinned"],
                         help="update channel (default: stored channel or stable)")
     common.add_argument("--version", help="explicit version (pinned channel)")
+    common.add_argument(
+        "--expected-sha256", type=_parse_cli_sha256,
+        help="expected archive SHA-256 from an independent trusted source; "
+             "required to migrate a legacy release without SHA256SUMS",
+    )
     common.add_argument("--force", action="store_true",
                         help="proceed over detected user modifications "
                              "(after backing them up)")

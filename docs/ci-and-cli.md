@@ -21,6 +21,11 @@ It offers `sad doctor`, `sad verify`, `sad guard`, `sad memory`,
   including `skills` package single-skill discovery.
 - `Native PostgreSQL RLS`: real PostgreSQL policy tests and negative control
   proving disabled RLS fails.
+- `Native Linux Bubblewrap containment`: a hosted Ubuntu job that requires
+  actual user and process namespaces and runs the sandbox filesystem tests
+  without accepting skipped namespace cases.
+- `CodeQL`: the GitHub Advanced Security code-scanning check associated with
+  the Python security-analysis workflow.
 
 The workflow grants only `contents: read`, pins GitHub Actions to immutable
 commits, bounds the main verification job to 30 minutes and the RLS job to 10
@@ -62,17 +67,28 @@ filter, not a complete shell or SQL security boundary. Always rely on host
 permissions, sandboxing and explicit consent for potentially destructive
 operations.
 
+## Updater artifact integrity
+
+`sadskill-update.py check` reports whether the selected release has a
+`SHA256SUMS.txt` asset. `plan` and `apply` fail closed when the checksum is
+missing, malformed, or does not contain the exact archive name. For a legacy
+release without a checksum, obtain its exact archive SHA-256 from an
+independent trusted source and pass it as `--expected-sha256` to that one
+`plan` or `apply` invocation. The updater verifies the fetched archive against
+it and labels the result `EXTERNAL_CHECKSUM_MATCHED`; the digest is not saved.
+A malformed or mismatched published checksum still refuses the operation. A
+checksum match is integrity evidence, not independent publisher
+authentication.
+
 ## How to merge responsibly
 
-Use a stable base and correct stacked order: PR #4 (0.4 integration), then
-retarget PR #9 (0.5 candidate) onto main. Require exact-head CI, independent
-review or an *explicitly authorized and recorded owner PR-only bypass*,
-resolved conversations and intact branch protection. PR-only bypass does not
-turn unrun checks into passing checks.
-
-If your GitHub connector cannot update the ruleset, do not alter the branch
-through an alternate destructive ref operation. Explain the permissions
-blocker and keep the PR reviewable.
+Merge prerequisite security work in dependency order: establish the real Linux
+Bubblewrap check (PR #18) before integrating dependent benchmark, release, or
+updater PRs (#13, #15, and #19). Require exact-head CI, resolved conversations,
+intact branch protection, and independent human review for security- and
+release-sensitive changes. AI review is useful evidence but does not count as
+independent human review. If any required status is missing or review is
+unavailable, keep the PR draft and do not merge it.
 
 ## Pinned web installer: intentionally breaking security change
 

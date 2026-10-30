@@ -1,6 +1,7 @@
 """Regression tests for updater trust boundaries and resource limits."""
 
 import http.server
+import hashlib
 import importlib.util
 import io
 import json
@@ -10,6 +11,7 @@ import sys
 import tarfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 TESTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -253,7 +255,7 @@ class ChecksumTrustTests(SandboxCase):
         self.run_install("-a", "claude")
         self.stub = GitHubStub()
         self.tarball, self.hashes = build_tarball(top_dir="sadskill-0.3.1")
-        self.stub.serve_release("v0.3.1", self.tarball)
+        self.stub.serve_release("v0.3.1", self.tarball, sums_bytes=None)
         self.base = self.stub.start()
         self.addCleanup(self.stub.stop)
         self.env["SADSKILL_UPDATE_API_BASE"] = self.base
@@ -261,8 +263,103 @@ class ChecksumTrustTests(SandboxCase):
     def test_check_discloses_transport_only_when_checksum_asset_is_absent(self):
         result = self.run_update("check", "--json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout).get("artifact_trust"),
-                         "TRANSPORT_ONLY")
+        data = json.loads(result.stdout)
+        self.assertEqual(data.get("artifact_trust"), "TRANSPORT_ONLY")
+        self.assertTrue(data.get("external_sha256_required"))
+
+        human = self.run_update("check")
+        self.assertEqual(human.returncode, 0, human.stdout + human.stderr)
+        self.assertIn("--expected-sha256", human.stdout)
+
+    def test_apply_refuses_transport_only_release_before_any_write(self):
+        before = self.home_snapshot()
+        result = self.run_update("apply", "--json")
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data.get("error"), "integrity")
+        self.assertIn("SHA256SUMS", data.get("details", ""))
+        self.assertEqual(self.home_snapshot(), before)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.home, ".sadskill", "update-journal.json"))
+        )
+
+    def test_plan_refuses_transport_only_release_without_external_sha256(self):
+        before = self.home_snapshot()
+        result = self.run_update("plan", "--json")
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertIn("SHA256SUMS", json.loads(result.stdout).get("details", ""))
+        self.assertEqual(self.home_snapshot(), before)
+
+    def test_external_sha256_plan_is_zero_write_and_one_time(self):
+        before = self.home_snapshot()
+        sha256 = hashlib.sha256(self.tarball).hexdigest()
+        result = self.run_update(
+            "plan", "--json", "--expected-sha256", sha256
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["artifact_trust"], "EXTERNAL_CHECKSUM_MATCHED")
+        self.assertTrue(data["zero_writes"])
+        self.assertEqual(self.home_snapshot(), before)
+
+        refused = self.run_update("plan", "--json")
+        self.assertEqual(refused.returncode, 4, refused.stdout + refused.stderr)
+
+    def test_external_sha256_apply_can_be_rolled_back(self):
+        skill = os.path.join(
+            self.home, ".claude", "skills", "sadskill", "SKILL.md"
+        )
+        original = Path(skill).read_bytes()
+        unrelated = Path(self.home, "user-notes.txt")
+        unrelated.write_text("USER DATA\n")
+        sha256 = hashlib.sha256(self.tarball).hexdigest()
+        applied = self.run_update(
+            "apply", "--json", "--expected-sha256", sha256
+        )
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(
+            json.loads(applied.stdout)["artifact_trust"],
+            "EXTERNAL_CHECKSUM_MATCHED",
+        )
+
+        rolled_back = self.run_update("rollback", "--json")
+        self.assertEqual(
+            rolled_back.returncode, 0,
+            rolled_back.stdout + rolled_back.stderr,
+        )
+        self.assertTrue(json.loads(rolled_back.stdout)["performed"])
+        self.assertEqual(Path(skill).read_bytes(), original)
+        self.assertEqual(unrelated.read_text(), "USER DATA\n")
+
+    def test_wrong_external_sha256_fails_before_any_write(self):
+        before = self.home_snapshot()
+        wrong = "0" * 64
+        result = self.run_update(
+            "apply", "--json", "--expected-sha256", wrong
+        )
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertEqual(self.home_snapshot(), before)
+
+    def test_external_sha256_must_match_published_checksums(self):
+        self.stub.serve_release("v0.3.1", self.tarball)
+        source_sha256 = hashlib.sha256(self.tarball).hexdigest()
+        wrong = "0" * 64 if source_sha256 != "0" * 64 else "1" * 64
+        before = self.home_snapshot()
+        result = self.run_update(
+            "apply", "--json", "--expected-sha256", wrong
+        )
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertIn("does not match SHA256SUMS", json.loads(result.stdout)["details"])
+        self.assertEqual(self.home_snapshot(), before)
+
+    def test_invalid_external_sha256_is_rejected_by_cli(self):
+        before = self.home_snapshot()
+        result = self.run_update(
+            "apply", "--json", "--expected-sha256", "not-a-sha256"
+        )
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("64 hexadecimal", result.stderr)
+        self.assertEqual(self.home_snapshot(), before)
 
     def test_malformed_published_checksum_fails_closed(self):
         self.stub.serve_release(

@@ -47,6 +47,8 @@ class ArtifactTests(SandboxCase):
         self.skill_dir = os.path.join(self.home, ".claude", "skills", "sadskill")
 
     def serve_bad(self, tar_bytes, sums=None):
+        if sums is None:
+            sums = (hashlib.sha256(tar_bytes).hexdigest() + "  v9.9.9.tar.gz\n").encode()
         self.stub.serve_release("v9.9.9", tar_bytes, sums_bytes=sums)
 
     def _apply_and_expect_rc4(self, tag_suffix=""):
