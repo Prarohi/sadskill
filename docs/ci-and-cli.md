@@ -21,6 +21,11 @@ It offers `sad doctor`, `sad verify`, `sad guard`, `sad memory`,
   including `skills` package single-skill discovery.
 - `Native PostgreSQL RLS`: real PostgreSQL policy tests and negative control
   proving disabled RLS fails.
+- `Native Linux Bubblewrap containment`: a hosted Ubuntu job that requires
+  actual user and process namespaces and runs the sandbox filesystem tests
+  without accepting skipped namespace cases.
+- `CodeQL`: the GitHub Advanced Security code-scanning check associated with
+  the Python security-analysis workflow.
 
 The workflow grants only `contents: read`, pins GitHub Actions to immutable
 commits, bounds the main verification job to 30 minutes and the RLS job to 10
@@ -77,15 +82,13 @@ authentication.
 
 ## How to merge responsibly
 
-Use a stable base and correct stacked order: PR #4 (0.4 integration), then
-retarget PR #9 (0.5 candidate) onto main. Require exact-head CI, independent
-review or an *explicitly authorized and recorded owner PR-only bypass*,
-resolved conversations and intact branch protection. PR-only bypass does not
-turn unrun checks into passing checks.
-
-If your GitHub connector cannot update the ruleset, do not alter the branch
-through an alternate destructive ref operation. Explain the permissions
-blocker and keep the PR reviewable.
+Merge prerequisite security work in dependency order: establish the real Linux
+Bubblewrap check (PR #18) before integrating dependent benchmark, release, or
+updater PRs (#13, #15, and #19). Require exact-head CI, resolved conversations,
+intact branch protection, and independent human review for security- and
+release-sensitive changes. AI review is useful evidence but does not count as
+independent human review. If any required status is missing or review is
+unavailable, keep the PR draft and do not merge it.
 
 ## Pinned web installer: intentionally breaking security change
 
