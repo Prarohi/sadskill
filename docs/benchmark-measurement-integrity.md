@@ -17,6 +17,15 @@ return code of zero **does not** prove it performed measurable model work.
   evaluator correctness, authenticated CLI/model version, balanced paired
   sampling, and spending approval.
 
-This PR is independently stacked on PR #9 and does not touch the concurrent
-PR #4 deletion repair or PR #9 sandbox hardening. Merge only after base
-changes are integrated and all exact-head CI/security gates pass.
+PR #4 and PR #9 are already integrated into `main`. This PR was
+retargeted directly to protected `main` on 2026-10-30. An older benchmark
+CI pass on a former merge base is not an exact-head main-integration pass.
+Require current Node 20/22, native PostgreSQL, CodeQL, benchmark checks and
+eligible independent review before considering integration.
+
+The live-run acknowledgment flag is an operator declaration, **not** a
+technical sandbox guarantee. Candidate code may be executed by graders;
+run it only in an externally isolated, disposable VM/container with
+separately restricted credentials, network access, and filesystem scope.
+No competitive accuracy, token savings, safety improvement, or model
+superiority is established until independently graded real-agent trials run.
