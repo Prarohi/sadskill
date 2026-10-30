@@ -105,7 +105,8 @@ class ReleaseGateTests(unittest.TestCase):
         for bad in [
             good[:-1],
             good + [{"id": 999, "head_sha": sha, "name": good[0]["name"],
-                     "status": "completed", "conclusion": "failure"}],
+                     "status": "completed", "conclusion": "failure",
+                     "app": {"id": gate.GITHUB_ACTIONS_APP_ID, "slug": "github-actions"}}],
             [{**entry, "head_sha": "b" * 40} for entry in good],
             [{**entry, "app": {"id": 57789, "slug": "github-advanced-security"}} for entry in good],
             [{**entry, "app": {}} for entry in good],
