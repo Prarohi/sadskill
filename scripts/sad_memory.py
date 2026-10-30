@@ -49,6 +49,9 @@ _SECRET_FIELD_SUFFIXES = (
     "signing_key", "secret_access_key", "secret_key", "access_key_id", "access_key",
     "authorization", "token",
 )
+_EVENT_BASENAME = re.compile(
+    r"^\d{8}-\d{6}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$"
+)
 
 
 def _redact_secret_text(text: str) -> str:
@@ -207,6 +210,21 @@ def _fsync_directory_fd(fd: int) -> None:
     os.fsync(fd)
 
 
+def _link_no_replace_at(parent_fd: int, source_name: str, destination_name: str) -> None:
+    if (
+        os.link not in getattr(os, "supports_dir_fd", set())
+        or os.link not in getattr(os, "supports_follow_symlinks", set())
+    ):
+        raise OSError("atomic no-replace project-memory publication is unavailable on this platform")
+    os.link(
+        source_name,
+        destination_name,
+        src_dir_fd=parent_fd,
+        dst_dir_fd=parent_fd,
+        follow_symlinks=False,
+    )
+
+
 def _ensure_text_file_at(parent_fd: int, name: str, initial_text: str) -> None:
     try:
         fd = _open_regular_at(
@@ -242,8 +260,8 @@ def _append_text_at(parent_fd: int, name: str, content: str) -> None:
 
 
 def _write_file_atomically_at(parent_fd: int, basename: str, content: bytes, *, replace: bool) -> None:
-    """Durably publish complete file bytes through a same-directory rename."""
-    if os.rename not in getattr(os, "supports_dir_fd", set()):
+    """Durably publish complete file bytes with atomic same-directory operations."""
+    if replace and os.rename not in getattr(os, "supports_dir_fd", set()):
         raise OSError("atomic project-memory file publication is unavailable on this platform")
     temporary_name = f".{basename}.{uuid.uuid4().hex}.tmp"
     fd = _open_regular_at(
@@ -258,16 +276,16 @@ def _write_file_atomically_at(parent_fd: int, basename: str, content: bytes, *, 
             os.fsync(fd)
         finally:
             os.close(fd)
-        if not replace:
-            # Event names use full random UUIDs. This check protects an existing
-            # record in the effectively collision-free destination namespace.
-            try:
-                os.stat(basename, dir_fd=parent_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                pass
-            else:
-                raise FileExistsError(f"project-memory file already exists: {basename}")
-        os.rename(temporary_name, basename, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        if replace:
+            os.rename(temporary_name, basename, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        else:
+            # linkat is atomic and fails if the destination exists, so an
+            # event published concurrently can never be silently overwritten.
+            _link_no_replace_at(parent_fd, temporary_name, basename)
+            # Persist both names before removing the staging link. A later
+            # reader can recover that two-link state if the process stops here.
+            _fsync_directory_fd(parent_fd)
+            os.unlink(temporary_name, dir_fd=parent_fd)
         _fsync_directory_fd(parent_fd)
     finally:
         try:
@@ -280,6 +298,80 @@ def _write_file_atomically_at(parent_fd: int, basename: str, content: bytes, *, 
 def _publish_event_atomically(parent_fd: int, event_name: str, content: bytes) -> None:
     """Publish a complete event with one link to its inode, even after a crash."""
     _write_file_atomically_at(parent_fd, event_name, content, replace=False)
+
+
+def _event_basename_from_temporary(temporary_name: str):
+    if not temporary_name.startswith(".") or not temporary_name.endswith(".tmp"):
+        return None
+    try:
+        basename, nonce = temporary_name[1:-4].rsplit(".", 1)
+    except ValueError:
+        return None
+    if not _EVENT_BASENAME.fullmatch(basename) or re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
+        return None
+    return basename
+
+
+def _pending_event_link_aliases(events_fd: int) -> dict[str, str]:
+    """Map complete events with a crash-left staging hard link to that alias."""
+    aliases = {}
+    for temporary_name in os.listdir(events_fd):
+        basename = _event_basename_from_temporary(temporary_name)
+        if basename is None:
+            continue
+        try:
+            temporary_stat = os.stat(temporary_name, dir_fd=events_fd, follow_symlinks=False)
+            published_stat = os.stat(basename, dir_fd=events_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if (
+            not stat.S_ISREG(temporary_stat.st_mode)
+            or not stat.S_ISREG(published_stat.st_mode)
+            or temporary_stat.st_nlink != 2
+            or published_stat.st_nlink != 2
+            or (temporary_stat.st_dev, temporary_stat.st_ino)
+            != (published_stat.st_dev, published_stat.st_ino)
+        ):
+            continue
+        aliases[basename] = temporary_name
+    return aliases
+
+
+def _read_event_text_at(events_fd: int, basename: str, pending_alias: str = None) -> str:
+    fd = os.open(
+        basename,
+        os.O_RDONLY | _nofollow_flag() | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0),
+        dir_fd=events_fd,
+    )
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError(f"refusing non-regular project-memory file: {basename}")
+        if metadata.st_nlink != 1:
+            if metadata.st_nlink != 2 or pending_alias is None:
+                raise OSError(f"refusing non-regular or hard-linked project-memory file: {basename}")
+            alias_stat = os.stat(pending_alias, dir_fd=events_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(alias_stat.st_mode)
+                or alias_stat.st_nlink != 2
+                or (metadata.st_dev, metadata.st_ino) != (alias_stat.st_dev, alias_stat.st_ino)
+            ):
+                raise OSError(f"refusing unmatched event staging link: {basename}")
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            fd = -1
+            return stream.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _recover_pending_event_links(events_fd: int) -> None:
+    """Remove staging links left if a process stopped after event publication."""
+    aliases = _pending_event_link_aliases(events_fd)
+    for temporary_name in aliases.values():
+        os.unlink(temporary_name, dir_fd=events_fd)
+    if aliases:
+        _fsync_directory_fd(events_fd)
 
 
 class MemoryLock:
@@ -332,6 +424,7 @@ def append_event(
         with MemoryLock(sad_fd):
             events_fd = _open_directory_at(sad_fd, "events", create=True)
             try:
+                _recover_pending_event_links(events_fd)
                 event_id = str(uuid.uuid4())
                 now = datetime.datetime.now(datetime.timezone.utc)
                 now_iso = now.isoformat().replace("+00:00", "Z")
@@ -417,13 +510,14 @@ def list_events(project_root: Path) -> list:
             except FileNotFoundError:
                 return []
             try:
+                pending_aliases = _pending_event_link_aliases(events_fd)
                 for archive_record in _read_archive_records(events_fd):
                     add_record(archive_record)
                 for name in sorted(os.listdir(events_fd)):
                     if not name.endswith(".json"):
                         continue
                     try:
-                        add_record(json.loads(_read_text_at(events_fd, name)))
+                        add_record(json.loads(_read_event_text_at(events_fd, name, pending_aliases.get(name))))
                     except (OSError, UnicodeError, ValueError):
                         # Untrusted symlinks, special files and malformed records
                         # are ignored; they are never read through their targets.
@@ -677,6 +771,7 @@ def compact_memory(project_root: Path, keep_latest: int = 10) -> int:
 
             try:
                 with MemoryLock(sad_fd):
+                    _recover_pending_event_links(events_fd)
                     event_files = sorted(
                         name for name in os.listdir(events_fd) if name.endswith(".json")
                     )

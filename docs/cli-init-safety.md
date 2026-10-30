@@ -8,10 +8,12 @@ symlink at the leaf. Existing regular template files are preserved.
 
 Project memory also opens `.sad/`, `events/`, and `archive/` relative to pinned
 directory descriptors. It rejects symlinked, non-regular, and hard-linked
-memory files. Event records and archive rewrites are staged, fsynced, and
-atomically renamed; compaction removes source events only after the archive is
-durable. A malformed archive causes compaction to stop while retaining source
-events.
+memory files. Event records are staged and published atomically without
+overwriting an existing event; readers recognize a matching staging link after
+a crash, and the next locked write or compaction removes that link. Archive
+rewrites are staged, fsynced, and atomically renamed; compaction removes source
+events only after the archive is durable. A malformed archive causes compaction
+to stop while retaining source events.
 
 These guards prevent redirection through pre-existing paths and reduce
 path-swap races. They are not an OS sandbox against a hostile process with the

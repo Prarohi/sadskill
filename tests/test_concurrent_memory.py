@@ -44,6 +44,13 @@ class ConcurrentMemoryTests(unittest.TestCase):
         self.assertIn("Setup Complete", history_text)
         self.assertIn("agent-alpha", history_text)
 
+    def test_list_events_does_not_create_a_lock_file_for_read_only_access(self):
+        events_directory = self.root / ".sad" / "events"
+        events_directory.mkdir()
+
+        self.assertEqual(list_events(self.root), [])
+        self.assertFalse((self.root / ".sad" / ".lock").exists())
+
     def test_interrupted_event_write_never_leaves_a_partial_json_record(self):
         events_dir = self.root / ".sad" / "events"
 
@@ -57,6 +64,87 @@ class ConcurrentMemoryTests(unittest.TestCase):
 
         self.assertEqual(list(events_dir.iterdir()), [])
         self.assertEqual(list_events(self.root), [])
+
+    def test_event_publish_does_not_overwrite_a_concurrent_destination(self):
+        events_directory = self.root / ".sad" / "events"
+        events_directory.mkdir()
+        original_link = sad_memory._link_no_replace_at
+
+        def create_competing_event(parent_fd, source, destination):
+            fd = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            try:
+                os.write(fd, b"user-owned event")
+            finally:
+                os.close(fd)
+
+            return original_link(parent_fd, source, destination)
+
+        events_fd = os.open(events_directory, sad_memory._directory_flags())
+        try:
+            with mock.patch.object(sad_memory, "_link_no_replace_at", side_effect=create_competing_event):
+                with self.assertRaises(FileExistsError):
+                    sad_memory._write_file_atomically_at(
+                        events_fd,
+                        "collision.json",
+                        b"new event contents",
+                        replace=False,
+                    )
+        finally:
+            os.close(events_fd)
+
+        self.assertEqual(
+            (events_directory / "collision.json").read_bytes(),
+            b"user-owned event",
+        )
+        self.assertEqual(
+            [path.name for path in events_directory.iterdir()],
+            ["collision.json"],
+        )
+
+    def test_event_publish_recovers_if_process_stops_after_link_creation(self):
+        events_directory = self.root / ".sad" / "events"
+        events_directory.mkdir()
+        event_id = "123e4567-e89b-12d3-a456-426614174000"
+        event_name = f"20261030-120000-{event_id}.json"
+        payload = json.dumps({
+            "event_id": event_id,
+            "timestamp": "2026-10-30T12:00:00Z",
+            "type": "custom",
+            "payload": {"title": "recover after crash"},
+        }).encode("utf-8") + b"\n"
+        repo_root = Path(__file__).resolve().parents[1]
+        program = (
+            "import os, sys; from pathlib import Path; from scripts import sad_memory; "
+            "root=Path(sys.argv[1]); sad_fd=os.open(root/'.sad', sad_memory._directory_flags()); "
+            "events_fd=os.open(root/'.sad'/'events', sad_memory._directory_flags()); "
+            "lock=sad_memory.MemoryLock(sad_fd); lock.__enter__(); "
+            "sad_memory._fsync_directory_fd=lambda fd: os._exit(73); "
+            f"sad_memory._publish_event_atomically(events_fd, {event_name!r}, {payload!r})"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", program, str(self.root)],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+
+        self.assertEqual(result.returncode, 73, result.stderr)
+        event_path = events_directory / event_name
+        self.assertEqual(event_path.stat().st_nlink, 2)
+        events = list_events(self.root)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["payload"]["title"], "recover after crash")
+        self.assertEqual(event_path.stat().st_nlink, 2)
+        self.assertEqual(compact_memory(self.root, keep_latest=10), 0)
+        self.assertEqual(event_path.stat().st_nlink, 1)
+        self.assertEqual([path.name for path in events_directory.iterdir()], [event_name])
 
     def test_first_write_syncs_new_memory_directory_entries(self):
         (self.root / ".sad").rmdir()
