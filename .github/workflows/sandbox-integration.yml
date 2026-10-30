@@ -1,0 +1,51 @@
+name: Native Linux Bubblewrap containment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bubblewrap-containment:
+    name: Native Linux Bubblewrap containment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout audited source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.11'
+      - name: Install Bubblewrap and the scoped AppArmor profile
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install --yes --no-install-recommends bubblewrap apparmor-profiles apparmor-utils
+          profile_source=/usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+          profile_target=/etc/apparmor.d/bwrap-userns-restrict
+          test -r "$profile_source" || { echo "Ubuntu Bubblewrap AppArmor profile is missing" >&2; exit 1; }
+          if ! test -e "$profile_target"; then
+            sudo install -m 0644 "$profile_source" "$profile_target"
+          fi
+          sudo apparmor_parser -r "$profile_target"
+          sudo aa-status --profiled || true
+          if test -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          fi
+          command -v bwrap
+          bwrap --version
+      - name: Preflight unprivileged Bubblewrap namespaces
+        run: bwrap --unshare-user --unshare-pid --ro-bind / / /usr/bin/true
+      - name: Require actual sandbox filesystem and namespace regressions
+        env:
+          SADSKILL_REQUIRE_BWRAP: '1'
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_sandbox.py' -v
