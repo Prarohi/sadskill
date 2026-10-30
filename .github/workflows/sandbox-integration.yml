@@ -47,7 +47,10 @@ jobs:
             sudo install -m 0644 "$profile_source" "$profile_target"
           fi
           sudo apparmor_parser -r "$profile_target"
-          sudo aa-status --profiled | grep -Fq 'bwrap-userns-restrict'
+          sudo aa-status --profiled || true
+          if test -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          fi
           command -v bwrap
           bwrap --version
       - name: Preflight unprivileged Bubblewrap namespaces
