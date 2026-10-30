@@ -63,6 +63,13 @@ class ReleaseGateTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(gate.ReleaseError, "SemVer"):
                 gate.check()
 
+    def test_impossible_changelog_calendar_dates_are_rejected(self):
+        for invalid in ("2026-13-01", "2026-02-30", "2026-11-31", "2025-02-29", "2026-1-01"):
+            with self.subTest(invalid=invalid):
+                seed(self.root, status=invalid)
+                with self.assertRaisesRegex(gate.ReleaseError, "valid YYYY-MM-DD date"):
+                    gate.check()
+
     def test_tag_mismatch_fails_without_git(self):
         with mock.patch.object(gate, "git") as git:
             with self.assertRaisesRegex(gate.ReleaseError, "tag must"):
